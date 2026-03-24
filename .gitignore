@@ -1,3 +1,4 @@
 .context/
 artifacts/
 .claude/skills/assess-rfe/
+.claude/skills/export-rubric/
