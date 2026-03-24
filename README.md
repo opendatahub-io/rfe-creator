@@ -10,11 +10,13 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 # RFE Pipeline
 /rfe.create     # Write a new RFE from a problem statement
 /rfe.review     # Review, improve, and auto-revise RFEs
+/rfe.split      # Split an oversized RFE into right-sized pieces
 /rfe.submit     # Submit new or update existing RFEs in Jira
 /rfe.speedrun   # Full pipeline end-to-end with minimal interaction
 
 # Improve an existing Jira RFE
 /rfe.review RHAIRFE-1234      # Fetch, review, and auto-revise
+/rfe.split RHAIRFE-1234       # Fetch and split an oversized RFE
 /rfe.speedrun RHAIRFE-1234    # Fetch, review, revise, and update in one step
 
 # Strategy Pipeline (after RFE approval)
@@ -57,11 +59,12 @@ Or in one step: `/rfe.speedrun RHAIRFE-1234`
 
 1. **Create**: Describe your need. The skill asks clarifying questions and produces RFEs.
 2. **Review**: Scores RFEs against the assess-rfe rubric, checks technical feasibility, and auto-revises issues. Accepts a Jira key to review existing RFEs.
-3. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira.
-4. **Strat Create**: Clone approved RFEs to RHAISTRAT in Jira.
-5. **Strat Refine**: Add the HOW — technical approach, dependencies, components, non-functionals.
-6. **Strat Review**: Four independent forked reviewers (feasibility, testability, scope, architecture).
-7. **Strat Prioritize**: Place new strategies in the existing backlog ordering.
+3. **Split**: Decompose an oversized RFE into right-sized pieces with user guidance. Runs review on new RFEs and checks for scope coverage gaps.
+4. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira.
+5. **Strat Create**: Clone approved RFEs to RHAISTRAT in Jira.
+6. **Strat Refine**: Add the HOW — technical approach, dependencies, components, non-functionals.
+7. **Strat Review**: Four independent forked reviewers (feasibility, testability, scope, architecture).
+8. **Strat Prioritize**: Place new strategies in the existing backlog ordering.
 
 ## Editing Between Steps
 
