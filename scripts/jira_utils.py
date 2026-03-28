@@ -593,6 +593,7 @@ def strip_metadata(markdown):
     """Remove artifact metadata and revision notes from RFE markdown.
 
     Strips:
+    - YAML frontmatter (--- delimited block at start of file)
     - # RFE-NNN: Title headings (duplicates Summary field)
     - **Jira Key**: ... lines
     - **Size**: ... lines
@@ -602,6 +603,12 @@ def strip_metadata(markdown):
     - > *Review note: ...* blockquotes
     - <!-- REVISION NOTE: ... --> HTML comments
     """
+    # Strip YAML frontmatter if present
+    frontmatter_match = re.match(r'^---\s*\n.*?\n---\s*\n', markdown,
+                                 re.DOTALL)
+    if frontmatter_match:
+        markdown = markdown[frontmatter_match.end():]
+
     lines = markdown.split("\n")
     result = []
     in_revision_notes = False
@@ -641,88 +648,3 @@ def strip_metadata(markdown):
     return cleaned.strip()
 
 
-def find_artifact_file(artifacts_dir, rfe_id):
-    """Find the main artifact file for a given RFE ID."""
-    tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
-    if not os.path.isdir(tasks_dir):
-        return None
-    for filename in os.listdir(tasks_dir):
-        if filename.startswith(rfe_id + "-") and filename.endswith(".md"):
-            if filename.endswith(("-comments.md", "-removed-context.md")):
-                continue
-            return os.path.join(tasks_dir, filename)
-    return None
-
-
-def find_removed_context_file(artifacts_dir, rfe_id):
-    """Find the removed-context file for a given RFE ID, if any."""
-    tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
-    if not os.path.isdir(tasks_dir):
-        return None
-    for filename in os.listdir(tasks_dir):
-        if (filename.startswith(rfe_id + "-") and
-                filename.endswith("-removed-context.md")):
-            return os.path.join(tasks_dir, filename)
-    return None
-
-
-def parse_child_artifact(path):
-    """Parse a child RFE markdown file.
-
-    Returns: (title, priority, full_markdown, cleaned_markdown)
-    - full_markdown: original content (for archival comment)
-    - cleaned_markdown: metadata stripped (for Jira description)
-    """
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-
-    title_match = re.match(r'^#\s+RFE-\d+:\s+(.+)$', content, re.MULTILINE)
-    title = title_match.group(1).strip() if title_match else "Untitled"
-
-    priority_match = re.search(r'^\*\*Priority\*\*:\s*(.+)$', content,
-                               re.MULTILINE)
-    priority = priority_match.group(1).strip() if priority_match else "Normal"
-
-    cleaned = strip_metadata(content)
-    return title, priority, content, cleaned
-
-
-def check_needs_attention(artifacts_dir, rfe_id):
-    """Check the review report to determine if this RFE needs human attention.
-
-    Returns True if:
-    - Any criterion scored below full marks (2/2) after auto-revision
-    - The RFE has a recommendation other than 'submit'
-    """
-    report_path = os.path.join(artifacts_dir, "rfe-review-report.md")
-    if not os.path.exists(report_path):
-        return False
-
-    with open(report_path, encoding="utf-8") as f:
-        report = f.read()
-
-    in_rfe_section = False
-    for line in report.split("\n"):
-        if re.match(rf'^###\s+{re.escape(rfe_id)}:', line):
-            in_rfe_section = True
-            continue
-        if in_rfe_section and re.match(r'^###\s+RFE-', line):
-            break
-        if in_rfe_section:
-            score_match = re.match(r'^\|\s*\w.*?\|\s*(\d)/2\s*\|', line)
-            if score_match and int(score_match.group(1)) < 2:
-                return True
-            if re.match(r'^\*\*Recommendation\*\*:\s*(revise|split|reject)',
-                        line, re.IGNORECASE):
-                return True
-
-    return False
-
-
-def has_revision_notes(artifact_path):
-    """Check if an artifact contains Revision Notes (was auto-revised)."""
-    with open(artifact_path, encoding="utf-8") as f:
-        for line in f:
-            if re.match(r'^###?\s+Revision Notes', line):
-                return True
-    return False

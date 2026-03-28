@@ -4,6 +4,9 @@
 Handles the standard (non-split) submission flow. For split submissions,
 use split_submit.py instead.
 
+Reads all structured metadata from YAML frontmatter on task and review files.
+No regex parsing of markdown prose.
+
 Usage:
     python scripts/submit.py [--dry-run] [--artifacts-dir DIR]
 
@@ -26,92 +29,20 @@ from jira_utils import (
     add_comment,
     strip_metadata,
     markdown_to_adf,
-    find_artifact_file,
-    find_removed_context_file,
-    check_needs_attention,
-    has_revision_notes,
 )
 
-
-def parse_rfes_md(path):
-    """Parse artifacts/rfes.md to find submittable RFEs.
-
-    Returns: [(rfe_id, title, jira_key_or_none, priority, size, status), ...]
-    Skips header/separator rows and archived/split entries.
-    """
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-
-    rfes = []
-    for line in content.split("\n"):
-        row_match = re.match(
-            r'^\|\s*~*\s*(RFE-\d+)\s*~*\s*\|'
-            r'\s*(.*?)\s*\|'
-            r'\s*(.*?)\s*\|'
-            r'\s*(.*?)\s*\|'
-            r'\s*(.*?)\s*\|'
-            r'\s*(.*?)\s*\|',
-            line
-        )
-        if not row_match:
-            continue
-
-        rfe_id = row_match.group(1).strip().strip("~")
-        title = row_match.group(2).strip().strip("~")
-        jira_key = row_match.group(3).strip().strip("~")
-        priority = row_match.group(4).strip().strip("~")
-        size = row_match.group(5).strip().strip("~")
-        status = row_match.group(6).strip()
-
-        # Skip archived/split entries
-        if "Split" in status or "Archived" in status or "split" in status:
-            continue
-
-        jira_key = jira_key if jira_key and jira_key != "—" else None
-        rfes.append((rfe_id, title, jira_key, priority, size, status))
-
-    return rfes
-
-
-def parse_review_report(artifacts_dir):
-    """Parse review report to find per-RFE recommendations.
-
-    Returns: {rfe_id: recommendation} or None if no report exists.
-    Recommendation is 'submit', 'revise', 'reject', or 'split'.
-    """
-    report_path = os.path.join(artifacts_dir, "rfe-review-report.md")
-    if not os.path.exists(report_path):
-        return None
-
-    recommendations = {}
-    current_rfe = None
-
-    with open(report_path, encoding="utf-8") as f:
-        for line in f:
-            rfe_match = re.match(r'^###\s+(RFE-\d+):', line)
-            if rfe_match:
-                current_rfe = rfe_match.group(1)
-                continue
-
-            if current_rfe:
-                rec_match = re.match(
-                    r'^\*\*Recommendation\*\*:\s*\*\*(\w+)\*\*', line
-                )
-                if rec_match:
-                    recommendations[current_rfe] = rec_match.group(1).lower()
-                    current_rfe = None
-
-    return recommendations
-
-
-def parse_artifact_title(path):
-    """Extract the title from an RFE artifact, without the RFE-NNN prefix."""
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            title_match = re.match(r'^#\s+(?:RFE-\d+:\s+)?(.+)$', line)
-            if title_match:
-                return title_match.group(1).strip()
-    return "Untitled"
+from artifact_utils import (
+    read_frontmatter,
+    read_frontmatter_validated,
+    update_frontmatter,
+    scan_task_files,
+    find_artifact_file,
+    find_removed_context_file,
+    find_review_file,
+    rename_to_jira_key,
+    rebuild_index,
+    ValidationError,
+)
 
 
 def main():
@@ -134,62 +65,69 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    # Parse rfes.md
-    rfes_path = os.path.join(args.artifacts_dir, "rfes.md")
-    if not os.path.exists(rfes_path):
-        print(f"Error: {rfes_path} not found.", file=sys.stderr)
+    # Scan task files for submittable RFEs
+    tasks = scan_task_files(args.artifacts_dir)
+    if not tasks:
+        print("Error: No RFE task files found.", file=sys.stderr)
         sys.exit(1)
 
-    rfes = parse_rfes_md(rfes_path)
-    if not rfes:
-        print("Error: No submittable RFEs found in rfes.md.", file=sys.stderr)
+    # Filter to non-archived RFEs
+    submittable = [(path, data) for path, data in tasks
+                   if data.get("status") != "Archived"]
+    if not submittable:
+        print("Error: No submittable RFEs found (all archived).",
+              file=sys.stderr)
         sys.exit(1)
-
-    # Parse review report
-    recommendations = parse_review_report(args.artifacts_dir)
-    if recommendations is None:
-        print("Warning: No review report found. Submitting without review "
-              "validation.", file=sys.stderr)
 
     # Build submission plan
     plan = []
-    for rfe_id, title, jira_key, priority, size, status in rfes:
-        artifact_path = find_artifact_file(args.artifacts_dir, rfe_id)
-        if not artifact_path:
-            print(f"Warning: No artifact file for {rfe_id}, skipping.",
-                  file=sys.stderr)
-            continue
+    for task_path, task_data in submittable:
+        rfe_id = task_data["rfe_id"]
+        title = task_data["title"]
+        is_existing = rfe_id.startswith("RHAIRFE-")
+        priority = task_data["priority"]
+        size = task_data.get("size", "M")
 
-        # Use title from artifact (cleaner than rfes.md table)
-        artifact_title = parse_artifact_title(artifact_path)
+        # Read review frontmatter if available
+        review_path = find_review_file(args.artifacts_dir, rfe_id)
+        review_data = None
+        if review_path:
+            try:
+                review_data, _ = read_frontmatter_validated(
+                    review_path, "rfe-review")
+            except (ValidationError, Exception) as e:
+                print(f"Warning: cannot read review for {rfe_id}: {e}",
+                      file=sys.stderr)
 
-        # Check review recommendation
-        rec = (recommendations or {}).get(rfe_id, "submit")
+        # Get recommendation from review
+        rec = "submit"
+        if review_data:
+            rec = review_data.get("recommendation", "submit")
+
         if rec == "reject":
             plan.append({
-                "rfe_id": rfe_id, "title": artifact_title,
-                "jira_key": jira_key, "priority": priority, "size": size,
+                "rfe_id": rfe_id, "title": title,
+                "is_existing": is_existing, "priority": priority, "size": size,
                 "action": "SKIP", "labels": [], "skip_reason": "rejected",
-                "artifact_path": artifact_path,
+                "task_path": task_path,
             })
             continue
 
         # Determine labels
         labels = []
-        if not jira_key:
+        if not is_existing:
             labels.append("rfe-creator-auto-created")
-        if has_revision_notes(artifact_path):
+        if review_data and review_data.get("revised", False):
             labels.append("rfe-creator-auto-revised")
-        if rec == "revise" or check_needs_attention(args.artifacts_dir,
-                                                     rfe_id):
+        if review_data and review_data.get("needs_attention", False):
             labels.append("rfe-creator-needs-attention")
 
-        action = f"Update {jira_key}" if jira_key else "Create"
+        action = f"Update {rfe_id}" if is_existing else "Create"
         plan.append({
-            "rfe_id": rfe_id, "title": artifact_title,
-            "jira_key": jira_key, "priority": priority, "size": size,
+            "rfe_id": rfe_id, "title": title,
+            "is_existing": is_existing, "priority": priority, "size": size,
             "action": action, "labels": labels, "skip_reason": None,
-            "artifact_path": artifact_path,
+            "task_path": task_path,
         })
 
     # Print summary
@@ -208,7 +146,7 @@ def main():
     print()
 
     # Execute
-    results = {}  # rfe_id -> jira_key
+    results = {}  # rfe_id -> assigned jira key
     for entry in plan:
         rfe_id = entry["rfe_id"]
         if entry["skip_reason"]:
@@ -216,27 +154,26 @@ def main():
             continue
 
         # Read and clean artifact content
-        with open(entry["artifact_path"], encoding="utf-8") as f:
+        with open(entry["task_path"], encoding="utf-8") as f:
             raw_content = f.read()
         cleaned = strip_metadata(raw_content)
         description_adf = markdown_to_adf(cleaned)
 
-        jira_key = entry["jira_key"]
         title = entry["title"]
         labels = entry["labels"]
 
-        if jira_key:
-            # Update existing ticket
+        if entry["is_existing"]:
+            # Update existing ticket (rfe_id is the Jira key)
             if args.dry_run:
-                print(f"  {rfe_id}: Would update {jira_key}")
+                print(f"  {rfe_id}: Would update")
             else:
-                update_issue(server, user, token, jira_key, title,
+                update_issue(server, user, token, rfe_id, title,
                              description_adf)
-                print(f"  {rfe_id}: Updated {jira_key}")
+                print(f"  {rfe_id}: Updated")
                 if labels:
-                    add_labels(server, user, token, jira_key, labels)
+                    add_labels(server, user, token, rfe_id, labels)
                     print(f"           Labels: {', '.join(labels)}")
-            results[rfe_id] = jira_key
+            results[rfe_id] = rfe_id
         else:
             # Create new ticket
             if args.dry_run:
@@ -268,28 +205,29 @@ def main():
 
     print()
 
-    # Write ticket mapping
-    mapping_path = os.path.join(args.artifacts_dir, "jira-tickets.md")
-    site = (server.rstrip("/") if server
-            else "https://example.atlassian.net")
-    with open(mapping_path, "w", encoding="utf-8") as f:
-        f.write("# Jira Tickets\n\n")
-        f.write("| RFE | Jira Key | Title | Priority | URL |\n")
-        f.write("|-----|----------|-------|----------|-----|\n")
-        for entry in plan:
-            rfe_id = entry["rfe_id"]
-            key = results.get(rfe_id, "—")
-            if entry["skip_reason"]:
-                key = f"SKIPPED ({entry['skip_reason']})"
-                url = "—"
-            elif key and key not in ("—", "RHAIRFE-DRY"):
-                url = f"{site}/browse/{key}"
-            else:
-                url = "—"
-            f.write(f"| {rfe_id} | {key} | {entry['title']} "
-                    f"| {entry['priority']} | {url} |\n")
+    # Post-submit: update frontmatter and rename files
+    for entry in plan:
+        rfe_id = entry["rfe_id"]
+        if entry["skip_reason"]:
+            continue
 
-    print(f"Done. Ticket mapping written to {mapping_path}")
+        assigned_key = results.get(rfe_id)
+        if not assigned_key or assigned_key == "RHAIRFE-DRY":
+            continue
+
+        if not entry["is_existing"]:
+            # New RFE: rename files from RFE-NNN to RHAIRFE-NNNN
+            rename_to_jira_key(args.artifacts_dir, rfe_id, assigned_key)
+            print(f"  {rfe_id}: Renamed artifacts to {assigned_key}")
+        else:
+            # Existing: just update status
+            update_frontmatter(entry["task_path"],
+                               {"status": "Submitted"},
+                               "rfe-task")
+
+    # Rebuild index
+    rebuild_index(args.artifacts_dir)
+    print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
 
 
 if __name__ == "__main__":
