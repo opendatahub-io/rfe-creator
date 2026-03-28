@@ -105,6 +105,39 @@ SCHEMAS = {
             },
         },
     },
+    "strat-task": {
+        "strat_id": {
+            "type": "string",
+            "required": True,
+            "pattern": r"^(STRAT-\d+|RHAISTRAT-\d+)$",
+        },
+        "title": {
+            "type": "string",
+            "required": True,
+        },
+        "source_rfe": {
+            "type": "string",
+            "required": True,
+            "pattern": r"^(RFE-\d+|RHAIRFE-\d+)$",
+        },
+        "jira_key": {
+            "type": "string",
+            "required": False,
+            "pattern": r"^RHAISTRAT-\d+$",
+            "default": None,
+        },
+        "priority": {
+            "type": "string",
+            "required": True,
+            "enum": ["Blocker", "Critical", "Major", "Normal", "Minor",
+                     "Undefined"],
+        },
+        "status": {
+            "type": "string",
+            "required": True,
+            "enum": ["Draft", "Ready", "Refined", "Reviewed"],
+        },
+    },
     "strat-review": {
         "strat_id": {
             "type": "string",

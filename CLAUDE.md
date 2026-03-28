@@ -24,7 +24,7 @@ artifacts/
     RHAIRFE-1595-review.md
     RFE-001-slug-review.md
 
-  strat-tasks/              # Individual strategy files, linked to source RFEs
+  strat-tasks/              # Individual strategy files with YAML frontmatter
     RHAISTRAT-400.md
   strat-reviews/            # Per-strategy review files with YAML frontmatter
     RHAISTRAT-400-review.md
@@ -41,6 +41,7 @@ All task and review files use YAML frontmatter for structured metadata. Skills m
 # Get schema for a file type
 python3 scripts/frontmatter.py schema rfe-task
 python3 scripts/frontmatter.py schema rfe-review
+python3 scripts/frontmatter.py schema strat-task
 python3 scripts/frontmatter.py schema strat-review
 
 # Set/update frontmatter on a file

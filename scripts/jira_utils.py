@@ -594,11 +594,9 @@ def strip_metadata(markdown):
 
     Strips:
     - YAML frontmatter (--- delimited block at start of file)
-    - # RFE-NNN: Title headings (duplicates Summary field)
-    - **Jira Key**: ... lines
-    - **Size**: ... lines
-    - **Split from**: ... lines
-    - **Priority**: ... lines
+    - # RFE-NNN: / # STRAT-NNN: Title headings (duplicates Summary field)
+    - Legacy inline metadata lines (now in frontmatter):
+      **Jira Key**, **Size**, **Split from**, **Priority**, **Source RFE**
     - ### Revision Notes sections (to next ## or EOF)
     - > *Review note: ...* blockquotes
     - <!-- REVISION NOTE: ... --> HTML comments
@@ -614,12 +612,13 @@ def strip_metadata(markdown):
     in_revision_notes = False
 
     for line in lines:
-        # Skip title heading (e.g. "# RFE-002: Title") — duplicates Summary
-        if re.match(r'^#\s+RFE-\d+:', line):
+        # Skip title heading — duplicates Summary
+        if re.match(r'^#\s+(RFE-\d+|STRAT-\d+):', line):
             continue
 
-        # Skip metadata lines
-        if re.match(r'^\*\*(Jira Key|Size|Split from|Priority)\*\*:', line):
+        # Skip metadata lines (legacy inline format, now in frontmatter)
+        if re.match(r'^\*\*(Jira Key|Size|Split from|Priority|'
+                    r'Source RFE)\*\*:', line):
             continue
 
         # Skip HTML revision comments
