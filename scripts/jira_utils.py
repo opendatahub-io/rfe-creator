@@ -592,14 +592,15 @@ def adf_to_markdown(node, list_depth=0):
 def strip_metadata(markdown):
     """Remove artifact metadata and revision notes from RFE markdown.
 
-    Strips:
+    Strips content that should not be pushed to Jira:
     - YAML frontmatter (--- delimited block at start of file)
-    - # RFE-NNN: / # STRAT-NNN: Title headings (duplicates Summary field)
+    - Title headings (# RFE-NNN: / # RHAIRFE-NNN: / # STRAT-NNN: / # RHAISTRAT-NNN:)
+      — title is in frontmatter and Jira's summary field
     - Legacy inline metadata lines (now in frontmatter):
       **Jira Key**, **Size**, **Split from**, **Priority**, **Source RFE**
-    - ### Revision Notes sections (to next ## or EOF)
-    - > *Review note: ...* blockquotes
-    - <!-- REVISION NOTE: ... --> HTML comments
+    - Legacy revision notes (now in review files):
+      ### Revision Notes sections, > *Review note: ...* blockquotes,
+      <!-- REVISION NOTE: ... --> HTML comments
     """
     # Strip YAML frontmatter if present
     frontmatter_match = re.match(r'^---\s*\n.*?\n---\s*\n', markdown,
@@ -613,7 +614,8 @@ def strip_metadata(markdown):
 
     for line in lines:
         # Skip title heading — duplicates Summary
-        if re.match(r'^#\s+(RFE-\d+|STRAT-\d+):', line):
+        if re.match(r'^#\s+(RFE-\d+|RHAIRFE-\d+|STRAT-\d+|RHAISTRAT-\d+):',
+                    line):
             continue
 
         # Skip metadata lines (legacy inline format, now in frontmatter)
