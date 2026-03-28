@@ -23,6 +23,31 @@ artifacts/
   strat-prioritization.md   # Prioritization decisions and rationale
 ```
 
+## Jira Integration
+
+### Write Operations (submit, update, comment)
+
+All write operations use the Jira REST API directly via Python scripts (`scripts/submit.py`, `scripts/split_submit.py`). This ensures the exact sequence of Jira API calls is deterministic and not dependent on LLM tool-calling decisions — critical for operations like split submissions that require multi-step transactional workflows (archive, create, link, close).
+
+Required environment variables:
+
+```
+JIRA_SERVER=https://your-site.atlassian.net
+JIRA_USER=your-email@example.com
+JIRA_TOKEN=your-api-token
+```
+
+To create an API token: https://id.atlassian.com/manage-profile/security/api-tokens
+
+### Read Operations (fetch issues, comments)
+
+Read operations support two modes:
+
+1. **Atlassian MCP server** (preferred when available) — used by `/rfe.review`, `/rfe.split`, and `/strat.create` when fetching issues from Jira
+2. **REST API fallback** — if the MCP server is unavailable, skills fall back to `python3 scripts/fetch_issue.py` using the same `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` env vars
+
+Skills that only work with local artifacts (`/rfe.create`) do not require Jira access.
+
 ## Jira Field Mappings
 
 ### RHAIRFE Project
