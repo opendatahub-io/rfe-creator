@@ -17,6 +17,9 @@ artifacts/
     RHAIRFE-1595-removed-context.md  # Companion: content removed during revision
     RFE-001-slug.md          # New RFE (pre-submission, renamed on submit)
 
+  rfe-originals/            # Snapshots of Jira-fetched RFEs before local modification
+    RHAIRFE-1595.md          # Baseline for before/after analysis and submit-time conflict detection
+
   rfe-reviews/              # Per-issue review files with YAML frontmatter
     RHAIRFE-1595-review.md
     RFE-001-slug-review.md
