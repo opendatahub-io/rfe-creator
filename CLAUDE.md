@@ -14,7 +14,8 @@ artifacts/
   rfe-tasks/                # Individual RFE files with YAML frontmatter
     RHAIRFE-1595.md          # Existing Jira issue (keyed by Jira key)
     RHAIRFE-1595-comments.md # Companion: stakeholder comment history
-    RHAIRFE-1595-removed-context.md  # Companion: content removed during revision
+    RHAIRFE-1595-removed-context.yaml  # Companion: structured removed content with type classification
+    RHAIRFE-1595-removed-context.md  # Legacy companion (markdown, being phased out)
     RFE-001-slug.md          # New RFE (pre-submission, renamed on submit)
 
   rfe-originals/            # Raw Jira descriptions at time of fetch (not templated)

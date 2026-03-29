@@ -1,3 +1,4 @@
+.DS_Store
 .context/
 artifacts/
 .claude/skills/assess-rfe/

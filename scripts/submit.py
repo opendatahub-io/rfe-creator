@@ -21,6 +21,8 @@ import os
 import re
 import sys
 
+import yaml
+
 from jira_utils import (
     require_env,
     create_issue,
@@ -37,12 +39,44 @@ from artifact_utils import (
     update_frontmatter,
     scan_task_files,
     find_artifact_file,
-    find_removed_context_file,
+    find_removed_context_yaml,
     find_review_file,
     rename_to_jira_key,
     rebuild_index,
     ValidationError,
 )
+
+
+def _render_jira_comment(yaml_path):
+    """Read removed-context YAML and render postable blocks as markdown.
+
+    Posts blocks with type 'genuine' or 'unclassified' (safety fallback).
+    Skips blocks with type 'reworded' or 'non-substantive'.
+    Returns empty string if no blocks qualify.
+    """
+    with open(yaml_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    if not data or "blocks" not in data:
+        return ""
+
+    postable_types = {"genuine", "unclassified"}
+    sections = []
+    for block in data["blocks"]:
+        btype = block.get("type", "unclassified")
+        if btype in postable_types:
+            heading = block.get("heading", "")
+            content = block.get("content", "")
+            sections.append(f"## {heading}\n{content}")
+
+    if not sections:
+        return ""
+
+    preamble = ("*[RFE Creator]* The following technical implementation "
+                "details were removed from the RFE description during review. "
+                "This content is better suited for a RHAISTRAT and is "
+                "preserved here for reference:")
+    return preamble + "\n\n" + "\n\n".join(sections)
 
 
 def main():
@@ -189,17 +223,18 @@ def main():
                     print(f"           Labels: {', '.join(labels)}")
                 results[rfe_id] = new_key
 
-        # Post removed-context comment if applicable
-        removed_path = find_removed_context_file(args.artifacts_dir, rfe_id)
-        if removed_path:
-            with open(removed_path, encoding="utf-8") as f:
-                removed_content = f.read()
+        # Post removed-context Jira comment if applicable
+        yaml_path = find_removed_context_yaml(args.artifacts_dir, rfe_id)
+        if yaml_path:
+            comment_md = _render_jira_comment(yaml_path)
             target_key = results.get(rfe_id)
-            if args.dry_run:
+            if not comment_md:
+                pass  # No postable blocks
+            elif args.dry_run:
                 print(f"  {rfe_id}: Would post removed-context comment "
-                      f"({len(removed_content)} chars)")
+                      f"({len(comment_md)} chars)")
             elif target_key:
-                comment_adf = markdown_to_adf(removed_content)
+                comment_adf = markdown_to_adf(comment_md)
                 add_comment(server, user, token, target_key, comment_adf)
                 print(f"  {rfe_id}: Posted removed-context comment")
 
