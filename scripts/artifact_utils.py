@@ -457,7 +457,8 @@ def update_frontmatter(path, updates, schema_type):
 
 def _is_companion_file(filename):
     """Check if a filename is a companion file (comments, removed-context)."""
-    return filename.endswith(("-comments.md", "-removed-context.md"))
+    return (filename.endswith(("-comments.md", "-removed-context.md"))
+            or filename.endswith("-removed-context.yaml"))
 
 
 def find_artifact_file(artifacts_dir, identifier):
@@ -527,6 +528,28 @@ def find_artifact_file_including_archived(artifacts_dir, identifier):
 
         if identifier.startswith("RFE-"):
             if filename.startswith(identifier + "-"):
+                return os.path.join(tasks_dir, filename)
+
+    return None
+
+
+def find_removed_context_yaml(artifacts_dir, identifier):
+    """Find the removed-context YAML file for a given RFE ID or Jira key."""
+    tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
+    if not os.path.isdir(tasks_dir):
+        return None
+
+    for filename in sorted(os.listdir(tasks_dir)):
+        if not filename.endswith("-removed-context.yaml"):
+            continue
+
+        if identifier.startswith("RHAIRFE-"):
+            if filename == f"{identifier}-removed-context.yaml":
+                return os.path.join(tasks_dir, filename)
+
+        if identifier.startswith("RFE-"):
+            if filename.startswith(identifier + "-") and \
+                    filename.endswith("-removed-context.yaml"):
                 return os.path.join(tasks_dir, filename)
 
     return None
@@ -654,13 +677,15 @@ def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
         for filename in list(os.listdir(tasks_dir)):
             if not filename.startswith(rfe_id + "-"):
                 continue
-            if not filename.endswith(".md"):
+            if not (filename.endswith(".md") or filename.endswith(".yaml")):
                 continue
 
             old_path = os.path.join(tasks_dir, filename)
 
             if filename.endswith("-comments.md"):
                 new_name = f"{jira_key}-comments.md"
+            elif filename.endswith("-removed-context.yaml"):
+                new_name = f"{jira_key}-removed-context.yaml"
             elif filename.endswith("-removed-context.md"):
                 new_name = f"{jira_key}-removed-context.md"
             else:
