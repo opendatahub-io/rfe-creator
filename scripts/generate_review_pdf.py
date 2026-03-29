@@ -159,10 +159,17 @@ def main():
         title = task_fm.get('title', rfe_id)
 
         after_scores = review_fm.get('scores', {})
-        revision_history = get_revision_history(review_body)
-        before_scores = parse_before_scores(revision_history, after_scores)
 
-        before_total = sum(before_scores.values())
+        # Use frontmatter before_scores if available, fall back to parsing
+        revision_history = get_revision_history(review_body)
+        fm_before_scores = review_fm.get('before_scores')
+        if fm_before_scores:
+            before_scores = fm_before_scores
+        else:
+            before_scores = parse_before_scores(revision_history, after_scores)
+
+        fm_before_score = review_fm.get('before_score')
+        before_total = fm_before_score if fm_before_score is not None else sum(before_scores.values())
         after_total = review_fm.get('score', sum(after_scores.values()))
 
         before_pass = before_total >= 8 and all(v > 0 for v in before_scores.values())
