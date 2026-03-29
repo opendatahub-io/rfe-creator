@@ -5,6 +5,10 @@ Submits child RFEs produced by /rfe.split to Jira with proper linking and
 parent closure. Designed to be idempotent and resumable — uses Jira comments
 as the durable store for content and progress tracking.
 
+Reads all structured metadata from YAML frontmatter on task files.
+Identifies parent (status: Archived, rfe_id matches parent key) and children
+(parent_key matches parent's rfe_id) from frontmatter.
+
 Usage:
     python scripts/split_submit.py RHAIRFE-XXXX [--dry-run] [--artifacts-dir DIR]
 
@@ -32,48 +36,20 @@ from jira_utils import (
     markdown_to_adf,
     text_to_adf_paragraph,
     archival_comment_adf,
-    find_artifact_file,
-    parse_child_artifact,
-    check_needs_attention,
-    has_revision_notes,
+    strip_metadata,
 )
 
-
-# ─── rfes.md Parsing (split-specific) ───────────────────────────────────────
-
-def parse_rfes_md(path):
-    """Parse artifacts/rfes.md to find parent key and child RFE list.
-
-    Returns: (parent_key, [(rfe_id, title, priority), ...])
-    """
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-
-    parent_key = None
-    children = []
-
-    for line in content.split("\n"):
-        row_match = re.match(
-            r'^\|\s*~*\s*(RFE-\d+)\s*~*\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|'
-            r'\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|',
-            line
-        )
-        if not row_match:
-            continue
-
-        rfe_id = row_match.group(1).strip().strip("~")
-        title = row_match.group(2).strip().strip("~")
-        jira_key = row_match.group(3).strip().strip("~")
-        priority = row_match.group(4).strip().strip("~")
-        status = row_match.group(6).strip()
-
-        if ("Archived" in status or "Split" in status) and \
-                jira_key and jira_key != "—":
-            parent_key = jira_key
-        elif "Draft" in status and (jira_key == "—" or not jira_key):
-            children.append((rfe_id, title, priority))
-
-    return parent_key, children
+from artifact_utils import (
+    read_frontmatter,
+    read_frontmatter_validated,
+    update_frontmatter,
+    scan_task_files,
+    find_review_file,
+    rename_to_jira_key,
+    rebuild_index,
+    parse_child_artifact,
+    ValidationError,
+)
 
 
 # ─── Recovery / State Detection ──────────────────────────────────────────────
@@ -140,7 +116,7 @@ def discover_state(server, user, token, parent_key, expected_children):
             continue
         child_key = outward["key"]
         child_summary = outward.get("fields", {}).get("summary", "")
-        for idx, (_, title, _) in enumerate(expected_children, 1):
+        for idx, (_, title, _, _) in enumerate(expected_children, 1):
             if title == child_summary and idx not in state.phase2_done:
                 state.phase2_done[idx] = child_key
 
@@ -195,12 +171,20 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         _, _, _, cleaned_markdown = parse_child_artifact(artifact_path)
         description_adf = markdown_to_adf(cleaned_markdown)
 
-        # Determine labels
+        # Determine labels from review frontmatter
         labels = ["rfe-creator-auto-created", "rfe-creator-split-result"]
-        if has_revision_notes(artifact_path):
-            labels.append("rfe-creator-auto-revised")
-        if check_needs_attention(artifacts_dir, rfe_id):
-            labels.append("rfe-creator-needs-attention")
+
+        review_path = find_review_file(artifacts_dir, rfe_id)
+        if review_path:
+            try:
+                review_data, _ = read_frontmatter_validated(
+                    review_path, "rfe-review")
+                if review_data.get("revised", False):
+                    labels.append("rfe-creator-auto-revised")
+                if review_data.get("needs_attention", False):
+                    labels.append("rfe-creator-needs-attention")
+            except (ValidationError, Exception):
+                pass  # proceed without review data
 
         if dry_run:
             print(f"  Phase 2: Would create RHAIRFE ticket for child "
@@ -318,41 +302,49 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    # Parse rfes.md
-    rfes_path = os.path.join(args.artifacts_dir, "rfes.md")
-    if not os.path.exists(rfes_path):
-        print(f"Error: {rfes_path} not found. Run /rfe.split first.",
+    # Scan task files to find parent and children via frontmatter
+    tasks = scan_task_files(args.artifacts_dir)
+    if not tasks:
+        print("Error: No task files found. Run /rfe.split first.",
               file=sys.stderr)
         sys.exit(1)
 
-    parent_key, child_refs = parse_rfes_md(rfes_path)
+    # Find parent: status=Archived with matching rfe_id
+    parent_task = None
+    for path, data in tasks:
+        if data.get("status") == "Archived" and \
+                data.get("rfe_id") == args.parent_key:
+            parent_task = (path, data)
+            break
 
-    if not parent_key:
-        print("Error: No archived (split) parent RFE found in rfes.md.",
-              file=sys.stderr)
+    if not parent_task:
+        print(f"Error: No archived parent with rfe_id={args.parent_key} "
+              f"found in task files.", file=sys.stderr)
         sys.exit(1)
 
-    if parent_key != args.parent_key:
-        print(f"Error: Parent key in rfes.md ({parent_key}) does not match "
-              f"argument ({args.parent_key}).", file=sys.stderr)
+    # Find children: parent_key matches the parent's rfe_id
+    child_tasks = []
+    for path, data in tasks:
+        if data.get("parent_key") == args.parent_key and \
+                data.get("status") != "Archived":
+            child_tasks.append((path, data))
+
+    if not child_tasks:
+        print("Error: No child RFEs found with parent_key="
+              f"{args.parent_key}.", file=sys.stderr)
         sys.exit(1)
 
-    if not child_refs:
-        print("Error: No draft child RFEs found in rfes.md.",
-              file=sys.stderr)
-        sys.exit(1)
-
-    # Resolve artifact files
+    # Build children list: (rfe_id, title, priority, artifact_path)
     children = []
-    for rfe_id, title, priority in child_refs:
-        artifact_path = find_artifact_file(args.artifacts_dir, rfe_id)
-        if not artifact_path:
-            print(f"Error: No artifact file found for {rfe_id} in "
-                  f"{args.artifacts_dir}/rfe-tasks/", file=sys.stderr)
-            sys.exit(1)
-        children.append((rfe_id, title, priority, artifact_path))
+    for path, data in child_tasks:
+        children.append((
+            data["rfe_id"],
+            data["title"],
+            data["priority"],
+            path,
+        ))
 
-    print(f"Split submission: {parent_key} -> {len(children)} children")
+    print(f"Split submission: {args.parent_key} -> {len(children)} children")
     for i, (rfe_id, title, priority, _) in enumerate(children, 1):
         print(f"  {i}. {rfe_id}: {title} (Priority: {priority})")
     print()
@@ -365,9 +357,8 @@ def main():
         state.total_children = len(children)
     else:
         print("Checking submission state...")
-        state = discover_state(server, user, token, parent_key,
-                               [(rfe_id, title, priority)
-                                for rfe_id, title, priority, _ in children])
+        state = discover_state(server, user, token, args.parent_key,
+                               children)
         if state.phase1_done:
             print(f"  Phase 1: {len(state.phase1_done)}/{len(children)} "
                   f"archival comments found")
@@ -382,34 +373,33 @@ def main():
 
     # Run phases
     print("Phase 1: Persisting child RFE content to parent comments...")
-    phase1_persist(server, user, token, parent_key, children, state,
+    phase1_persist(server, user, token, args.parent_key, children, state,
                    args.dry_run)
     print()
 
     print("Phase 2: Creating tickets and linking...")
-    phase2_create_link(server, user, token, parent_key, children, state,
+    phase2_create_link(server, user, token, args.parent_key, children, state,
                        args.artifacts_dir, args.dry_run)
     print()
 
     print("Phase 3: Closing parent...")
-    phase3_close(server, user, token, parent_key, children, state,
+    phase3_close(server, user, token, args.parent_key, children, state,
                  args.dry_run)
     print()
 
-    # Write local mapping file
-    mapping_path = os.path.join(args.artifacts_dir, "jira-tickets.md")
-    with open(mapping_path, "w", encoding="utf-8") as f:
-        f.write("# Jira Tickets\n\n")
-        f.write("| RFE | Jira Key | Title | Priority | URL |\n")
-        f.write("|-----|----------|-------|----------|-----|\n")
-        site = server.rstrip("/") if server else "https://example.atlassian.net"
-        for idx, (rfe_id, title, priority, _) in enumerate(children, 1):
-            key = state.phase2_done.get(idx, "—")
-            url = f"{site}/browse/{key}" if key != "—" else "—"
-            f.write(f"| {rfe_id} | {key} | {title} | {priority} "
-                    f"| {url} |\n")
+    # Post-submit: update frontmatter and rename files
+    for idx, (rfe_id, title, priority, artifact_path) in \
+            enumerate(children, 1):
+        assigned_key = state.phase2_done.get(idx)
+        if not assigned_key or assigned_key == "RHAIRFE-DRY":
+            continue
 
-    print(f"Done. Ticket mapping written to {mapping_path}")
+        rename_to_jira_key(args.artifacts_dir, rfe_id, assigned_key)
+        print(f"  {rfe_id}: Renamed artifacts to {assigned_key}")
+
+    # Rebuild index
+    rebuild_index(args.artifacts_dir)
+    print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
 
 
 if __name__ == "__main__":
