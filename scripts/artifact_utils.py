@@ -104,6 +104,23 @@ SCHEMAS = {
                 "right_sized": {"type": "int", "required": True},
             },
         },
+        "before_score": {
+            "type": "int",
+            "required": False,
+            "default": None,
+        },
+        "before_scores": {
+            "type": "dict",
+            "required": False,
+            "default": None,
+            "fields": {
+                "what": {"type": "int", "required": True},
+                "why": {"type": "int", "required": True},
+                "open_to_how": {"type": "int", "required": True},
+                "not_a_task": {"type": "int", "required": True},
+                "right_sized": {"type": "int", "required": True},
+            },
+        },
     },
     "strat-task": {
         "strat_id": {
