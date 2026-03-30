@@ -49,7 +49,7 @@ def split_into_blocks(content):
     current_lines = []
 
     for line in lines:
-        if re.match(r'^#{1,3}\s+', line):
+        if re.match(r'^#{1,6}\s+', line):
             if current_lines:
                 blocks.append((current_heading, current_lines))
             current_heading = line.strip()
