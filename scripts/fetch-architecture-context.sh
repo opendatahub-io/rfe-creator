@@ -12,15 +12,11 @@ if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
 fi
 
 if [ -d "$CONTEXT_DIR" ]; then
-  cd "$CONTEXT_DIR"
-  git sparse-checkout set "architecture/$LATEST"
-  git pull --quiet
-  cd -
+  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST"
+  git -C "$CONTEXT_DIR" pull --quiet
 else
   git clone --depth 1 --filter=blob:none --sparse https://github.com/opendatahub-io/architecture-context "$CONTEXT_DIR"
-  cd "$CONTEXT_DIR"
-  git sparse-checkout set "architecture/$LATEST"
-  cd -
+  git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST"
 fi
 
 echo "Architecture context ready: $CONTEXT_DIR/architecture/$LATEST"
