@@ -181,7 +181,7 @@ def main():
         before_total = fm_before_score if fm_before_score is not None else sum(before_scores.values())
         after_total = review_fm.get('score', sum(after_scores.values()))
 
-        before_pass = before_total >= 8 and all(v > 0 for v in before_scores.values())
+        before_pass = before_total >= 7 and all(v > 0 for v in before_scores.values())
         after_pass = review_fm.get('pass', False)
 
         diff_text = generate_diff(rfe_id)
