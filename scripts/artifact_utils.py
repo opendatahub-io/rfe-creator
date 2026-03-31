@@ -104,6 +104,11 @@ SCHEMAS = {
                 "right_sized": {"type": "int", "required": True},
             },
         },
+        "error": {
+            "type": "string",
+            "required": False,
+            "default": None,
+        },
         "before_score": {
             "type": "int",
             "required": False,

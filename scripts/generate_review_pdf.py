@@ -145,6 +145,15 @@ def type_badge(block_type):
     return f'<span style="display:inline-block;background:{bg};color:{color};font-size:8pt;font-weight:700;padding:2pt 8pt;border-radius:3pt;border:1px solid {color};letter-spacing:0.5pt;text-transform:uppercase">{html_escape(block_type)}</span>'
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Generate HTML review report')
+    parser.add_argument('--revised-only', action='store_true',
+                        help='Only include detail pages for revised RFEs '
+                             '(summary table still shows all)')
+    parser.add_argument('--output', type=str, default=None,
+                        help='Output file path (default: artifacts/review-report.html)')
+    args = parser.parse_args()
+
     rfes = []
     review_files = sorted([f for f in os.listdir(REVIEWS_DIR) if f.endswith('-review.md')])
 
@@ -599,7 +608,11 @@ def main():
         ('Right-sized', 'right_sized'),
     ]
 
-    for r in rfes:
+    detail_rfes = rfes
+    if args.revised_only:
+        detail_rfes = [r for r in rfes if r['revised']]
+
+    for r in detail_rfes:
         d = r['after_total'] - r['before_total']
 
         html += f'''
@@ -680,7 +693,8 @@ def main():
 </html>
 '''
 
-    output_path = os.path.join(ARTIFACTS, 'review-report.html')
+    output_path = args.output or os.path.join(ARTIFACTS, 'review-report.html')
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write(html)
     print(f'Report written to {output_path}')

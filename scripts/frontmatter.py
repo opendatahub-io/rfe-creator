@@ -183,6 +183,34 @@ def cmd_set(args):
     print(f"OK: {args.file}")
 
 
+def cmd_batch_read(args):
+    """Read frontmatter from multiple files and output as JSON array."""
+    results = []
+    for filepath in args.files:
+        if not os.path.exists(filepath):
+            results.append({"_file": filepath, "_error": "not found"})
+            continue
+
+        schema_type = _detect_schema_type(filepath)
+        if schema_type:
+            try:
+                data, _ = read_frontmatter_validated(filepath, schema_type)
+                data["_file"] = filepath
+                results.append(data)
+            except ValidationError as e:
+                results.append({"_file": filepath, "_error": str(e)})
+        else:
+            data, _ = read_frontmatter(filepath)
+            if data:
+                data["_file"] = filepath
+                results.append(data)
+            else:
+                results.append({"_file": filepath, "_error": "no frontmatter"})
+
+    json.dump(results, sys.stdout, indent=2, default=str)
+    print()
+
+
 def cmd_rebuild_index(args):
     """Rebuild rfes.md index from frontmatter."""
     content = rebuild_index(args.artifacts_dir)
@@ -224,6 +252,13 @@ def main():
                        choices=list(SCHEMAS.keys()),
                        help="Schema type (auto-detected from path if omitted)")
     p_set.set_defaults(func=cmd_set)
+
+    # batch-read
+    p_batch = subparsers.add_parser("batch-read",
+                                    help="Read frontmatter from multiple files")
+    p_batch.add_argument("files", nargs="+",
+                         help="Paths to markdown files")
+    p_batch.set_defaults(func=cmd_batch_read)
 
     # rebuild-index
     p_rebuild = subparsers.add_parser("rebuild-index",
