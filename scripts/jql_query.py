@@ -22,34 +22,40 @@ from jira_utils import require_env, api_call_with_retry
 
 
 def search_issues(server, user, token, jql, limit=None):
-    """Run a JQL search with pagination, yielding issue keys."""
-    start_at = 0
+    """Run a JQL search with cursor-based pagination, yielding issue keys."""
     page_size = 100
-    total = None
-    count = 0
+    keys = []
+    next_page_token = None
 
     while True:
-        path = (f"/search?jql={urllib.parse.quote(jql, safe='')}"
-                f"&startAt={start_at}&maxResults={page_size}&fields=key")
+        path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
+                f"&maxResults={page_size}&fields=key")
+        if next_page_token:
+            path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
         data = api_call_with_retry(server, path, user, token)
-
-        if total is None:
-            total = data.get("total", 0)
-            print(f"TOTAL={total}")
 
         issues = data.get("issues", [])
         if not issues:
             break
 
         for issue in issues:
-            print(issue["key"])
-            count += 1
-            if limit and count >= limit:
-                return
+            keys.append(issue["key"])
+            if limit and len(keys) >= limit:
+                break
 
-        start_at += len(issues)
-        if start_at >= total:
+        if limit and len(keys) >= limit:
             break
+
+        if data.get("isLast", True):
+            break
+
+        next_page_token = data.get("nextPageToken")
+        if not next_page_token:
+            break
+
+    print(f"TOTAL={len(keys)}")
+    for key in keys:
+        print(key)
 
 
 def main():
