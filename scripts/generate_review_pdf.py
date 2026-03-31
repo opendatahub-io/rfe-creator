@@ -108,7 +108,9 @@ def diff_to_html(diff_text):
 
     return '\n'.join(html_parts)
 
-def badge(passed):
+def badge(passed, error=None):
+    if error:
+        return '<span class="badge-error">ERROR</span>'
     if passed:
         return '<span class="badge-pass">PASS</span>'
     return '<span class="badge-fail">FAIL</span>'
@@ -187,6 +189,8 @@ def main():
         diff_text = generate_diff(rfe_id)
         removed_context = read_removed_context(rfe_id)
 
+        error = review_fm.get('error')
+
         rfes.append({
             'rfe_id': rfe_id,
             'title': title,
@@ -200,16 +204,19 @@ def main():
             'revised': review_fm.get('revised', False),
             'needs_attention': review_fm.get('needs_attention', False),
             'recommendation': review_fm.get('recommendation', ''),
+            'error': error,
             'diff_text': diff_text,
             'removed_context': removed_context,
             'revision_history': revision_history,
         })
 
     n = len(rfes)
-    before_passing = sum(1 for r in rfes if r['before_pass'])
-    after_passing = sum(1 for r in rfes if r['after_pass'])
-    avg_before = sum(r['before_total'] for r in rfes) / n if n else 0
-    avg_after = sum(r['after_total'] for r in rfes) / n if n else 0
+    error_count = sum(1 for r in rfes if r.get('error'))
+    n_scored = n - error_count
+    before_passing = sum(1 for r in rfes if not r.get('error') and r['before_pass'])
+    after_passing = sum(1 for r in rfes if not r.get('error') and r['after_pass'])
+    avg_before = sum(r['before_total'] for r in rfes if not r.get('error')) / n_scored if n_scored else 0
+    avg_after = sum(r['after_total'] for r in rfes if not r.get('error')) / n_scored if n_scored else 0
 
     removed_count = sum(1 for r in rfes if r['removed_context'])
     total_blocks = sum(len(r['removed_context'].get('blocks', [])) for r in rfes if r['removed_context'])
@@ -310,6 +317,16 @@ def main():
     .badge-fail {
         display: inline-block;
         background: #c0392b;
+        color: white;
+        font-size: 8pt;
+        font-weight: 700;
+        padding: 2pt 8pt;
+        border-radius: 3pt;
+        letter-spacing: 0.5pt;
+    }
+    .badge-error {
+        display: inline-block;
+        background: #e67e22;
         color: white;
         font-size: 8pt;
         font-weight: 700;
@@ -500,16 +517,16 @@ def main():
 
     <div class="page summary-page">
         <h1>RFE Review &amp; Remediation Report</h1>
-        <p class="subtitle">{n} RFEs assessed, auto-revised, and re-assessed</p>
+        <p class="subtitle">{n} RFEs assessed, auto-revised, and re-assessed{f' ({error_count} error{"s" if error_count != 1 else ""})' if error_count else ''}</p>
 
         <div class="summary-stats">
             <div class="stat-box">
-                <div class="stat-value">{before_passing}/{n}</div>
+                <div class="stat-value">{before_passing}/{n_scored}</div>
                 <div class="stat-label">Passing Before</div>
             </div>
             <div class="stat-arrow">&rarr;</div>
             <div class="stat-box">
-                <div class="stat-value">{after_passing}/{n}</div>
+                <div class="stat-value">{after_passing}/{n_scored}</div>
                 <div class="stat-label">Passing After</div>
             </div>
             <div class="stat-box">
@@ -521,6 +538,10 @@ def main():
                 <div class="stat-value">{avg_after:.1f}</div>
                 <div class="stat-label">Avg Score After</div>
             </div>
+{f"""            <div class="stat-box" style="border-color: #e67e22;">
+                <div class="stat-value" style="color: #e67e22;">{error_count}</div>
+                <div class="stat-label">Errors</div>
+            </div>""" if error_count else ''}
         </div>
 
         <table class="summary-table">
@@ -547,7 +568,17 @@ def main():
         else:
             rc_text = '&mdash;'
 
-        html += f'''        <tr>
+        error = r.get('error')
+        if error:
+            html += f'''        <tr>
+            <td class="key-col">{html_escape(r['rfe_id'])}</td>
+            <td colspan="4" style="background: #fef3e6;">{badge(False, error=error)} &nbsp; <span style="color: #8b4513; font-weight: 600;">{html_escape(str(error))}</span></td>
+            <td>&mdash;</td>
+            <td>{rc_text}</td>
+        </tr>
+'''
+        else:
+            html += f'''        <tr>
             <td class="key-col">{html_escape(r['rfe_id'])}</td>
             <td>{r['before_total']}/10</td>
             <td>{badge(r['before_pass'])}</td>
@@ -608,9 +639,9 @@ def main():
         ('Right-sized', 'right_sized'),
     ]
 
-    detail_rfes = rfes
+    detail_rfes = [r for r in rfes if not r.get('error')]
     if args.revised_only:
-        detail_rfes = [r for r in rfes if r['revised']]
+        detail_rfes = [r for r in detail_rfes if r['revised']]
 
     for r in detail_rfes:
         d = r['after_total'] - r['before_total']
@@ -698,7 +729,8 @@ def main():
     with open(output_path, 'w') as f:
         f.write(html)
     print(f'Report written to {output_path}')
-    print(f'{n} RFEs, {before_passing}/{n} passing before, {after_passing}/{n} passing after')
+    print(f'{n} RFEs, {before_passing}/{n_scored} passing before, {after_passing}/{n_scored} passing after'
+          + (f', {error_count} errors' if error_count else ''))
     print(f'{removed_count} RFEs with removed context ({total_blocks} blocks)')
 
 if __name__ == '__main__':
