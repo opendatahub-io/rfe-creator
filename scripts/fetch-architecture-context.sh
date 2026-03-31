@@ -4,7 +4,7 @@
 
 CONTEXT_DIR=".context/architecture-context"
 
-LATEST=$(curl -sL https://api.github.com/repos/opendatahub-io/architecture-context/contents/architecture | jq -r '[.[] | select(.name | startswith("rhoai-")) | .name] | sort | last')
+LATEST=$(curl -sL https://api.github.com/repos/opendatahub-io/architecture-context/contents/architecture | python3 -c "import sys,json; entries=json.load(sys.stdin); names=sorted(e['name'] for e in entries if e['name'].startswith('rhoai-')); print(names[-1] if names else '')")
 
 if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
   echo "Could not detect latest architecture version"
