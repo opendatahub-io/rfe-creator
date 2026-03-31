@@ -16,6 +16,7 @@ PHASE_CHECKS = {
     "assess": lambda id: f"/tmp/rfe-assess/single/{id}.result.md",
     "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
     "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
+    "revise": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
     "split": lambda id: f"artifacts/rfe-reviews/{id}-split-status.yaml",
 }
 
@@ -26,9 +27,22 @@ def check_id(phase, rfe_id):
     if not os.path.exists(path):
         return "pending"
     if phase == "review":
-        data, _ = read_frontmatter(path)
+        try:
+            data, _ = read_frontmatter(path)
+        except Exception:
+            return "pending"
+        if not data.get("score"):
+            return "pending"
         if data.get("error"):
             return "error"
+    if phase == "revise":
+        try:
+            data, _ = read_frontmatter(path)
+        except Exception:
+            return "pending"
+        if data.get("revised"):
+            return "completed"
+        return "pending"
     return "completed"
 
 
