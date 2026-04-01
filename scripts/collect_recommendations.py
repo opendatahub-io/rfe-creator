@@ -24,6 +24,8 @@ def collect_default(ids):
             groups["ERRORS"].append(rfe_id)
             continue
         rec = data.get("recommendation", "").upper()
+        if rec == "AUTOREVISE_REJECT":
+            rec = "REJECT"
         if rec in groups:
             groups[rec].append(rfe_id)
         else:
