@@ -83,7 +83,7 @@ SCHEMAS = {
             "required": True,
             "enum": ["feasible", "infeasible"],
         },
-        "revised": {
+        "auto_revised": {
             "type": "bool",
             "required": True,
             "default": False,
@@ -375,7 +375,20 @@ def read_frontmatter(path):
     if not isinstance(data, dict):
         return {}, content
 
+    _migrate_fields(data)
     return data, body
+
+
+_FIELD_MIGRATIONS = {
+    "revised": "auto_revised",
+}
+
+
+def _migrate_fields(data, schema_type=None):
+    """Rename deprecated frontmatter fields to current names."""
+    for old, new in _FIELD_MIGRATIONS.items():
+        if old in data and new not in data:
+            data[new] = data.pop(old)
 
 
 def read_frontmatter_validated(path, schema_type):
@@ -392,6 +405,7 @@ def read_frontmatter_validated(path, schema_type):
     if not data:
         raise ValidationError(f"No frontmatter found in {path}")
 
+    _migrate_fields(data, schema_type)
     apply_defaults(data, schema_type)
     errors = validate(data, schema_type)
     if errors:
@@ -417,6 +431,7 @@ def write_frontmatter(path, data, schema_type):
     Raises:
         ValidationError: if data fails schema validation
     """
+    _migrate_fields(data, schema_type)
     apply_defaults(data, schema_type)
     errors = validate(data, schema_type)
     if errors:
@@ -460,6 +475,7 @@ def update_frontmatter(path, updates, schema_type):
         else:
             data[key] = value
 
+    _migrate_fields(data, schema_type)
     apply_defaults(data, schema_type)
     errors = validate(data, schema_type)
     if errors:

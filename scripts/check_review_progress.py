@@ -40,7 +40,7 @@ def check_id(phase, rfe_id):
             data, _ = read_frontmatter(path)
         except Exception:
             return "pending"
-        if data.get("revised"):
+        if data.get("auto_revised"):
             return "completed"
         return "pending"
     return "completed"

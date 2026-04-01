@@ -33,7 +33,7 @@ def collect_default(ids):
 
 
 def collect_reassess(ids):
-    """Collect IDs needing reassessment (revised=true, pass=false)."""
+    """Collect IDs needing reassessment (auto_revised=true, pass=false)."""
     reassess, done = [], []
     for rfe_id in ids:
         path = os.path.join(ARTIFACTS_DIR, "rfe-reviews", f"{rfe_id}-review.md")
@@ -41,7 +41,7 @@ def collect_reassess(ids):
             done.append(rfe_id)
             continue
         data, _ = read_frontmatter(path)
-        if data.get("revised") and not data.get("pass"):
+        if data.get("auto_revised") and not data.get("pass"):
             reassess.append(rfe_id)
         else:
             done.append(rfe_id)

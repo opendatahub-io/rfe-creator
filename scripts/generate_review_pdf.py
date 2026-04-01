@@ -24,7 +24,12 @@ def read_frontmatter(path):
         return {}, content
     fm = yaml.safe_load(parts[1])
     body = parts[2].strip()
-    return fm or {}, body
+    if not fm:
+        return {}, body
+    # Migrate deprecated field names
+    if "revised" in fm and "auto_revised" not in fm:
+        fm["auto_revised"] = fm.pop("revised")
+    return fm, body
 
 def get_revision_history(body):
     """Extract revision history section from review body."""
@@ -208,7 +213,7 @@ def main():
             'before_pass': before_pass,
             'after_pass': after_pass,
             'feasibility': review_fm.get('feasibility', ''),
-            'revised': review_fm.get('revised', False),
+            'auto_revised': review_fm.get('auto_revised', False),
             'needs_attention': review_fm.get('needs_attention', False),
             'recommendation': review_fm.get('recommendation', ''),
             'error': error,
@@ -815,7 +820,7 @@ def main():
 
     detail_rfes = [r for r in rfes if not r.get('error')]
     if args.revised_only:
-        detail_rfes = [r for r in detail_rfes if r['revised'] or r['is_split_parent']]
+        detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent']]
 
     for r in detail_rfes:
         d = r['after_total'] - r['before_total']

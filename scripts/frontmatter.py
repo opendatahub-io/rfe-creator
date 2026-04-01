@@ -19,7 +19,7 @@ Usage:
     # Set nested fields with dot notation
     python3 scripts/frontmatter.py set artifacts/rfe-reviews/RFE-001-foo-review.md \\
         --rfe_id RFE-001 --score 9 --pass true --recommendation submit \\
-        --feasibility feasible --revised false --needs_attention false \\
+        --feasibility feasible --auto_revised false --needs_attention false \\
         --scores.what 2 --scores.why 1 --scores.open_to_how 2 \\
         --scores.not_a_task 2 --scores.right_sized 2
 

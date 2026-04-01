@@ -179,7 +179,7 @@ def phase2_create_link(server, user, token, parent_key, children, state,
             try:
                 review_data, _ = read_frontmatter_validated(
                     review_path, "rfe-review")
-                if review_data.get("revised", False):
+                if review_data.get("auto_revised", False):
                     labels.append("rfe-creator-auto-revised")
                 if review_data.get("needs_attention", False):
                     labels.append("rfe-creator-needs-attention")

@@ -47,7 +47,7 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
         entry = {"id": rfe_id}
         rec = data.get("recommendation", "revise")
         entry["recommendation"] = rec
-        entry["revised"] = data.get("revised", False)
+        entry["auto_revised"] = data.get("auto_revised", False)
 
         score = data.get("score", 0)
         entry["after_score"] = score
@@ -59,7 +59,7 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
             before_score_list.append(before)
 
         # Revision cycles approximation
-        if data.get("revised") and before is not None and before != score:
+        if data.get("auto_revised") and before is not None and before != score:
             entry["revision_cycles"] = 1
         else:
             entry["revision_cycles"] = 0
