@@ -55,6 +55,23 @@ python3 scripts/frontmatter.py read <path>
 python3 scripts/frontmatter.py rebuild-index
 ```
 
+### State Persistence
+
+Long-running skills use `scripts/state.py` to persist state to `tmp/` files so it survives context compression. All skills must use this utility instead of inline bash commands (cat, echo, mkdir) to avoid unnecessary auth prompts.
+
+```bash
+python3 scripts/state.py init <file> key=value ...    # Create config file
+python3 scripts/state.py set <file> key=value ...     # Update keys in place
+python3 scripts/state.py set-default <file> key=value ...  # Set only if key absent (cycle counters)
+python3 scripts/state.py read <file>                  # Print file contents
+python3 scripts/state.py write-ids <file> ID ...      # Write ID list (one per line, deduped)
+python3 scripts/state.py read-ids <file>              # Print IDs space-separated
+python3 scripts/state.py timestamp                    # Print current UTC time (ISO 8601)
+python3 scripts/state.py clean                        # Reset tmp/ directory
+```
+
+Each skill uses distinct file prefixes to avoid collisions during nested calls: `autofix-`, `review-`, `split-`, `speedrun-`.
+
 ### File Naming
 
 - **Existing Jira issues**: Use Jira key as filename and `rfe_id` (e.g., `RHAIRFE-1595.md` with `rfe_id: RHAIRFE-1595`)
