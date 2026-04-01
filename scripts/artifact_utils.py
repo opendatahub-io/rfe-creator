@@ -448,7 +448,9 @@ def write_frontmatter(path, data, schema_type):
                          allow_unicode=True)
     content = f"---\n{yaml_str}---\n{body}"
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
