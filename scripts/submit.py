@@ -138,7 +138,7 @@ def main():
         if review_data:
             rec = review_data.get("recommendation", "submit")
 
-        if rec == "reject":
+        if rec in ("reject", "autorevise_reject"):
             plan.append({
                 "rfe_id": rfe_id, "title": title,
                 "is_existing": is_existing, "priority": priority, "size": size,

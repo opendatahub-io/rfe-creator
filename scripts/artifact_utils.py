@@ -76,7 +76,7 @@ SCHEMAS = {
         "recommendation": {
             "type": "string",
             "required": True,
-            "enum": ["submit", "revise", "split", "reject"],
+            "enum": ["submit", "revise", "split", "reject", "autorevise_reject"],
         },
         "feasibility": {
             "type": "string",
