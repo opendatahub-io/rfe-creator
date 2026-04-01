@@ -21,7 +21,8 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 /rfe.speedrun RHAIRFE-1234    # Fetch, review, revise, and update in one step
 
 # Batch operations
-/rfe.speedrun --input batch.yaml --headless --dry-run   # Batch create + review from YAML
+/rfe.speedrun --input batch.yaml --headless --dry-run              # Batch create + review from YAML
+/rfe.speedrun --input batch.yaml --headless --announce-complete    # Print completion marker for CI
 /rfe.auto-fix --jql "project = RHAIRFE AND ..."         # Batch review from JQL query
 /rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678                 # Batch review explicit IDs
 
@@ -95,7 +96,7 @@ Auto-fix processes in batches (default 5), handles review, revision, splitting, 
 3. **Split**: Decompose an oversized RFE into right-sized pieces. Runs review on new RFEs, self-corrects right-sizing (up to 3 cycles), and checks scope coverage. Supports `--headless`.
 4. **Auto-fix**: Batch pipeline that orchestrates review + revision + split + retry across many RFEs. Accepts explicit IDs or a `--jql` query. Processes in configurable batches (`--batch-size N`, default 5). Generates run reports and HTML review reports.
 5. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira.
-6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--dry-run` to skip Jira writes, and `--batch-size N`.
+6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--announce-complete` for completion signaling, `--dry-run` to skip Jira writes, and `--batch-size N`.
 7. **Strat Create**: Clone approved RFEs to RHAISTRAT in Jira.
 8. **Strat Refine**: Add the HOW — technical approach, dependencies, components, non-functionals.
 9. **Strat Review**: Four independent forked reviewers (feasibility, testability, scope, architecture).
@@ -140,6 +141,12 @@ All orchestrator skills support `--headless` for non-interactive use in CI pipel
 
 ```bash
 claude -p "/rfe.speedrun --headless --dry-run --input batch.yaml"
+```
+
+Add `--announce-complete` to print a `FULL RUN COMPLETE` marker when the pipeline finishes — useful for CI harnesses that need a reliable completion signal:
+
+```bash
+claude -p "/rfe.speedrun --headless --announce-complete --input batch.yaml"
 ```
 
 Flag persistence: parsed arguments are written to `tmp/*.yaml` config files so they survive context compression during long batch runs.
