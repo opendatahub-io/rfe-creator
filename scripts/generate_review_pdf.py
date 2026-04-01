@@ -8,28 +8,13 @@ import subprocess
 import sys
 import yaml
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from artifact_utils import read_frontmatter
+
 ARTIFACTS = os.path.join(os.path.dirname(__file__), '..', 'artifacts')
 REVIEWS_DIR = os.path.join(ARTIFACTS, 'rfe-reviews')
 TASKS_DIR = os.path.join(ARTIFACTS, 'rfe-tasks')
 ORIGINALS_DIR = os.path.join(ARTIFACTS, 'rfe-originals')
-
-def read_frontmatter(path):
-    """Read YAML frontmatter from a markdown file."""
-    with open(path) as f:
-        content = f.read()
-    if not content.startswith('---'):
-        return {}, content
-    parts = content.split('---', 2)
-    if len(parts) < 3:
-        return {}, content
-    fm = yaml.safe_load(parts[1])
-    body = parts[2].strip()
-    if not fm:
-        return {}, body
-    # Migrate deprecated field names
-    if "revised" in fm and "auto_revised" not in fm:
-        fm["auto_revised"] = fm.pop("revised")
-    return fm, body
 
 def get_revision_history(body):
     """Extract revision history section from review body."""
