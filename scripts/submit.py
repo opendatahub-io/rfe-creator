@@ -31,9 +31,12 @@ from jira_utils import (
     update_issue,
     add_labels,
     add_comment,
+    get_issue,
+    adf_to_markdown,
     strip_metadata,
     markdown_to_adf,
 )
+from check_conflicts import _normalize_for_compare
 
 from artifact_utils import (
     read_frontmatter,
@@ -229,6 +232,39 @@ def main():
                 "attn_reason": None, "original_labels": original_labels,
             })
             continue
+
+        # For existing RFEs, check for Jira conflicts
+        if is_existing and not args.dry_run:
+            original_path = os.path.join(
+                args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
+            if os.path.exists(original_path):
+                try:
+                    with open(original_path, encoding="utf-8") as f:
+                        orig_snap = _normalize_for_compare(f.read())
+                    issue = get_issue(server, user, token, rfe_id,
+                                      fields=["description"])
+                    desc_raw = issue.get("fields", {}).get("description")
+                    if isinstance(desc_raw, dict):
+                        jira_desc = _normalize_for_compare(
+                            adf_to_markdown(desc_raw))
+                    elif desc_raw is None:
+                        jira_desc = ""
+                    else:
+                        jira_desc = _normalize_for_compare(str(desc_raw))
+                    if orig_snap != jira_desc:
+                        plan.append({
+                            "rfe_id": rfe_id, "title": title,
+                            "is_existing": is_existing, "priority": priority,
+                            "size": size,
+                            "action": "SKIP", "labels": [],
+                            "skip_reason": "Jira conflict — description "
+                                           "modified since fetch",
+                            "task_path": task_path,
+                        })
+                        continue
+                except Exception as e:
+                    print(f"Warning: conflict check failed for {rfe_id}: "
+                          f"{e}", file=sys.stderr)
 
         # For existing RFEs, check if content has changed
         if is_existing:
