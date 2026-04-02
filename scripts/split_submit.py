@@ -176,6 +176,7 @@ def phase2_create_link(server, user, token, parent_key, children, state,
 
         review_path = find_review_file(artifacts_dir, rfe_id)
         review_rec = None
+        attn_reason = None
         if review_path:
             try:
                 review_data, _ = read_frontmatter_validated(
@@ -185,6 +186,7 @@ def phase2_create_link(server, user, token, parent_key, children, state,
                     labels.append("rfe-creator-auto-revised")
                 if review_data.get("needs_attention", False):
                     labels.append("rfe-creator-needs-attention")
+                    attn_reason = review_data.get("needs_attention_reason")
             except (ValidationError, Exception):
                 pass  # proceed without review data
         if review_rec == "submit":
@@ -195,6 +197,8 @@ def phase2_create_link(server, user, token, parent_key, children, state,
                   f"{idx}/{total}: {title} (priority: {priority})")
             print(f"           Labels: {', '.join(labels)}")
             print(f"           Would link to {parent_key} via 'Issue split'")
+            if attn_reason:
+                print(f"           Would post needs-attention comment")
             state.phase2_done[idx] = "RHAIRFE-DRY"
             continue
 
@@ -216,6 +220,16 @@ def phase2_create_link(server, user, token, parent_key, children, state,
                         f"parent. (ref: child {idx} of {total})")
         add_comment(server, user, token, parent_key,
                     text_to_adf_paragraph(confirm_text))
+
+        # 4. Post needs-attention comment on the new child ticket
+        if attn_reason:
+            attn_md = (
+                "*[RFE Creator]* This RFE has been flagged for human "
+                f"review:\n\n{attn_reason}"
+            )
+            add_comment(server, user, token, child_key,
+                        markdown_to_adf(attn_md))
+            print(f"           Posted needs-attention comment")
 
         state.phase2_done[idx] = child_key
 

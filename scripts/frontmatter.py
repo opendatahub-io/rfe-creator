@@ -61,6 +61,12 @@ def _coerce_value(value_str, field_spec):
     if field_type == "int":
         return int(value_str)
 
+    if field_type == "list":
+        if value_str.lower() in ("null", "none", "[]"):
+            return None
+        # Accept comma-separated values
+        return [v.strip() for v in value_str.split(",") if v.strip()]
+
     if field_type == "string":
         if value_str.lower() == "null" or value_str.lower() == "none":
             return None

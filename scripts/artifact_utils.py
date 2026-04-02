@@ -58,6 +58,11 @@ SCHEMAS = {
             "pattern": r"^(RFE-\d+|RHAIRFE-\d+)$",
             "default": None,
         },
+        "original_labels": {
+            "type": "list",
+            "required": False,
+            "default": None,
+        },
     },
     "rfe-review": {
         "rfe_id": {
@@ -111,6 +116,11 @@ SCHEMAS = {
         },
         "before_score": {
             "type": "int",
+            "required": False,
+            "default": None,
+        },
+        "needs_attention_reason": {
+            "type": "string",
             "required": False,
             "default": None,
         },
@@ -241,6 +251,11 @@ def _validate_field(name, value, spec, path=""):
         if not isinstance(value, bool):
             errors.append(
                 f"{full_name}: expected bool, got {type(value).__name__}")
+
+    elif expected_type == "list":
+        if not isinstance(value, list):
+            errors.append(
+                f"{full_name}: expected list, got {type(value).__name__}")
 
     elif expected_type == "dict":
         if not isinstance(value, dict):
