@@ -99,7 +99,7 @@ class TestContentDiffGuard:
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "Label only" in stdout
-        assert "rfe-creator-autofix-pass" in stdout
+        assert "rfe-creator-autofix-rubric-pass" in stdout
 
     def test_existing_rfe_with_changes_submitted(self, art_dir):
         """Existing RFE with different content → update."""
