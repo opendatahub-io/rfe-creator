@@ -12,19 +12,19 @@ Usage:
     python3 scripts/frontmatter.py schema strat-review
 
     # Set/update frontmatter on a file (validates before writing)
-    python3 scripts/frontmatter.py set artifacts/rfe-tasks/RFE-001-foo.md \\
+    python3 scripts/frontmatter.py set artifacts/rfe-tasks/RFE-001.md \\
         --rfe_id RFE-001 --title "My RFE" --priority Major --size M \\
         --status Draft
 
     # Set nested fields with dot notation
-    python3 scripts/frontmatter.py set artifacts/rfe-reviews/RFE-001-foo-review.md \\
+    python3 scripts/frontmatter.py set artifacts/rfe-reviews/RFE-001-review.md \\
         --rfe_id RFE-001 --score 9 --pass true --recommendation submit \\
-        --feasibility feasible --revised false --needs_attention false \\
+        --feasibility feasible --auto_revised false --needs_attention false \\
         --scores.what 2 --scores.why 1 --scores.open_to_how 2 \\
         --scores.not_a_task 2 --scores.right_sized 2
 
     # Read and validate frontmatter from a file
-    python3 scripts/frontmatter.py read artifacts/rfe-tasks/RFE-001-foo.md
+    python3 scripts/frontmatter.py read artifacts/rfe-tasks/RFE-001.md
 
     # Rebuild the rfes.md index from all task and review files
     python3 scripts/frontmatter.py rebuild-index [--artifacts-dir artifacts]
@@ -183,6 +183,34 @@ def cmd_set(args):
     print(f"OK: {args.file}")
 
 
+def cmd_batch_read(args):
+    """Read frontmatter from multiple files and output as JSON array."""
+    results = []
+    for filepath in args.files:
+        if not os.path.exists(filepath):
+            results.append({"_file": filepath, "_error": "not found"})
+            continue
+
+        schema_type = _detect_schema_type(filepath)
+        if schema_type:
+            try:
+                data, _ = read_frontmatter_validated(filepath, schema_type)
+                data["_file"] = filepath
+                results.append(data)
+            except ValidationError as e:
+                results.append({"_file": filepath, "_error": str(e)})
+        else:
+            data, _ = read_frontmatter(filepath)
+            if data:
+                data["_file"] = filepath
+                results.append(data)
+            else:
+                results.append({"_file": filepath, "_error": "no frontmatter"})
+
+    json.dump(results, sys.stdout, indent=2, default=str)
+    print()
+
+
 def cmd_rebuild_index(args):
     """Rebuild rfes.md index from frontmatter."""
     content = rebuild_index(args.artifacts_dir)
@@ -224,6 +252,13 @@ def main():
                        choices=list(SCHEMAS.keys()),
                        help="Schema type (auto-detected from path if omitted)")
     p_set.set_defaults(func=cmd_set)
+
+    # batch-read
+    p_batch = subparsers.add_parser("batch-read",
+                                    help="Read frontmatter from multiple files")
+    p_batch.add_argument("files", nargs="+",
+                         help="Paths to markdown files")
+    p_batch.set_defaults(func=cmd_batch_read)
 
     # rebuild-index
     p_rebuild = subparsers.add_parser("rebuild-index",

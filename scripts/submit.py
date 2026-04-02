@@ -138,7 +138,7 @@ def main():
         if review_data:
             rec = review_data.get("recommendation", "submit")
 
-        if rec == "reject":
+        if rec in ("reject", "autorevise_reject"):
             plan.append({
                 "rfe_id": rfe_id, "title": title,
                 "is_existing": is_existing, "priority": priority, "size": size,
@@ -147,11 +147,30 @@ def main():
             })
             continue
 
+        # For existing RFEs, skip if content hasn't changed
+        if is_existing:
+            original_path = os.path.join(
+                args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
+            if os.path.exists(original_path):
+                with open(original_path, encoding="utf-8") as f:
+                    original_body = strip_metadata(f.read())
+                with open(task_path, encoding="utf-8") as f:
+                    current_body = strip_metadata(f.read())
+                if original_body.strip() == current_body.strip():
+                    plan.append({
+                        "rfe_id": rfe_id, "title": title,
+                        "is_existing": is_existing, "priority": priority,
+                        "size": size, "action": "SKIP", "labels": [],
+                        "skip_reason": "no changes",
+                        "task_path": task_path,
+                    })
+                    continue
+
         # Determine labels
         labels = []
         if not is_existing:
             labels.append("rfe-creator-auto-created")
-        if review_data and review_data.get("revised", False):
+        if review_data and review_data.get("auto_revised", False):
             labels.append("rfe-creator-auto-revised")
         if review_data and review_data.get("needs_attention", False):
             labels.append("rfe-creator-needs-attention")
