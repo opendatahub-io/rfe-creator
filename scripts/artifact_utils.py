@@ -81,7 +81,7 @@ SCHEMAS = {
         "feasibility": {
             "type": "string",
             "required": True,
-            "enum": ["feasible", "infeasible"],
+            "enum": ["feasible", "infeasible", "indeterminate"],
         },
         "auto_revised": {
             "type": "bool",

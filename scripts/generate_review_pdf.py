@@ -670,6 +670,8 @@ def main():
             return '<span style="color:#2d6a2d;">Feasible</span>'
         if f == 'infeasible':
             return '<span style="color:#c0392b;font-weight:600;">Infeasible</span>'
+        if f == 'indeterminate':
+            return '<span style="color:#b8860b;font-weight:600;">Indeterminate</span>'
         return '&mdash;'
 
     def render_table_rows(rfe_list):
