@@ -808,7 +808,7 @@ def main():
 
     detail_rfes = [r for r in rfes if not r.get('error')]
     if args.revised_only:
-        detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent']]
+        detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent'] or r.get('is_leaf_child')]
 
     for r in detail_rfes:
         d = r['after_total'] - r['before_total']
