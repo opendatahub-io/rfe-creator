@@ -175,16 +175,20 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         labels = ["rfe-creator-auto-created", "rfe-creator-split-result"]
 
         review_path = find_review_file(artifacts_dir, rfe_id)
+        review_rec = None
         if review_path:
             try:
                 review_data, _ = read_frontmatter_validated(
                     review_path, "rfe-review")
+                review_rec = review_data.get("recommendation")
                 if review_data.get("auto_revised", False):
                     labels.append("rfe-creator-auto-revised")
                 if review_data.get("needs_attention", False):
                     labels.append("rfe-creator-needs-attention")
             except (ValidationError, Exception):
                 pass  # proceed without review data
+        if review_rec == "submit":
+            labels.append("rfe-creator-autofix-pass")
 
         if dry_run:
             print(f"  Phase 2: Would create RHAIRFE ticket for child "
