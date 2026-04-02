@@ -25,13 +25,17 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
         if parent:
             children_map.setdefault(parent, []).append(task_data["rfe_id"])
 
+    # Expand ID list to include split children discovered from task files
+    all_children = [c for kids in children_map.values() for c in kids]
+    expanded_ids = list(rfe_ids) + [c for c in all_children if c not in rfe_ids]
+
     per_rfe = []
     before_totals = {f: [] for f in SCORE_FIELDS}
     after_totals = {f: [] for f in SCORE_FIELDS}
     before_score_list, after_score_list = [], []
     counts = {"passed": 0, "failed": 0, "split": 0, "errors": 0}
 
-    for rfe_id in rfe_ids:
+    for rfe_id in expanded_ids:
         review_path = find_review_file(ARTIFACTS_DIR, rfe_id)
         if not review_path:
             per_rfe.append({"id": rfe_id, "error": "review file not found"})

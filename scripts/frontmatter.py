@@ -12,19 +12,19 @@ Usage:
     python3 scripts/frontmatter.py schema strat-review
 
     # Set/update frontmatter on a file (validates before writing)
-    python3 scripts/frontmatter.py set artifacts/rfe-tasks/RFE-001-foo.md \\
+    python3 scripts/frontmatter.py set artifacts/rfe-tasks/RFE-001.md \\
         --rfe_id RFE-001 --title "My RFE" --priority Major --size M \\
         --status Draft
 
     # Set nested fields with dot notation
-    python3 scripts/frontmatter.py set artifacts/rfe-reviews/RFE-001-foo-review.md \\
+    python3 scripts/frontmatter.py set artifacts/rfe-reviews/RFE-001-review.md \\
         --rfe_id RFE-001 --score 9 --pass true --recommendation submit \\
         --feasibility feasible --auto_revised false --needs_attention false \\
         --scores.what 2 --scores.why 1 --scores.open_to_how 2 \\
         --scores.not_a_task 2 --scores.right_sized 2
 
     # Read and validate frontmatter from a file
-    python3 scripts/frontmatter.py read artifacts/rfe-tasks/RFE-001-foo.md
+    python3 scripts/frontmatter.py read artifacts/rfe-tasks/RFE-001.md
 
     # Rebuild the rfes.md index from all task and review files
     python3 scripts/frontmatter.py rebuild-index [--artifacts-dir artifacts]

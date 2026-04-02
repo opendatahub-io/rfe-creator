@@ -131,7 +131,7 @@ class TestContentDiffGuard:
 
     def test_new_rfe_always_created(self, art_dir):
         """New RFE (RFE-NNN) → always create, no content-diff check."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001-test.md",
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
                TASK_FM.format(rfe_id="RFE-001"))
         _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
                REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
@@ -144,7 +144,7 @@ class TestContentDiffGuard:
 class TestSkipLogic:
     def test_rejected_rfe_skipped(self, art_dir):
         """RFE with recommendation=reject → SKIP rejected."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001-test.md",
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
                TASK_FM.format(rfe_id="RFE-001"))
         _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
                REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false")
@@ -157,7 +157,7 @@ class TestSkipLogic:
 
     def test_archived_rfe_excluded(self, art_dir):
         """Archived RFE → not in plan at all."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001-test.md",
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
                TASK_FM.format(rfe_id="RFE-001").replace(
                    "status: Ready", "status: Archived"))
 
@@ -170,7 +170,7 @@ class TestSkipLogic:
 class TestAutoRevisedLabel:
     def test_auto_revised_label_applied(self, art_dir):
         """auto_revised=true → rfe-creator-auto-revised label."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001-test.md",
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
                TASK_FM.format(rfe_id="RFE-001"))
         _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
                REVIEW_FM.format(rfe_id="RFE-001", auto_revised="true"))
@@ -181,7 +181,7 @@ class TestAutoRevisedLabel:
 
     def test_no_label_when_not_revised(self, art_dir):
         """auto_revised=false → no auto-revised label."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001-test.md",
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
                TASK_FM.format(rfe_id="RFE-001"))
         _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
                REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))

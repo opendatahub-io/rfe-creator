@@ -505,7 +505,7 @@ def find_artifact_file(artifacts_dir, identifier):
     """Find the main artifact file for a given RFE ID or Jira key.
 
     Matches:
-    - RFE-NNN-*.md (local pre-submission)
+    - RFE-NNN.md (local pre-submission)
     - RHAIRFE-NNNN.md (Jira-keyed)
 
     Excludes companion files (-comments.md, -removed-context.md).
@@ -538,9 +538,10 @@ def find_artifact_file(artifacts_dir, identifier):
                     continue
                 return path
 
-        # Match by local RFE ID (prefix: RFE-001-*.md)
+        # Match by local RFE ID (exact: RFE-001.md, legacy: RFE-001-slug.md)
         if identifier.startswith("RFE-"):
-            if filename.startswith(identifier + "-"):
+            if filename == f"{identifier}.md" or \
+                    filename.startswith(identifier + "-"):
                 path = os.path.join(tasks_dir, filename)
                 data, _ = read_frontmatter(path)
                 if data.get("status") == "Archived":
@@ -567,7 +568,8 @@ def find_artifact_file_including_archived(artifacts_dir, identifier):
                 return os.path.join(tasks_dir, filename)
 
         if identifier.startswith("RFE-"):
-            if filename.startswith(identifier + "-"):
+            if filename == f"{identifier}.md" or \
+                    filename.startswith(identifier + "-"):
                 return os.path.join(tasks_dir, filename)
 
     return None
@@ -588,8 +590,7 @@ def find_removed_context_yaml(artifacts_dir, identifier):
                 return os.path.join(tasks_dir, filename)
 
         if identifier.startswith("RFE-"):
-            if filename.startswith(identifier + "-") and \
-                    filename.endswith("-removed-context.yaml"):
+            if filename == f"{identifier}-removed-context.yaml":
                 return os.path.join(tasks_dir, filename)
 
     return None
@@ -610,8 +611,7 @@ def find_removed_context_file(artifacts_dir, identifier):
                 return os.path.join(tasks_dir, filename)
 
         if identifier.startswith("RFE-"):
-            if filename.startswith(identifier + "-") and \
-                    filename.endswith("-removed-context.md"):
+            if filename == f"{identifier}-removed-context.md":
                 return os.path.join(tasks_dir, filename)
 
     return None
@@ -620,8 +620,7 @@ def find_removed_context_file(artifacts_dir, identifier):
 def find_review_file(artifacts_dir, identifier):
     """Find the review file for a given RFE ID or Jira key.
 
-    Looks in rfe-reviews/ for {identifier}-review.md or
-    {identifier}-*-review.md (for RFE-NNN slugged names).
+    Looks in rfe-reviews/ for {identifier}-review.md.
     """
     reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")
     if not os.path.isdir(reviews_dir):
@@ -636,7 +635,7 @@ def find_review_file(artifacts_dir, identifier):
                 return os.path.join(reviews_dir, filename)
 
         if identifier.startswith("RFE-"):
-            if filename.startswith(identifier + "-"):
+            if filename == f"{identifier}-review.md":
                 return os.path.join(reviews_dir, filename)
 
     return None
@@ -699,7 +698,7 @@ def scan_review_files(artifacts_dir):
 # ─── File Renaming (post-submit) ───────────────────────────────────────────────
 
 def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
-    """Rename RFE-NNN-*.md files to RHAIRFE-NNNN.md after submission.
+    """Rename RFE-NNN.md files to RHAIRFE-NNNN.md after submission.
 
     Renames the task file, companion files, and review file.
     Updates rfe_id in frontmatter to the new Jira key.
@@ -715,7 +714,8 @@ def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
     # Rename task file and companions
     if os.path.isdir(tasks_dir):
         for filename in list(os.listdir(tasks_dir)):
-            if not filename.startswith(rfe_id + "-"):
+            if not (filename == f"{rfe_id}.md" or
+                    filename.startswith(rfe_id + "-")):
                 continue
             if not (filename.endswith(".md") or filename.endswith(".yaml")):
                 continue

@@ -54,7 +54,7 @@ def main():
         for i in range(count):
             rfe_id = f"RFE-{highest + 1 + i:03d}"
             # Touch a placeholder so subsequent calls see it
-            placeholder = os.path.join(TASKS_DIR, f"{rfe_id}-placeholder.md")
+            placeholder = os.path.join(TASKS_DIR, f"{rfe_id}.md")
             open(placeholder, "a").close()
             print(rfe_id)
     finally:

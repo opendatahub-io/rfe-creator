@@ -9,7 +9,7 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import read_frontmatter
+from artifact_utils import find_artifact_file_including_archived, read_frontmatter
 
 ARTIFACTS = os.path.join(os.path.dirname(__file__), '..', 'artifacts')
 REVIEWS_DIR = os.path.join(ARTIFACTS, 'rfe-reviews')
@@ -153,9 +153,10 @@ def main():
         rfe_id = rf.replace('-review.md', '')
         review_fm, review_body = read_frontmatter(os.path.join(REVIEWS_DIR, rf))
 
-        task_path = os.path.join(TASKS_DIR, f'{rfe_id}.md')
+        task_path = find_artifact_file_including_archived(
+            os.path.dirname(TASKS_DIR), rfe_id)
         task_fm = {}
-        if os.path.exists(task_path):
+        if task_path and os.path.exists(task_path):
             task_fm, _ = read_frontmatter(task_path)
         title = task_fm.get('title', rfe_id)
 
