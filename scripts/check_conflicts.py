@@ -28,10 +28,52 @@ Environment variables:
 
 import argparse
 import os
+import re
 import sys
+import unicodedata
 
 from jira_utils import require_env, get_issue, adf_to_markdown
 from artifact_utils import scan_task_files
+
+
+def _normalize_for_compare(text):
+    """Normalize text to ignore ADF-to-markdown conversion artifacts.
+
+    Handles: curly quotes, non-breaking spaces, carriage returns,
+    dash/arrow variants, trailing whitespace, emoji, table alignment,
+    and other Unicode normalization differences.
+    """
+    # Unicode normalize (NFC)
+    text = unicodedata.normalize("NFC", text)
+    # Carriage returns
+    text = text.replace("\r", "")
+    # Curly quotes -> straight
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    # Dashes: em dash -> —, en dash -> -  (normalize to ASCII)
+    text = text.replace("\u2014", "---").replace("\u2013", "--")
+    # Arrows: → -> ->
+    text = text.replace("\u2192", "->")
+    # Non-breaking space -> regular space
+    text = text.replace("\xa0", " ")
+    # Collapse multiple spaces to one (table alignment differences)
+    text = re.sub(r"  +", " ", text)
+    # Strip emoji (Unicode emoji blocks)
+    text = re.sub(
+        r"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+        r"\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF"
+        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]", "", text)
+    # Normalize table separator rows (varying dash counts)
+    text = re.sub(r"-{2,}", "--", text)
+    # Strip auto-linked URLs: [url](url) -> url
+    text = re.sub(r"\[([^\]]+)\]\(\1/?\.?\)", r"\1", text)
+    # Strip zero-width characters
+    text = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", text)
+    # Strip trailing whitespace per line
+    text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
+    # Collapse multiple blank lines to one
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def main():
@@ -73,7 +115,7 @@ def main():
     for rfe_id, original_path in jira_rfes:
         # Read the original snapshot
         with open(original_path, encoding="utf-8") as f:
-            original_desc = f.read().strip()
+            original_desc = _normalize_for_compare(f.read())
 
         # Fetch current Jira description
         try:
@@ -82,11 +124,13 @@ def main():
             fields = issue.get("fields", {})
             current_desc_raw = fields.get("description")
             if isinstance(current_desc_raw, dict):
-                current_desc = adf_to_markdown(current_desc_raw).strip()
+                current_desc = _normalize_for_compare(
+                    adf_to_markdown(current_desc_raw))
             elif current_desc_raw is None:
                 current_desc = ""
             else:
-                current_desc = str(current_desc_raw).strip()
+                current_desc = _normalize_for_compare(
+                    str(current_desc_raw))
         except Exception as e:
             print(f"Warning: could not fetch {rfe_id}: {e}", file=sys.stderr)
             continue
