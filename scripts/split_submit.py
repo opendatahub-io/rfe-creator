@@ -188,7 +188,7 @@ def phase2_create_link(server, user, token, parent_key, children, state,
             except (ValidationError, Exception):
                 pass  # proceed without review data
         if review_rec == "submit":
-            labels.append("rfe-creator-autofix-pass")
+            labels.append("rfe-creator-autofix-rubric-pass")
 
         if dry_run:
             print(f"  Phase 2: Would create RHAIRFE ticket for child "

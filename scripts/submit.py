@@ -206,7 +206,7 @@ def main():
                     if review_data and review_data.get("needs_attention", False):
                         no_change_labels.append("rfe-creator-needs-attention")
                     if review_data and rec == "submit":
-                        no_change_labels.append("rfe-creator-autofix-pass")
+                        no_change_labels.append("rfe-creator-autofix-rubric-pass")
                     plan.append({
                         "rfe_id": rfe_id, "title": title,
                         "is_existing": is_existing, "priority": priority,
@@ -227,7 +227,7 @@ def main():
         if review_data and review_data.get("needs_attention", False):
             labels.append("rfe-creator-needs-attention")
         if review_data and rec == "submit":
-            labels.append("rfe-creator-autofix-pass")
+            labels.append("rfe-creator-autofix-rubric-pass")
 
         action = f"Update {rfe_id}" if is_existing else "Create"
         plan.append({
