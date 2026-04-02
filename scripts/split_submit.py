@@ -326,12 +326,27 @@ def main():
               f"found in task files.", file=sys.stderr)
         sys.exit(1)
 
-    # Find children: parent_key matches the parent's rfe_id
-    child_tasks = []
+    # Find leaf children: walk the tree recursively to collect all
+    # non-archived descendants.  Intermediary nodes (archived local IDs
+    # like RFE-017) are stepping stones — their children belong to the
+    # RHAIRFE parent for Jira linking purposes.
+    tasks_by_parent = {}
     for path, data in tasks:
-        if data.get("parent_key") == args.parent_key and \
-                data.get("status") != "Archived":
-            child_tasks.append((path, data))
+        pk = data.get("parent_key")
+        if pk:
+            tasks_by_parent.setdefault(pk, []).append((path, data))
+
+    def _collect_leaves(parent_id):
+        leaves = []
+        for path, data in tasks_by_parent.get(parent_id, []):
+            if data.get("status") == "Archived":
+                # Intermediary — recurse into its children
+                leaves.extend(_collect_leaves(data["rfe_id"]))
+            else:
+                leaves.append((path, data))
+        return leaves
+
+    child_tasks = _collect_leaves(args.parent_key)
 
     if not child_tasks:
         print("Error: No child RFEs found with parent_key="

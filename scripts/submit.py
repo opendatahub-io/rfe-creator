@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Submit RFE artifacts to Jira — create new or update existing tickets.
 
-Handles the standard (non-split) submission flow. For split submissions,
-use split_submit.py instead.
+Handles both split and standard submissions in one pass. Split parents
+(RHAIRFE with status: Archived) are submitted via split_submit.py first,
+then regular RFEs are updated/created directly.
 
 Reads all structured metadata from YAML frontmatter on task and review files.
 No regex parsing of markdown prose.
@@ -19,6 +20,7 @@ Environment variables:
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 import yaml
@@ -99,19 +101,59 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    # Scan task files for submittable RFEs
+    # Scan task files
     tasks = scan_task_files(args.artifacts_dir)
     if not tasks:
         print("Error: No RFE task files found.", file=sys.stderr)
         sys.exit(1)
 
-    # Filter to non-archived RFEs
+    # --- Phase 1: Submit splits via split_submit.py ---
+    # Find RHAIRFE parents that were split (Archived + have children)
+    child_parent_keys = {data.get("parent_key") for _, data in tasks
+                         if data.get("parent_key")}
+    split_parents = [data["rfe_id"] for _, data in tasks
+                     if data.get("status") == "Archived"
+                     and data["rfe_id"].startswith("RHAIRFE-")
+                     and data["rfe_id"] in child_parent_keys]
+
+    if split_parents:
+        print(f"Phase 1: Submitting {len(split_parents)} split parent(s)\n")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        split_script = os.path.join(script_dir, "split_submit.py")
+
+        for parent_key in sorted(split_parents):
+            cmd = [sys.executable, split_script, parent_key,
+                   "--artifacts-dir", args.artifacts_dir]
+            if args.dry_run:
+                cmd.append("--dry-run")
+            print(f"--- {parent_key} ---")
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                print(f"Error: split_submit.py failed for {parent_key} "
+                      f"(exit code {result.returncode})", file=sys.stderr)
+                sys.exit(result.returncode)
+            print()
+
+    # --- Phase 2: Submit regular (non-split) RFEs ---
+    # Re-scan after splits may have renamed files
+    tasks = scan_task_files(args.artifacts_dir)
+
+    # Filter to non-archived RFEs without a parent (split children were
+    # already handled by split_submit.py in Phase 1)
     submittable = [(path, data) for path, data in tasks
-                   if data.get("status") != "Archived"]
+                   if data.get("status") != "Archived"
+                   and not data.get("parent_key")]
     if not submittable:
-        print("Error: No submittable RFEs found (all archived).",
-              file=sys.stderr)
+        if split_parents:
+            # All RFEs were splits — nothing left for Phase 2
+            rebuild_index(args.artifacts_dir)
+            print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
+            return
+        print("Error: No submittable RFEs found.", file=sys.stderr)
         sys.exit(1)
+
+    if split_parents:
+        print(f"Phase 2: Submitting {len(submittable)} regular RFE(s)\n")
 
     # Build submission plan
     plan = []
