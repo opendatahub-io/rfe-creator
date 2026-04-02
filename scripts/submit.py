@@ -81,6 +81,40 @@ def _render_jira_comment(yaml_path):
     return preamble + "\n\n" + "\n\n".join(sections)
 
 
+def _post_needs_attention_comment(server, user, token, entry, results,
+                                  dry_run):
+    """Post a Jira comment explaining why human attention is needed.
+
+    Only posts if:
+    - needs_attention_reason is set in the review
+    - The issue did not already have the rfe-creator-needs-attention label
+      when it was fetched from Jira (checked via original_labels)
+    """
+    reason = entry.get("attn_reason")
+    if not reason:
+        return
+
+    original_labels = entry.get("original_labels") or []
+    if "rfe-creator-needs-attention" in original_labels:
+        return  # Already flagged in a prior run
+
+    target_key = results.get(entry["rfe_id"])
+    if dry_run:
+        print(f"  {entry['rfe_id']}: Would post needs-attention comment")
+        return
+
+    if not target_key:
+        return
+
+    comment_md = (
+        "*[RFE Creator]* This RFE has been flagged for human review:\n\n"
+        f"{reason}"
+    )
+    comment_adf = markdown_to_adf(comment_md)
+    add_comment(server, user, token, target_key, comment_adf)
+    print(f"  {entry['rfe_id']}: Posted needs-attention comment")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -180,12 +214,19 @@ def main():
         if review_data:
             rec = review_data.get("recommendation", "submit")
 
+        # Collect needs-attention info for Jira comment
+        original_labels = task_data.get("original_labels") or []
+        attn_reason = None
+        if review_data and review_data.get("needs_attention", False):
+            attn_reason = review_data.get("needs_attention_reason")
+
         if rec in ("reject", "autorevise_reject"):
             plan.append({
                 "rfe_id": rfe_id, "title": title,
                 "is_existing": is_existing, "priority": priority, "size": size,
                 "action": "SKIP", "labels": [], "skip_reason": "rejected",
                 "task_path": task_path,
+                "attn_reason": None, "original_labels": original_labels,
             })
             continue
 
@@ -215,6 +256,8 @@ def main():
                         "labels": no_change_labels,
                         "skip_reason": None if no_change_labels else "no changes",
                         "task_path": task_path,
+                        "attn_reason": attn_reason,
+                        "original_labels": original_labels,
                     })
                     continue
 
@@ -235,6 +278,7 @@ def main():
             "is_existing": is_existing, "priority": priority, "size": size,
             "action": action, "labels": labels, "skip_reason": None,
             "task_path": task_path,
+            "attn_reason": attn_reason, "original_labels": original_labels,
         })
 
     # Print summary
@@ -268,6 +312,8 @@ def main():
                 add_labels(server, user, token, rfe_id, labels)
                 print(f"  {rfe_id}: Labels: {', '.join(labels)}")
             results[rfe_id] = rfe_id
+            _post_needs_attention_comment(
+                server, user, token, entry, results, args.dry_run)
             continue
 
         # Read and clean artifact content
@@ -320,6 +366,10 @@ def main():
                 comment_adf = markdown_to_adf(comment_md)
                 add_comment(server, user, token, target_key, comment_adf)
                 print(f"  {rfe_id}: Posted removed-context comment")
+
+        # Post needs-attention comment if newly flagged
+        _post_needs_attention_comment(
+            server, user, token, entry, results, args.dry_run)
 
     print()
 
