@@ -147,7 +147,7 @@ def main():
             })
             continue
 
-        # For existing RFEs, skip if content hasn't changed
+        # For existing RFEs, check if content has changed
         if is_existing:
             original_path = os.path.join(
                 args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
@@ -157,11 +157,21 @@ def main():
                 with open(task_path, encoding="utf-8") as f:
                     current_body = strip_metadata(f.read())
                 if original_body.strip() == current_body.strip():
+                    # No content changes — still apply labels (e.g. pass marker)
+                    no_change_labels = []
+                    if review_data and review_data.get("auto_revised", False):
+                        no_change_labels.append("rfe-creator-auto-revised")
+                    if review_data and review_data.get("needs_attention", False):
+                        no_change_labels.append("rfe-creator-needs-attention")
+                    if review_data and rec == "submit":
+                        no_change_labels.append("rfe-creator-autofix-pass")
                     plan.append({
                         "rfe_id": rfe_id, "title": title,
                         "is_existing": is_existing, "priority": priority,
-                        "size": size, "action": "SKIP", "labels": [],
-                        "skip_reason": "no changes",
+                        "size": size,
+                        "action": "Label only" if no_change_labels else "SKIP",
+                        "labels": no_change_labels,
+                        "skip_reason": None if no_change_labels else "no changes",
                         "task_path": task_path,
                     })
                     continue
@@ -174,6 +184,8 @@ def main():
             labels.append("rfe-creator-auto-revised")
         if review_data and review_data.get("needs_attention", False):
             labels.append("rfe-creator-needs-attention")
+        if review_data and rec == "submit":
+            labels.append("rfe-creator-autofix-pass")
 
         action = f"Update {rfe_id}" if is_existing else "Create"
         plan.append({
@@ -204,6 +216,16 @@ def main():
         rfe_id = entry["rfe_id"]
         if entry["skip_reason"]:
             print(f"  {rfe_id}: Skipping — {entry['skip_reason']}")
+            continue
+
+        if entry["action"] == "Label only":
+            labels = entry["labels"]
+            if args.dry_run:
+                print(f"  {rfe_id}: Would add labels: {', '.join(labels)}")
+            else:
+                add_labels(server, user, token, rfe_id, labels)
+                print(f"  {rfe_id}: Labels: {', '.join(labels)}")
+            results[rfe_id] = rfe_id
             continue
 
         # Read and clean artifact content

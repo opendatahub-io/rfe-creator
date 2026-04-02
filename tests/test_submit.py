@@ -83,8 +83,8 @@ def art_dir(tmp_path):
 
 
 class TestContentDiffGuard:
-    def test_existing_rfe_no_changes_skipped(self, art_dir):
-        """Existing RFE with identical content → SKIP no changes."""
+    def test_existing_rfe_no_changes_label_only(self, art_dir):
+        """Existing RFE with identical content and passing review → Label only."""
         body = "## Problem\n\nSame content.\n"
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
                TASK_FM.format(rfe_id="RHAIRFE-1234") )
@@ -98,8 +98,8 @@ class TestContentDiffGuard:
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
-        assert "SKIP" in stdout
-        assert "no changes" in stdout
+        assert "Label only" in stdout
+        assert "rfe-creator-autofix-pass" in stdout
 
     def test_existing_rfe_with_changes_submitted(self, art_dir):
         """Existing RFE with different content → update."""
