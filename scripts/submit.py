@@ -30,13 +30,18 @@ from jira_utils import (
     create_issue,
     update_issue,
     add_labels,
+    remove_labels,
     add_comment,
     get_issue,
     adf_to_markdown,
     strip_metadata,
     markdown_to_adf,
+    normalize_for_compare,
 )
-from check_conflicts import _normalize_for_compare
+
+_normalize_for_compare = normalize_for_compare
+
+from snapshot_fetch import compute_content_hash, update_snapshot_hashes
 
 from artifact_utils import (
     read_frontmatter,
@@ -224,10 +229,18 @@ def main():
             attn_reason = review_data.get("needs_attention_reason")
 
         if rec in ("reject", "autorevise_reject"):
+            # Check if rubric-pass label needs to be removed (RFE was
+            # previously passing but no longer does after re-review)
+            remove = []
+            if (is_existing
+                    and "rfe-creator-autofix-rubric-pass" in original_labels):
+                remove.append("rfe-creator-autofix-rubric-pass")
             plan.append({
                 "rfe_id": rfe_id, "title": title,
                 "is_existing": is_existing, "priority": priority, "size": size,
-                "action": "SKIP", "labels": [], "skip_reason": "rejected",
+                "action": "Remove labels" if remove else "SKIP",
+                "labels": [], "remove_labels": remove,
+                "skip_reason": None if remove else "rejected",
                 "task_path": task_path,
                 "attn_reason": None, "original_labels": original_labels,
             })
@@ -257,9 +270,12 @@ def main():
                             "is_existing": is_existing, "priority": priority,
                             "size": size,
                             "action": "SKIP", "labels": [],
+                            "remove_labels": [],
                             "skip_reason": "Jira conflict — description "
                                            "modified since fetch",
                             "task_path": task_path,
+                            "attn_reason": None,
+                            "original_labels": original_labels,
                         })
                         continue
                 except Exception as e:
@@ -289,7 +305,7 @@ def main():
                         "is_existing": is_existing, "priority": priority,
                         "size": size,
                         "action": "Label only" if no_change_labels else "SKIP",
-                        "labels": no_change_labels,
+                        "labels": no_change_labels, "remove_labels": [],
                         "skip_reason": None if no_change_labels else "no changes",
                         "task_path": task_path,
                         "attn_reason": attn_reason,
@@ -312,8 +328,8 @@ def main():
         plan.append({
             "rfe_id": rfe_id, "title": title,
             "is_existing": is_existing, "priority": priority, "size": size,
-            "action": action, "labels": labels, "skip_reason": None,
-            "task_path": task_path,
+            "action": action, "labels": labels, "remove_labels": [],
+            "skip_reason": None, "task_path": task_path,
             "attn_reason": attn_reason, "original_labels": original_labels,
         })
 
@@ -328,16 +344,29 @@ def main():
               f"{entry['priority']:<10} {entry['action']:<20}")
         if entry["labels"]:
             print(f"{'':>10} Labels: {', '.join(entry['labels'])}")
+        if entry.get("remove_labels"):
+            print(f"{'':>10} Remove: {', '.join(entry['remove_labels'])}")
         if entry["skip_reason"]:
             print(f"{'':>10} Reason: {entry['skip_reason']}")
     print()
 
     # Execute
     results = {}  # rfe_id -> assigned jira key
+    submitted_hashes = {}  # assigned_key -> content_hash
     for entry in plan:
         rfe_id = entry["rfe_id"]
         if entry["skip_reason"]:
             print(f"  {rfe_id}: Skipping — {entry['skip_reason']}")
+            continue
+
+        if entry["action"] == "Remove labels":
+            remove = entry["remove_labels"]
+            if args.dry_run:
+                print(f"  {rfe_id}: Would remove labels: "
+                      f"{', '.join(remove)}")
+            else:
+                remove_labels(server, user, token, rfe_id, remove)
+                print(f"  {rfe_id}: Removed labels: {', '.join(remove)}")
             continue
 
         if entry["action"] == "Label only":
@@ -372,6 +401,7 @@ def main():
                 if labels:
                     add_labels(server, user, token, rfe_id, labels)
                     print(f"           Labels: {', '.join(labels)}")
+                submitted_hashes[rfe_id] = compute_content_hash(description_adf)
             results[rfe_id] = rfe_id
         else:
             # Create new ticket
@@ -387,6 +417,7 @@ def main():
                 if labels:
                     print(f"           Labels: {', '.join(labels)}")
                 results[rfe_id] = new_key
+                submitted_hashes[new_key] = compute_content_hash(description_adf)
 
         # Post removed-context Jira comment if applicable
         yaml_path = find_removed_context_yaml(args.artifacts_dir, rfe_id)
@@ -428,6 +459,18 @@ def main():
             update_frontmatter(entry["task_path"],
                                {"status": "Submitted"},
                                "rfe-task")
+
+    # Update snapshot with post-submit hashes so the next fetch
+    # doesn't re-flag our own changes
+    if submitted_hashes and not args.dry_run:
+        snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
+        updated = update_snapshot_hashes(submitted_hashes, snap_dir)
+        if updated:
+            print(f"  Updated snapshot with {len(submitted_hashes)} "
+                  f"post-submit hashes: {updated}")
+        else:
+            print("  Warning: no snapshot found to update",
+                  file=sys.stderr)
 
     # Rebuild index
     rebuild_index(args.artifacts_dir)

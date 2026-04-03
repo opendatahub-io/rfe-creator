@@ -70,6 +70,27 @@ scores:
 Looks good.
 """
 
+REJECT_REVIEW_FM = """\
+---
+rfe_id: {rfe_id}
+score: 3
+pass: false
+recommendation: reject
+feasibility: feasible
+auto_revised: false
+needs_attention: false
+scores:
+  what: 0
+  why: 1
+  open_to_how: 1
+  not_a_task: 1
+  right_sized: 0
+---
+
+## Assessor Feedback
+Does not meet rubric.
+"""
+
 
 @pytest.fixture
 def art_dir(tmp_path):
@@ -189,3 +210,85 @@ class TestAutoRevisedLabel:
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "rfe-creator-auto-revised" not in stdout
+
+
+class TestRemoveLabels:
+    """Tests for stale label removal on rejected RFEs."""
+
+    def _task_with_labels(self, rfe_id, labels):
+        """Task frontmatter with original_labels set."""
+        labels_yaml = "\n".join(f"- {l}" for l in labels) if labels else "[]"
+        return (f"---\nrfe_id: {rfe_id}\ntitle: Test RFE\n"
+                f"priority: Major\nstatus: Ready\n"
+                f"original_labels:\n{labels_yaml}\n---\n\n"
+                f"## Problem\n\nContent here.\n")
+
+    def test_rejected_with_rubric_pass_removes_label(self, art_dir):
+        """Rejected RFE that had rubric-pass → Remove labels action."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               self._task_with_labels("RHAIRFE-1234",
+                                      ["rfe-creator-autofix-rubric-pass"]))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Remove labels" in stdout
+        assert "rfe-creator-autofix-rubric-pass" in stdout
+        assert "Would remove labels" in stdout
+
+    def test_rejected_without_rubric_pass_skips(self, art_dir):
+        """Rejected RFE without rubric-pass → plain SKIP."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "SKIP" in stdout
+        assert "rejected" in stdout
+        assert "Remove labels" not in stdout
+
+    def test_rejected_new_rfe_skips(self, art_dir):
+        """Rejected new RFE (RFE-NNN) → SKIP, no label removal."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RFE-001"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "SKIP" in stdout
+        assert "Remove labels" not in stdout
+
+    def test_autorevise_reject_removes_rubric_pass(self, art_dir):
+        """autorevise_reject with rubric-pass → Remove labels."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               self._task_with_labels("RHAIRFE-1234",
+                                      ["rfe-creator-autofix-rubric-pass"]))
+        review = REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234").replace(
+            "recommendation: reject", "recommendation: autorevise_reject")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", review)
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Remove labels" in stdout
+        assert "Would remove labels" in stdout
+
+
+class TestSnapshotUpdate:
+    """Tests for snapshot update after submission."""
+
+    def test_dry_run_does_not_update_snapshot(self, art_dir):
+        """Dry-run does not update snapshot."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        # Dry run should NOT create any snapshot files
+        snap_dir = os.path.join(art_dir, "auto-fix-runs")
+        assert not os.path.exists(snap_dir)
