@@ -367,7 +367,7 @@ class TestBootstrapIntegration:
         assert snap["issues"]["RHAIRFE-1234"] == expected_1234
 
     def test_run_timestamp_used(self, tmp_path, mock_jira):
-        """Snapshot query_timestamp comes from the run directory name."""
+        """Snapshot query_timestamp and filename come from the run directory name."""
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
@@ -399,6 +399,8 @@ class TestBootstrapIntegration:
 
         assert snap["query_timestamp"] == "2026-04-01T12:00:00Z"
         assert snap["bootstrapped_from"] == "20260401-120000"
+        # Filename uses the run directory name, not current time
+        assert snapshots[0] == "issue-snapshot-20260401-120000.yaml"
 
     def test_historical_description_via_changelog(self, tmp_path, mock_jira):
         """Issue updated since run gets historical hash from changelog."""
