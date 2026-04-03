@@ -23,6 +23,7 @@ Environment variables:
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -87,7 +88,8 @@ def _fetch_changelog(server, user, token, key):
             created_str = history.get("created", "")
             try:
                 created = datetime.fromisoformat(
-                    created_str.replace("+0000", "+00:00"))
+                    re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2',
+                           created_str))
             except (ValueError, TypeError):
                 continue
             entries.append({
