@@ -40,6 +40,21 @@ from snapshot_fetch import (
 )
 
 
+def _load_run_report(results_dir, run_name):
+    """Load processed IDs and report from the run's per_rfe list.
+
+    Returns (set_of_ids, report_dict) or (None, None) if no report found.
+    """
+    path = os.path.join(results_dir, run_name,
+                        "auto-fix-runs", f"{run_name}.yaml")
+    if not os.path.exists(path):
+        return None, None
+    with open(path, encoding="utf-8") as f:
+        report = yaml.safe_load(f)
+    ids = {e["id"] for e in report.get("per_rfe", [])}
+    return ids, report
+
+
 def find_latest_run_timestamp(results_dir):
     """Find the timestamp of the latest run from directory names.
 
@@ -275,6 +290,19 @@ def main():
     current = fetch_all_issues(server, user, token, jql)
     print(f"Fetched {len(current)} issues from Jira", file=sys.stderr)
 
+    # Filter to issues that were actually processed in the run
+    processed_ids, report = _load_run_report(args.results_dir, run_name)
+    if processed_ids is None:
+        print("Warning: no run report — including all issues",
+              file=sys.stderr)
+        report = None
+    else:
+        before = len(current)
+        current = {k: v for k, v in current.items()
+                   if k in processed_ids}
+        print(f"Filtered to {len(current)}/{before} issues "
+              f"from run report", file=sys.stderr)
+
     # Step 3: Find which issues were updated since the run
     run_jql_ts = run_dt.strftime("%Y-%m-%d %H:%M")
     updated_jql = (f"{jql} AND updated >= \"{run_jql_ts}\"")
@@ -343,11 +371,7 @@ def main():
     # (pre-submit) hashes in the snapshot, but Jira now has the post-submit
     # content. Use current hashes for these so the next fetch doesn't
     # re-flag our own changes.
-    run_report_path = os.path.join(
-        args.results_dir, run_name, "auto-fix-runs", f"{run_name}.yaml")
-    if os.path.exists(run_report_path):
-        with open(run_report_path, encoding="utf-8") as f:
-            report = yaml.safe_load(f)
+    if report is not None:
         submitted_ids = [
             e["id"] for e in report.get("per_rfe", [])
             if e.get("recommendation") == "submit" and e.get("auto_revised")

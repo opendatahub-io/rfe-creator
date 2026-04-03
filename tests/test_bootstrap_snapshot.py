@@ -246,14 +246,26 @@ def mock_jira():
     server.shutdown()
 
 
-def _make_results_dir(tmp_path, run_names, latest=None):
-    """Create a results directory with run dirs."""
+def _make_results_dir(tmp_path, run_names, latest=None,
+                      processed_ids=None):
+    """Create a results directory with run dirs.
+
+    If processed_ids is provided and latest is set, writes a run report
+    with per_rfe entries for those IDs.
+    """
     results = str(tmp_path / "results")
     os.makedirs(results)
     for name in run_names:
         os.makedirs(os.path.join(results, name))
     if latest:
         os.symlink(latest, os.path.join(results, "latest"))
+    if processed_ids is not None and latest:
+        report_dir = os.path.join(results, latest, "auto-fix-runs")
+        os.makedirs(report_dir, exist_ok=True)
+        report = {"per_rfe": [{"id": pid, "recommendation": "submit"}
+                               for pid in processed_ids]}
+        with open(os.path.join(report_dir, f"{latest}.yaml"), "w") as f:
+            yaml.dump(report, f)
     return results
 
 
@@ -268,7 +280,8 @@ class TestBootstrapIntegration:
             "RHAIRFE-5678": "Description 2.",
         }
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -305,7 +318,8 @@ class TestBootstrapIntegration:
         # for updated >= will still match all, but changelogs are empty
         # so current hashes are used)
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -341,7 +355,8 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -384,7 +399,8 @@ class TestBootstrapIntegration:
             }],
         }]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -429,7 +445,8 @@ class TestBootstrapIntegration:
             }],
         }]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -463,7 +480,8 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -504,7 +522,8 @@ class TestBootstrapIntegration:
             }],
         }]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -556,7 +575,8 @@ class TestBootstrapIntegration:
             }],
         }]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -604,7 +624,8 @@ class TestBootstrapIntegration:
             }],
         }]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1", "RHAIRFE-2"])
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -632,3 +653,82 @@ class TestBootstrapIntegration:
         assert "RHAIRFE-1" in snap["issues"]
         assert "RHAIRFE-2" not in snap["issues"]
         assert len(snap["issues"]) == 1
+
+    def test_filters_to_run_report_ids(self, tmp_path, mock_jira):
+        """Only issues listed in run report's per_rfe are included."""
+        url, server = mock_jira
+        server.issues = {
+            "RHAIRFE-1": "Issue one.",
+            "RHAIRFE-2": "Issue two.",
+            "RHAIRFE-3": "Issue three.",
+        }
+        # Run report only contains 2 of the 3 issues
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=["RHAIRFE-1", "RHAIRFE-3"])
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "Filtered to 2/3 issues" in r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        assert "RHAIRFE-1" in snap["issues"]
+        assert "RHAIRFE-3" in snap["issues"]
+        assert "RHAIRFE-2" not in snap["issues"]
+        assert len(snap["issues"]) == 2
+
+    def test_no_run_report_includes_all(self, tmp_path, mock_jira):
+        """Without a run report, all fetched issues are included."""
+        url, server = mock_jira
+        server.issues = {
+            "RHAIRFE-1": "Issue one.",
+            "RHAIRFE-2": "Issue two.",
+        }
+        # No processed_ids → no run report file
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000")
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "no run report" in r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        assert len(snap["issues"]) == 2
