@@ -5,6 +5,11 @@ Fetches all issues matching a JQL query, computes content hashes, and
 diffs against the previous snapshot to identify genuinely changed issues.
 Only changed issues are output for processing, avoiding redundant work.
 
+The snapshot is cumulative: each run merges selected issues into the
+previous snapshot rather than replacing it.  Issues not selected retain
+their previous hashes (enabling stale-hash change detection), and issues
+never selected remain absent (staying NEW until selected).
+
 Usage:
     python3 scripts/snapshot_fetch.py fetch "<jql>" --ids-file tmp/autofix-all-ids.txt --changed-file tmp/autofix-changed-ids.txt [--limit 100] [--data-dir <path>]
 
@@ -12,6 +17,7 @@ Output (stdout):
     TOTAL=<count>
     CHANGED=<count>
     NEW=<count>
+    UNCHANGED=<count>
 """
 
 import argparse
@@ -289,20 +295,7 @@ def cmd_fetch(args):
     current = fetch_all_issues(server, user, token, jql)
     print(f"Fetched {len(current)} issues", file=sys.stderr)
 
-    # Write snapshot directly to artifacts
-    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-    snapshot = {
-        "query_timestamp": query_timestamp,
-        "timestamp": datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"),
-        "issues": {k: v["content_hash"] for k, v in current.items()},
-    }
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    out_path = os.path.join(SNAPSHOT_DIR, f"issue-snapshot-{ts}.yaml")
-    with open(out_path, "w", encoding="utf-8") as f:
-        yaml.dump(snapshot, f, default_flow_style=False, sort_keys=False)
-
-    # Diff
+    # Diff against previous snapshot
     changed, new = diff_snapshots(current, prev_data)
 
     # Maintain Jira's original order across both sets
@@ -316,6 +309,28 @@ def cmd_fetch(args):
     # Changed/new get priority ordering; total capped at limit
     limit = args.limit or len(current)
     all_ids = (priority_ids + unchanged_ids)[:limit]
+
+    # Build cumulative snapshot: previous entries + selected issues.
+    # Only selected issues get their hashes recorded (or updated).
+    # Unselected issues retain their previous hash, enabling stale-hash
+    # change detection on future runs.  Issues never selected stay out
+    # of the snapshot and remain NEW until selected.
+    prev_issues = prev_data.get("issues", {}) if prev_data else {}
+    merged_issues = dict(prev_issues)
+    for key in all_ids:
+        merged_issues[key] = current[key]["content_hash"]
+
+    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+    snapshot = {
+        "query_timestamp": query_timestamp,
+        "timestamp": datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "issues": merged_issues,
+    }
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out_path = os.path.join(SNAPSHOT_DIR, f"issue-snapshot-{ts}.yaml")
+    with open(out_path, "w", encoding="utf-8") as f:
+        yaml.dump(snapshot, f, default_flow_style=False, sort_keys=False)
 
     # Split for downstream
     out_changed = [k for k in all_ids if k in changed_set]

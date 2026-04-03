@@ -77,6 +77,16 @@ def _run_fetch(args):
     return buf.getvalue()
 
 
+def _latest_snapshot(work_dirs):
+    """Read the most recent snapshot from the test snapshot dir."""
+    snaps = sorted(
+        [f for f in os.listdir(work_dirs.snapshot_dir)
+         if f.startswith("issue-snapshot-")], reverse=True)
+    assert snaps, "No snapshot files found"
+    with open(os.path.join(work_dirs.snapshot_dir, snaps[0])) as f:
+        return yaml.safe_load(f)
+
+
 def _seed_snapshot(work_dirs, issues, query_ts="2026-04-01T00:00:00Z"):
     """Write a previous snapshot."""
     snap = {
@@ -449,6 +459,188 @@ class TestMultiRunPipeline:
         stdout3 = _run_fetch(args3)
         assert "CHANGED=0" in stdout3
         assert _read_ids(args3.changed_file) == []
+
+
+# ── Cumulative Snapshot ─────────────────────────────────────────────────────
+
+class TestCumulativeSnapshot:
+    """Verify the cumulative snapshot merge invariants.
+
+    The snapshot only grows by selection: selected issues are added/updated,
+    previous entries are retained, unselected issues stay out.
+    """
+
+    def test_snapshot_only_contains_selected_and_previous(
+            self, work_dirs, jira, monkeypatch, tmp_path):
+        """Snapshot = previous entries + selected issues, not all fetched."""
+        prev_hash = compute_content_hash(_text_to_adf("Previous."))
+        _seed_snapshot(work_dirs, {"RHAIRFE-0": prev_hash})
+
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        jira.create("RHAIRFE-3", "Three", "Three.")
+        _jira_env(monkeypatch, jira.url)
+
+        args = _fetch_args(tmp_path, limit=2)
+        _run_fetch(args)
+
+        snap = _latest_snapshot(work_dirs)
+        # Previous entry retained + 2 selected = 3
+        assert "RHAIRFE-0" in snap["issues"]
+        assert len(snap["issues"]) == 3
+        # One of the 3 NEW issues was not selected
+        selected = set(_read_ids(args.ids_file))
+        assert len(selected) == 2
+        for key in selected:
+            assert key in snap["issues"]
+
+    def test_new_persists_until_selected(self, work_dirs, jira,
+                                          monkeypatch, tmp_path):
+        """NEW issues stay NEW across runs until selected by the limit."""
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        jira.create("RHAIRFE-3", "Three", "Three.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Run 1: limit=1, 3 NEW → select 1
+        stdout1 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        assert "NEW=1" in stdout1
+        snap1 = _latest_snapshot(work_dirs)
+        assert len(snap1["issues"]) == 1
+
+        # Run 2: prev has 1, 2 still NEW → select 1 NEW (priority)
+        stdout2 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        assert "NEW=1" in stdout2
+        snap2 = _latest_snapshot(work_dirs)
+        assert len(snap2["issues"]) == 2
+
+        # Run 3: prev has 2, 1 still NEW → select 1 NEW
+        stdout3 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        assert "NEW=1" in stdout3
+        snap3 = _latest_snapshot(work_dirs)
+        assert len(snap3["issues"]) == 3
+
+        # Run 4: all in snapshot → 0 NEW, 0 CHANGED
+        stdout4 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        assert "NEW=0" in stdout4
+        assert "CHANGED=0" in stdout4
+
+    def test_closed_issue_persists_in_snapshot(self, work_dirs, jira,
+                                                monkeypatch, tmp_path):
+        """Closed issues remain in the snapshot (no pruning)."""
+        jira.create("RHAIRFE-1", "Open", "Open issue.")
+        jira.create("RHAIRFE-2", "Will close", "Will close.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Run 1: both selected
+        _run_fetch(_fetch_args(tmp_path))
+        snap1 = _latest_snapshot(work_dirs)
+        assert len(snap1["issues"]) == 2
+
+        # Close RHAIRFE-2
+        transitions = jira.request(
+            "GET", "/rest/api/3/issue/RHAIRFE-2/transitions")
+        done_t = next(
+            (t for t in transitions["transitions"]
+             if t["to"]["statusCategory"]["key"] == "done"), None)
+        if done_t:
+            jira.request("POST",
+                         "/rest/api/3/issue/RHAIRFE-2/transitions",
+                         {"transition": {"id": done_t["id"]}})
+
+        # Run 2: only RHAIRFE-1 fetched, but snapshot retains RHAIRFE-2
+        _run_fetch(_fetch_args(tmp_path))
+        snap2 = _latest_snapshot(work_dirs)
+        assert "RHAIRFE-1" in snap2["issues"]
+        assert "RHAIRFE-2" in snap2["issues"]
+        assert len(snap2["issues"]) == 2
+
+    def test_stale_hash_detects_edit_on_unselected(self, work_dirs, jira,
+                                                    monkeypatch, tmp_path):
+        """Stale hash in snapshot catches edits on unselected issues."""
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        jira.create("RHAIRFE-3", "Three", "Three.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Run 1: limit=2, select 2 of 3 NEW
+        args1 = _fetch_args(tmp_path, limit=2)
+        _run_fetch(args1)
+        snap1 = _latest_snapshot(work_dirs)
+        assert len(snap1["issues"]) == 2
+
+        # Run 2: limit=1, RHAIRFE-3 is NEW (priority), selected
+        args2 = _fetch_args(tmp_path, limit=1)
+        stdout2 = _run_fetch(args2)
+        assert "NEW=1" in stdout2
+
+        # Edit RHAIRFE-2 (already in snapshot with stale hash)
+        jira.request("PUT", "/rest/api/3/issue/RHAIRFE-2",
+                     {"fields": {"description": "Edited after selection."}})
+
+        # Run 3: limit=1, RHAIRFE-2 CHANGED (stale hash mismatch) → priority
+        args3 = _fetch_args(tmp_path, limit=1)
+        stdout3 = _run_fetch(args3)
+        assert "CHANGED=1" in stdout3
+        assert _read_ids(args3.changed_file) == ["RHAIRFE-2"]
+
+    def test_no_limit_includes_all_in_snapshot(self, work_dirs, jira,
+                                                monkeypatch, tmp_path):
+        """Without limit, all issues are selected → all in snapshot."""
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        jira.create("RHAIRFE-3", "Three", "Three.")
+        _jira_env(monkeypatch, jira.url)
+
+        _run_fetch(_fetch_args(tmp_path))
+
+        snap = _latest_snapshot(work_dirs)
+        assert len(snap["issues"]) == 3
+        assert set(snap["issues"].keys()) == {
+            "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"}
+
+    def test_post_submit_hash_composes_with_cumulative_merge(
+            self, work_dirs, jira, monkeypatch, tmp_path):
+        """Invariant 6: update_snapshot_hashes on a cumulative snapshot
+        correctly updates entries, and the next fetch sees them as
+        UNCHANGED."""
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Run 1: both selected
+        _run_fetch(_fetch_args(tmp_path))
+        snap1 = _latest_snapshot(work_dirs)
+        assert len(snap1["issues"]) == 2
+        old_hash_1 = snap1["issues"]["RHAIRFE-1"]
+
+        # Simulate submit: update RHAIRFE-1's description in Jira and
+        # record the post-submit hash in the snapshot
+        jira.request("PUT", "/rest/api/3/issue/RHAIRFE-1",
+                     {"fields": {"description": "Revised by submit."}})
+        new_adf = _text_to_adf("Revised by submit.")
+        post_submit_hash = compute_content_hash(new_adf)
+        update_snapshot_hashes(
+            {"RHAIRFE-1": post_submit_hash},
+            snapshot_dir=work_dirs.snapshot_dir)
+
+        # Verify the snapshot was updated in place
+        snap_updated = _latest_snapshot(work_dirs)
+        assert snap_updated["issues"]["RHAIRFE-1"] == post_submit_hash
+        assert snap_updated["issues"]["RHAIRFE-1"] != old_hash_1
+        # RHAIRFE-2 untouched
+        assert snap_updated["issues"]["RHAIRFE-2"] == snap1["issues"]["RHAIRFE-2"]
+
+        # Run 2: RHAIRFE-1 should be UNCHANGED (post-submit hash matches)
+        args2 = _fetch_args(tmp_path)
+        stdout2 = _run_fetch(args2)
+        assert "CHANGED=0" in stdout2
+        assert "NEW=0" in stdout2
+
+        # Both still in snapshot (cumulative merge preserved)
+        snap2 = _latest_snapshot(work_dirs)
+        assert "RHAIRFE-1" in snap2["issues"]
+        assert "RHAIRFE-2" in snap2["issues"]
 
 
 # ── End-to-End: Clone → Fetch with --data-dir ──────────────────────────────

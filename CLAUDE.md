@@ -120,6 +120,10 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 - **Related link type**: `Related`
 - **Informs link type**: `Informs`
 
+## Snapshot System
+
+Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all six invariants.
+
 ## Architecture Context
 
 `/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.
