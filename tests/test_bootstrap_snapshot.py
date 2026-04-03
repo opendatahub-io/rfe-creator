@@ -22,6 +22,7 @@ from bootstrap_snapshot import (
     find_latest_run_timestamp,
     get_description_at_time,
     _parse_adf,
+    _description_at_time,
 )
 
 
@@ -92,11 +93,80 @@ class TestParseAdf:
         adf = {"type": "doc", "version": 1, "content": []}
         assert _parse_adf(json.dumps(adf)) == adf
 
-    def test_invalid_json_returns_none(self):
-        assert _parse_adf("not json") is None
+    def test_wiki_markup_returned_as_string(self):
+        wiki = "h2. Business Goal\n\nSome description text."
+        assert _parse_adf(wiki) == wiki
 
-    def test_non_dict_json_returns_none(self):
-        assert _parse_adf(json.dumps([1, 2, 3])) is None
+    def test_non_dict_json_returned_as_string(self):
+        # JSON that isn't a dict isn't ADF — returned as raw string
+        assert _parse_adf(json.dumps([1, 2, 3])) == "[1, 2, 3]"
+
+
+class TestDescriptionAtTime:
+    """Unit tests for _description_at_time with from/to and fromString/toString."""
+
+    def test_adf_from_to(self):
+        """Uses from/to when available (Jira Cloud)."""
+        from datetime import datetime, timezone
+        target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+        changelog = [{
+            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+            "items": [{
+                "field": "description",
+                "from": json.dumps(_text_to_adf("before")),
+                "to": json.dumps(_text_to_adf("after")),
+                "fromString": "before",
+                "toString": "after",
+            }],
+        }]
+        result = _description_at_time(changelog, target)
+        # Should use ADF from "from", not fromString
+        assert isinstance(result, dict)
+        assert result == _text_to_adf("before")
+
+    def test_falls_back_to_fromstring(self):
+        """Falls back to fromString/toString when from/to are None (Jira Server/DC)."""
+        from datetime import datetime, timezone
+        target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+        changelog = [{
+            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+            "items": [{
+                "field": "description",
+                "from": None,
+                "to": None,
+                "fromString": "h2. Before\n\nOriginal text.",
+                "toString": "h2. After\n\nEdited text.",
+            }],
+        }]
+        result = _description_at_time(changelog, target)
+        assert result == "h2. Before\n\nOriginal text."
+
+    def test_to_value_for_pre_target_change(self):
+        """Change before target → uses 'to' value."""
+        from datetime import datetime, timezone
+        target = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
+        changelog = [{
+            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+            "items": [{
+                "field": "description",
+                "from": None,
+                "to": None,
+                "fromString": "old wiki",
+                "toString": "new wiki",
+            }],
+        }]
+        result = _description_at_time(changelog, target)
+        assert result == "new wiki"
+
+    def test_no_description_changes(self):
+        """No description items → returns None."""
+        from datetime import datetime, timezone
+        target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+        changelog = [{
+            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+            "items": [{"field": "status", "fromString": "New", "toString": "Done"}],
+        }]
+        assert _description_at_time(changelog, target) is None
 
 
 # ── Mock Jira Server ─────────────────────────────────────────────────────────
@@ -111,6 +181,8 @@ class JiraHandler(BaseHTTPRequestHandler):
             self._handle_search(decoded)
         elif "/changelog" in decoded:
             self._handle_changelog(decoded)
+        elif "/rest/api/2/issue/" in decoded:
+            self._handle_v2_issue(decoded)
         else:
             self._json(404, {"error": "not found"})
 
@@ -142,6 +214,12 @@ class JiraHandler(BaseHTTPRequestHandler):
             "total": len(histories),
         })
 
+    def _handle_v2_issue(self, path):
+        # /rest/api/2/issue/RHAIRFE-1234?fields=description
+        key = path.split("/rest/api/2/issue/")[1].split("?")[0]
+        wiki = self.server.wiki_descriptions.get(key, "")
+        self._json(200, {"fields": {"description": wiki}})
+
     def _json(self, status, data):
         body = json.dumps(data).encode()
         self.send_response(status)
@@ -159,6 +237,7 @@ def mock_jira():
     server = HTTPServer(("127.0.0.1", 0), JiraHandler)
     server.issues = {}
     server.changelogs = {}
+    server.wiki_descriptions = {}
     url = f"http://127.0.0.1:{server.server_address[1]}"
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
@@ -336,6 +415,49 @@ class TestBootstrapIntegration:
         assert snap["issues"]["RHAIRFE-1"] == historical_hash
         assert snap["issues"]["RHAIRFE-1"] != current_hash
 
+    def test_adf_changelog_unchanged_uses_current_hash(self, tmp_path, mock_jira):
+        """ADF changelog change before run → 'to' hash matches current ADF hash."""
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Updated before run."}
+        # Description changed BEFORE the run — 'to' matches current
+        server.changelogs["RHAIRFE-1"] = [{
+            "created": "2026-03-30T10:00:00.000+0000",
+            "items": [{
+                "field": "description",
+                "from": json.dumps(_text_to_adf("Old version.")),
+                "to": json.dumps(_text_to_adf("Updated before run.")),
+            }],
+        }]
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000")
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        # ADF 'to' hash == current ADF hash (same content, same format)
+        current_hash = _md_hash("Updated before run.")
+        assert snap["issues"]["RHAIRFE-1"] == current_hash
+
     def test_only_snapshot_written(self, tmp_path, mock_jira):
         """Bootstrap writes only an issue-snapshot file, nothing else."""
         url, server = mock_jira
@@ -362,6 +484,108 @@ class TestBootstrapIntegration:
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
         files = os.listdir(snapshot_dir)
         assert all(f.startswith("issue-snapshot-") for f in files)
+
+    def test_wiki_markup_fallback_changed(self, tmp_path, mock_jira):
+        """Jira Server/DC: from/to are None, falls back to fromString/toString.
+
+        When historical wiki differs from current wiki, uses historical hash.
+        """
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Edited after run."}
+        server.wiki_descriptions = {"RHAIRFE-1": "h2. Edited after run."}
+        server.changelogs["RHAIRFE-1"] = [{
+            "created": "2026-04-02T10:00:00.000+0000",
+            "items": [{
+                "field": "description",
+                "from": None,
+                "to": None,
+                "fromString": "h2. Original at run time.",
+                "toString": "h2. Edited after run.",
+            }],
+        }]
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000")
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        # Should use historical wiki hash, NOT current ADF hash
+        hist_hash = _md_hash("h2. Original at run time.")
+        current_adf_hash = _md_hash("Edited after run.")
+        assert snap["issues"]["RHAIRFE-1"] == hist_hash
+        assert snap["issues"]["RHAIRFE-1"] != current_adf_hash
+
+    def test_wiki_markup_fallback_unchanged(self, tmp_path, mock_jira):
+        """Jira Server/DC: pre-run description change, wiki matches current.
+
+        When historical wiki matches current wiki via v2, uses current ADF hash
+        (avoids false positive from wiki vs ADF format difference).
+        """
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Same description."}
+        server.wiki_descriptions = {"RHAIRFE-1": "h2. Same description."}
+        # Description was changed BEFORE the run
+        server.changelogs["RHAIRFE-1"] = [{
+            "created": "2026-03-30T10:00:00.000+0000",
+            "items": [{
+                "field": "description",
+                "from": None,
+                "to": None,
+                "fromString": "h2. Old version.",
+                "toString": "h2. Same description.",
+            }],
+        }]
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000")
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        # Should use current ADF hash (not wiki hash) since content is the same
+        current_adf_hash = _md_hash("Same description.")
+        wiki_hash = _md_hash("h2. Same description.")
+        assert snap["issues"]["RHAIRFE-1"] == current_adf_hash
+        assert snap["issues"]["RHAIRFE-1"] != wiki_hash
 
     def test_reopened_issue_excluded(self, tmp_path, mock_jira):
         """Issue in Done status at run time is excluded from snapshot."""
