@@ -149,7 +149,7 @@ def load_snapshot_from_dir(data_dir):
     # Follow 'latest' symlink to find the most recent run
     latest_link = os.path.join(data_dir, "latest")
     if os.path.islink(latest_link):
-        latest_target = os.readlink(latest_link)
+        latest_target = os.path.basename(os.readlink(latest_link))
         print(f"Data repo latest: {latest_target}", file=sys.stderr)
     else:
         print("Data repo: no 'latest' symlink, scanning directories",
@@ -159,14 +159,13 @@ def load_snapshot_from_dir(data_dir):
     # Collect run directories sorted newest-first
     run_dirs = []
     for name in sorted(os.listdir(data_dir), reverse=True):
-        if name.startswith(".") or name == "latest":
+        if name.startswith(".") or name in ("latest", "test-data"):
             continue
         path = os.path.join(data_dir, name)
         if os.path.isdir(path):
             run_dirs.append(name)
 
-    if latest_target and latest_target in [os.path.basename(d)
-                                           for d in run_dirs]:
+    if latest_target and latest_target in run_dirs:
         # Put the symlink target first, then the rest newest-first
         run_dirs.remove(latest_target)
         run_dirs.insert(0, latest_target)

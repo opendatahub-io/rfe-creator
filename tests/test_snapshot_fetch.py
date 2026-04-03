@@ -270,6 +270,36 @@ class TestLoadSnapshotFromDir:
         data = load_snapshot_from_dir(str(tmp_path / "no-such-dir"))
         assert data is None
 
+    def test_skips_test_data_dir(self, tmp_path):
+        """test-data/ with a valid snapshot is ignored."""
+        repo = str(tmp_path / "data-repo")
+        td_dir = os.path.join(repo, "test-data", "auto-fix-runs")
+        os.makedirs(td_dir)
+        with open(os.path.join(td_dir,
+                  "issue-snapshot-20260401-120000.yaml"), "w") as f:
+            yaml.dump({"issues": {"RHAIRFE-1": "aaa"}}, f)
+
+        data = load_snapshot_from_dir(repo)
+        assert data is None
+
+    def test_latest_symlink_with_relative_prefix(self, tmp_path):
+        """latest symlink with ./ prefix still prioritises target."""
+        snap_old = {"issues": {"RHAIRFE-1": "old"}}
+        snap_new = {"issues": {"RHAIRFE-1": "new"}}
+        repo = _make_results_dir(tmp_path, [
+            {"name": "20260401-120000", "snapshot": snap_old,
+             "latest": True},
+            {"name": "20260402-120000", "snapshot": snap_new},
+        ])
+        # Re-create symlink with ./ prefix
+        os.remove(os.path.join(repo, "latest"))
+        os.symlink("./20260401-120000", os.path.join(repo, "latest"))
+
+        data = load_snapshot_from_dir(repo)
+        assert data is not None
+        # Should prioritise the symlink target (older), not newest
+        assert data["issues"] == {"RHAIRFE-1": "old"}
+
 
 class TestWriteIdFile:
     def test_writes_ids_one_per_line(self, tmp_path):

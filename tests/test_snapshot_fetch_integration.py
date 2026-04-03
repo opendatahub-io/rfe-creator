@@ -247,6 +247,32 @@ class TestCmdFetchWithDataDir:
         assert "CHANGED=1" in stdout
         assert _read_ids(args.ids_file) == ["RHAIRFE-1"]
 
+    def test_test_data_dir_skipped(self, work_dirs, jira, monkeypatch,
+                                   tmp_path):
+        """test-data/ directory with valid snapshot is ignored."""
+        jira.create("RHAIRFE-1", "Issue one", "Content.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Build a data-dir with only test-data containing a valid snapshot
+        data_dir = str(tmp_path / "data-repo")
+        td_run_dir = os.path.join(data_dir, "test-data", "auto-fix-runs")
+        os.makedirs(td_run_dir)
+        fake_snap = {
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": {"RHAIRFE-1": "should-not-be-used"},
+        }
+        with open(os.path.join(td_run_dir,
+                  "issue-snapshot-20260401-120000.yaml"), "w") as f:
+            yaml.dump(fake_snap, f)
+
+        args = _fetch_args(tmp_path, data_dir=data_dir)
+        stdout = _run_fetch(args)
+
+        # test-data skipped → no previous snapshot → RHAIRFE-1 is NEW
+        assert "NEW=1" in stdout
+        assert "CHANGED=0" in stdout
+
 
 # ── Multi-Run Pipeline ──────────────────────────────────────────────────────
 

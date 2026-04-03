@@ -74,7 +74,7 @@ def find_latest_run_timestamp(results_dir):
             pass
 
     for name in sorted(os.listdir(results_dir), reverse=True):
-        if name.startswith(".") or name == "latest":
+        if name.startswith(".") or name in ("latest", "test-data"):
             continue
         if not os.path.isdir(os.path.join(results_dir, name)):
             continue
@@ -376,7 +376,8 @@ def main():
     if report is not None:
         submitted_ids = [
             e["id"] for e in report.get("per_rfe", [])
-            if e.get("recommendation") == "submit" and e.get("auto_revised")
+            if e.get("auto_revised")
+            and e.get("recommendation") not in ("reject", "autorevise_reject")
         ]
         merged = 0
         for key in submitted_ids:
@@ -405,9 +406,8 @@ def main():
         "bootstrapped_from": run_name,
         "issues": snapshot_issues,
     }
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     snapshot_path = os.path.join(snapshot_dir,
-                                 f"issue-snapshot-{ts}.yaml")
+                                 f"issue-snapshot-{run_name}.yaml")
     with open(snapshot_path, "w", encoding="utf-8") as f:
         yaml.dump(snapshot, f, default_flow_style=False,
                   sort_keys=False)

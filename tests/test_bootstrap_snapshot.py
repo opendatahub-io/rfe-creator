@@ -80,6 +80,22 @@ class TestFindLatestRunTimestamp:
         name, dt = find_latest_run_timestamp(str(tmp_path))
         assert name == "20260401-120000"
 
+    def test_skips_test_data_dir(self, tmp_path):
+        """test-data/ is not considered a run directory."""
+        (tmp_path / "test-data").mkdir()
+        (tmp_path / "20260401-120000").mkdir()
+
+        name, dt = find_latest_run_timestamp(str(tmp_path))
+        assert name == "20260401-120000"
+
+    def test_test_data_only_returns_none(self, tmp_path):
+        """Only test-data/ present → no valid runs."""
+        (tmp_path / "test-data").mkdir()
+
+        name, dt = find_latest_run_timestamp(str(tmp_path))
+        assert name is None
+        assert dt is None
+
 
 class TestParseAdf:
     def test_none_returns_none(self):
@@ -351,7 +367,7 @@ class TestBootstrapIntegration:
         assert snap["issues"]["RHAIRFE-1234"] == expected_1234
 
     def test_run_timestamp_used(self, tmp_path, mock_jira):
-        """Snapshot query_timestamp comes from the run directory name."""
+        """Snapshot query_timestamp and filename come from the run directory name."""
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
@@ -383,6 +399,8 @@ class TestBootstrapIntegration:
 
         assert snap["query_timestamp"] == "2026-04-01T12:00:00Z"
         assert snap["bootstrapped_from"] == "20260401-120000"
+        # Filename uses the run directory name, not current time
+        assert snapshots[0] == "issue-snapshot-20260401-120000.yaml"
 
     def test_historical_description_via_changelog(self, tmp_path, mock_jira):
         """Issue updated since run gets historical hash from changelog."""
@@ -732,6 +750,84 @@ class TestBootstrapIntegration:
             snap = yaml.safe_load(f)
 
         assert len(snap["issues"]) == 2
+
+    def test_revise_recommendation_merges_submitted_hash(
+            self, tmp_path, mock_jira):
+        """auto_revised issues with recommendation=revise get current hash.
+
+        submit.py submits all non-rejected entries, not just those with
+        recommendation=submit.  The bootstrap merge must mirror this.
+        """
+        url, server = mock_jira
+        server.issues = {
+            "RHAIRFE-1": "Auto-revised and submitted.",
+            "RHAIRFE-2": "Also revised, submitted.",
+            "RHAIRFE-3": "Rejected, not submitted.",
+        }
+        # All three were updated after the run
+        for key in ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]:
+            server.changelogs[key] = [{
+                "created": "2026-04-02T10:00:00.000+0000",
+                "items": [{
+                    "field": "description",
+                    "from": json.dumps(_text_to_adf(f"Original {key}.")),
+                    "to": json.dumps(_text_to_adf(
+                        server.issues[key])),
+                }],
+            }]
+
+        # Build run report with mixed recommendations
+        results = str(tmp_path / "results")
+        run_name = "20260401-120000"
+        report_dir = os.path.join(results, run_name, "auto-fix-runs")
+        os.makedirs(report_dir)
+        os.symlink(run_name, os.path.join(results, "latest"))
+        report = {"per_rfe": [
+            {"id": "RHAIRFE-1", "recommendation": "revise",
+             "auto_revised": True},
+            {"id": "RHAIRFE-2", "recommendation": "submit",
+             "auto_revised": True},
+            {"id": "RHAIRFE-3", "recommendation": "autorevise_reject",
+             "auto_revised": True},
+        ]}
+        with open(os.path.join(report_dir, f"{run_name}.yaml"), "w") as f:
+            yaml.dump(report, f)
+
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "Merged 2 submitted hashes" in r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        current_hash_1 = _md_hash("Auto-revised and submitted.")
+        current_hash_2 = _md_hash("Also revised, submitted.")
+        historical_hash_3 = _md_hash("Original RHAIRFE-3.")
+
+        # revise + auto_revised → current hash (submitted)
+        assert snap["issues"]["RHAIRFE-1"] == current_hash_1
+        # submit + auto_revised → current hash (submitted)
+        assert snap["issues"]["RHAIRFE-2"] == current_hash_2
+        # autorevise_reject → historical hash (not submitted)
+        assert snap["issues"]["RHAIRFE-3"] == historical_hash_3
 
     def test_empty_per_rfe_includes_all(self, tmp_path, mock_jira):
         """Run report with empty per_rfe falls back to including all."""
