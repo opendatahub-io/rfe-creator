@@ -21,6 +21,7 @@ Output (stdout):
 """
 
 import argparse
+from collections import OrderedDict
 import glob
 import hashlib
 import os
@@ -95,10 +96,10 @@ def _fetch_paginated(server, user, token, jql, fields):
 def fetch_all_issues(server, user, token, jql):
     """Fetch all issues matching JQL with description and labels.
 
-    Returns an ordered dict of {key: {"content_hash": str, "labels": list}}.
+    Returns an OrderedDict of {key: {"content_hash": str, "labels": list}}.
     Order matches Jira's default (created desc).
     """
-    issues = {}
+    issues = OrderedDict()
     for issue in _fetch_paginated(
             server, user, token, jql, "key,description,labels"):
         key = issue["key"]
@@ -297,17 +298,17 @@ def cmd_fetch(args):
     # Diff against previous snapshot
     changed, new = diff_snapshots(current, prev_data)
 
-    # Maintain Jira's original order within each category
+    # changed and new are already ordered lists from diff_snapshots
     changed_set = set(changed)
     new_set = set(new)
-    changed_ids = [k for k in current.keys() if k in changed_set]
-    new_ids = [k for k in current.keys() if k in new_set]
-    unchanged_ids = [k for k in current.keys()
-                     if k not in changed_set and k not in new_set]
-
-    # Changed get highest priority, then new, then unchanged; total capped at limit
     limit = args.limit or len(current)
-    all_ids = (changed_ids + new_ids + unchanged_ids)[:limit]
+
+    # Select up to limit: changed first, then new, then unchanged
+    all_ids = (changed + new)[:limit]
+    if len(all_ids) < limit:
+        unchanged = [k for k in current
+                     if k not in changed_set and k not in new_set]
+        all_ids.extend(unchanged[:limit - len(all_ids)])
 
     # Build cumulative snapshot: previous entries + selected issues.
     # Only selected issues get their hashes recorded (or updated).
