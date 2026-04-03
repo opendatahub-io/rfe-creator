@@ -751,12 +751,15 @@ class TestBootstrapIntegration:
 
         assert len(snap["issues"]) == 2
 
-    def test_revise_recommendation_merges_submitted_hash(
+    def test_auto_revised_keeps_historical_hash(
             self, tmp_path, mock_jira):
-        """auto_revised issues with recommendation=revise get current hash.
+        """auto_revised issues keep historical hashes, not current.
 
-        submit.py submits all non-rejected entries, not just those with
-        recommendation=submit.  The bootstrap merge must mirror this.
+        The bootstrap should not overwrite historical hashes for
+        auto_revised issues. submit.py's update_snapshot_hashes is the
+        sole authority for recording post-submit state. The bootstrap
+        uses only changelog-derived historical hashes so that genuinely
+        changed issues are detected on the next fetch.
         """
         url, server = mock_jira
         server.issues = {
@@ -810,7 +813,6 @@ class TestBootstrapIntegration:
             capture_output=True, text=True, env=env,
         )
         assert r.returncode == 0, r.stderr
-        assert "Merged 2 submitted hashes" in r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
         snapshots = [f for f in os.listdir(snapshot_dir)
@@ -818,15 +820,13 @@ class TestBootstrapIntegration:
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
-        current_hash_1 = _md_hash("Auto-revised and submitted.")
-        current_hash_2 = _md_hash("Also revised, submitted.")
+        historical_hash_1 = _md_hash("Original RHAIRFE-1.")
+        historical_hash_2 = _md_hash("Original RHAIRFE-2.")
         historical_hash_3 = _md_hash("Original RHAIRFE-3.")
 
-        # revise + auto_revised → current hash (submitted)
-        assert snap["issues"]["RHAIRFE-1"] == current_hash_1
-        # submit + auto_revised → current hash (submitted)
-        assert snap["issues"]["RHAIRFE-2"] == current_hash_2
-        # autorevise_reject → historical hash (not submitted)
+        # All three keep historical hashes — bootstrap never overwrites
+        assert snap["issues"]["RHAIRFE-1"] == historical_hash_1
+        assert snap["issues"]["RHAIRFE-2"] == historical_hash_2
         assert snap["issues"]["RHAIRFE-3"] == historical_hash_3
 
     def test_empty_per_rfe_includes_all(self, tmp_path, mock_jira):
