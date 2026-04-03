@@ -181,3 +181,41 @@ class TestSparseCheckout:
         assert not os.path.exists(os.path.join(
             dest, "20260401-120000", "auto-fix-runs",
             "20260401-120000.yaml"))
+
+    def test_test_data_not_materialized(self, tmp_path):
+        """test-data/ directory is excluded from sparse checkout."""
+        src = _init_source_repo(str(tmp_path / "source"))
+
+        snap_content = yaml.dump({
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": {"RHAIRFE-1": "abc123"},
+        })
+        _commit_file(src, "20260401-120000/auto-fix-runs/"
+                     "issue-snapshot-20260401-120000.yaml", snap_content)
+
+        fake_snap = yaml.dump({
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": {"RHAIRFE-FAKE": "fake"},
+        })
+        _commit_file(src, "test-data/auto-fix-runs/"
+                     "issue-snapshot-test.yaml", fake_snap)
+
+        dest = str(tmp_path / "clone")
+        r = subprocess.run(
+            [sys.executable, SCRIPT, src, dest],
+            capture_output=True, text=True,
+            env={**os.environ, "DATA_REPO_TOKEN": ""},
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Real snapshot materialized
+        assert os.path.exists(os.path.join(
+            dest, "20260401-120000", "auto-fix-runs",
+            "issue-snapshot-20260401-120000.yaml"))
+
+        # test-data snapshot NOT materialized
+        assert not os.path.exists(os.path.join(
+            dest, "test-data", "auto-fix-runs",
+            "issue-snapshot-test.yaml"))

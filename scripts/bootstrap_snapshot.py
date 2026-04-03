@@ -74,7 +74,7 @@ def find_latest_run_timestamp(results_dir):
             pass
 
     for name in sorted(os.listdir(results_dir), reverse=True):
-        if name.startswith(".") or name == "latest":
+        if name.startswith(".") or name in ("latest", "test-data"):
             continue
         if not os.path.isdir(os.path.join(results_dir, name)):
             continue

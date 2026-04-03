@@ -73,7 +73,8 @@ def main():
     subprocess.run(
         ["git", "sparse-checkout", "set", "--no-cone",
          "/latest",
-         "/*/auto-fix-runs/issue-snapshot-*.yaml"],
+         "/*/auto-fix-runs/issue-snapshot-*.yaml",
+         "!/test-data/**"],
         cwd=dest, check=True, capture_output=True, text=True,
     )
 

@@ -80,6 +80,22 @@ class TestFindLatestRunTimestamp:
         name, dt = find_latest_run_timestamp(str(tmp_path))
         assert name == "20260401-120000"
 
+    def test_skips_test_data_dir(self, tmp_path):
+        """test-data/ is not considered a run directory."""
+        (tmp_path / "test-data").mkdir()
+        (tmp_path / "20260401-120000").mkdir()
+
+        name, dt = find_latest_run_timestamp(str(tmp_path))
+        assert name == "20260401-120000"
+
+    def test_test_data_only_returns_none(self, tmp_path):
+        """Only test-data/ present → no valid runs."""
+        (tmp_path / "test-data").mkdir()
+
+        name, dt = find_latest_run_timestamp(str(tmp_path))
+        assert name is None
+        assert dt is None
+
 
 class TestParseAdf:
     def test_none_returns_none(self):
