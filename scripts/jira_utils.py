@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -156,6 +157,17 @@ def add_labels(server, user, token, issue_key, labels):
     body = {
         "update": {
             "labels": [{"add": label} for label in labels]
+        }
+    }
+    path = f"/issue/{issue_key}"
+    api_call_with_retry(server, path, user, token, body=body, method="PUT")
+
+
+def remove_labels(server, user, token, issue_key, labels):
+    """Remove labels from an existing issue without affecting other labels."""
+    body = {
+        "update": {
+            "labels": [{"remove": label} for label in labels]
         }
     }
     path = f"/issue/{issue_key}"
@@ -647,5 +659,45 @@ def strip_metadata(markdown):
     cleaned = "\n".join(result)
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     return cleaned.strip()
+
+
+def normalize_for_compare(text):
+    """Normalize text to ignore ADF-to-markdown conversion artifacts.
+
+    Handles: curly quotes, non-breaking spaces, carriage returns,
+    dash/arrow variants, trailing whitespace, emoji, table alignment,
+    and other Unicode normalization differences.
+    """
+    # Unicode normalize (NFC)
+    text = unicodedata.normalize("NFC", text)
+    # Carriage returns
+    text = text.replace("\r", "")
+    # Curly quotes -> straight
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    # Dashes: em dash -> —, en dash -> -  (normalize to ASCII)
+    text = text.replace("\u2014", "---").replace("\u2013", "--")
+    # Arrows: → -> ->
+    text = text.replace("\u2192", "->")
+    # Non-breaking space -> regular space
+    text = text.replace("\xa0", " ")
+    # Collapse multiple spaces to one (table alignment differences)
+    text = re.sub(r"  +", " ", text)
+    # Strip emoji (Unicode emoji blocks)
+    text = re.sub(
+        r"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+        r"\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF"
+        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]", "", text)
+    # Normalize table separator rows (varying dash counts)
+    text = re.sub(r"-{2,}", "--", text)
+    # Strip auto-linked URLs: [url](url) -> url
+    text = re.sub(r"\[([^\]]+)\]\(\1/?\.?\)", r"\1", text)
+    # Strip zero-width characters
+    text = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", text)
+    # Strip trailing whitespace per line
+    text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
+    # Collapse multiple blank lines to one
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
