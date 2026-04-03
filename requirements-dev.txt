@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest
+jira-emulator @ git+https://github.com/jctanner/jira-emulator.git

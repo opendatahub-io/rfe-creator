@@ -26,7 +26,10 @@ def build_clone_url(repo, token):
     """Build an authenticated clone URL from repo spec and token.
 
     Raises ValueError if a bare project path is given without a token.
+    Local absolute paths (starting with /) are passed through as-is.
     """
+    if os.path.isabs(repo):
+        return repo
     if "://" not in repo and "@" not in repo:
         if not token:
             raise ValueError(

@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """Integration tests for snapshot_fetch.py — cmd_fetch exercised
-end-to-end against a mock Jira HTTP server.
+end-to-end against a jira-emulator server.
 
 Covers the full pipeline: first fetch, incremental fetch with change
 detection, snapshot update, and data-dir fallback.
 """
 import io
-import json
 import os
+import subprocess
 import sys
 import threading
-import urllib.parse
 from contextlib import redirect_stdout
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+CLONE_SCRIPT = os.path.join(os.path.dirname(__file__), "..",
+                            "scripts", "clone_results_repo.py")
 
 import snapshot_fetch
 from snapshot_fetch import cmd_fetch, compute_content_hash, update_snapshot_hashes
@@ -45,54 +46,7 @@ def _text_to_adf(text):
     }
 
 
-# ── Mock Jira Server ─────────────────────────────────────────────────────────
-
-class JiraHandler(BaseHTTPRequestHandler):
-    """Mock Jira that serves search results.
-
-    server.issues: dict of {key: description} — all current issues
-    """
-
-    def do_GET(self):
-        if "/search/jql" not in self.path:
-            self._json(404, {"error": "not found"})
-            return
-
-        issues = []
-        for key, desc in self.server.issues.items():
-            adf = _text_to_adf(desc) if desc else None
-            issues.append({
-                "key": key,
-                "fields": {"description": adf, "labels": []},
-            })
-
-        self._json(200, {"issues": issues, "isLast": True})
-
-    def _json(self, status, data):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format, *args):
-        pass
-
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def mock_jira():
-    server = HTTPServer(("127.0.0.1", 0), JiraHandler)
-    server.issues = {}
-    url = f"http://127.0.0.1:{server.server_address[1]}"
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
-    yield url, server
-    server.shutdown()
-
 
 @pytest.fixture
 def work_dirs(tmp_path, monkeypatch):
@@ -138,22 +92,18 @@ def _seed_snapshot(work_dirs, issues, query_ts="2026-04-01T00:00:00Z"):
 
 def _jira_env(monkeypatch, url):
     monkeypatch.setenv("JIRA_SERVER", url)
-    monkeypatch.setenv("JIRA_USER", "test@example.com")
-    monkeypatch.setenv("JIRA_TOKEN", "test-token")
+    monkeypatch.setenv("JIRA_USER", "admin")
+    monkeypatch.setenv("JIRA_TOKEN", "admin")
 
 
 # ── cmd_fetch: First Run ─────────────────────────────────────────────────────
 
 class TestCmdFetchFirstRun:
-    def test_all_issues_are_new(self, work_dirs, mock_jira, monkeypatch,
-                                tmp_path):
+    def test_all_issues_are_new(self, work_dirs, jira, monkeypatch, tmp_path):
         """First run (no snapshot) → all issues NEW, correct stdout."""
-        url, server = mock_jira
-        server.issues = {
-            "RHAIRFE-1": "Description one.",
-            "RHAIRFE-2": "Description two.",
-        }
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Description one.")
+        jira.create("RHAIRFE-2", "Issue two", "Description two.")
+        _jira_env(monkeypatch, jira.url)
         args = _fetch_args(tmp_path)
 
         stdout = _run_fetch(args)
@@ -164,12 +114,10 @@ class TestCmdFetchFirstRun:
         assert set(_read_ids(args.ids_file)) == {"RHAIRFE-1", "RHAIRFE-2"}
         assert _read_ids(args.changed_file) == []
 
-    def test_snapshot_written(self, work_dirs, mock_jira, monkeypatch,
-                              tmp_path):
+    def test_snapshot_written(self, work_dirs, jira, monkeypatch, tmp_path):
         """Fetch writes snapshot directly to artifacts with hashes."""
-        url, server = mock_jira
-        server.issues = {"RHAIRFE-1": "Content."}
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Content.")
+        _jira_env(monkeypatch, jira.url)
         args = _fetch_args(tmp_path)
 
         _run_fetch(args)
@@ -187,26 +135,22 @@ class TestCmdFetchFirstRun:
 # ── cmd_fetch: Incremental Run ───────────────────────────────────────────────
 
 class TestCmdFetchIncremental:
-    def test_unchanged_excluded(self, work_dirs, mock_jira, monkeypatch,
-                                tmp_path):
+    def test_unchanged_excluded(self, work_dirs, jira, monkeypatch, tmp_path):
         """Issue with same hash → not in output IDs."""
-        url, server = mock_jira
+        jira.create("RHAIRFE-1", "Issue one", "Same content.")
         same_hash = compute_content_hash(_text_to_adf("Same content."))
         _seed_snapshot(work_dirs, {"RHAIRFE-1": same_hash})
-        server.issues = {"RHAIRFE-1": "Same content."}
-        _jira_env(monkeypatch, url)
+        _jira_env(monkeypatch, jira.url)
 
         stdout = _run_fetch(_fetch_args(tmp_path))
 
         assert "TOTAL=0" in stdout
 
-    def test_changed_detected(self, work_dirs, mock_jira, monkeypatch,
-                              tmp_path):
+    def test_changed_detected(self, work_dirs, jira, monkeypatch, tmp_path):
         """Issue with different hash → in changed file."""
-        url, server = mock_jira
+        jira.create("RHAIRFE-1", "Issue one", "New content.")
         _seed_snapshot(work_dirs, {"RHAIRFE-1": "old-hash"})
-        server.issues = {"RHAIRFE-1": "New content."}
-        _jira_env(monkeypatch, url)
+        _jira_env(monkeypatch, jira.url)
 
         args = _fetch_args(tmp_path)
         stdout = _run_fetch(args)
@@ -217,16 +161,13 @@ class TestCmdFetchIncremental:
         assert _read_ids(args.ids_file) == ["RHAIRFE-1"]
         assert _read_ids(args.changed_file) == ["RHAIRFE-1"]
 
-    def test_new_detected(self, work_dirs, mock_jira, monkeypatch, tmp_path):
+    def test_new_detected(self, work_dirs, jira, monkeypatch, tmp_path):
         """Issue not in previous snapshot → new."""
-        url, server = mock_jira
+        jira.create("RHAIRFE-1", "Issue one", "Existing.")
+        jira.create("RHAIRFE-2", "Issue two", "Brand new.")
         existing_hash = compute_content_hash(_text_to_adf("Existing."))
         _seed_snapshot(work_dirs, {"RHAIRFE-1": existing_hash})
-        server.issues = {
-            "RHAIRFE-1": "Existing.",
-            "RHAIRFE-2": "Brand new.",
-        }
-        _jira_env(monkeypatch, url)
+        _jira_env(monkeypatch, jira.url)
 
         args = _fetch_args(tmp_path)
         stdout = _run_fetch(args)
@@ -235,17 +176,13 @@ class TestCmdFetchIncremental:
         assert "NEW=1" in stdout
         assert _read_ids(args.ids_file) == ["RHAIRFE-2"]
 
-    def test_limit_caps_output(self, work_dirs, mock_jira, monkeypatch,
-                               tmp_path):
+    def test_limit_caps_output(self, work_dirs, jira, monkeypatch, tmp_path):
         """--limit caps the number of output IDs."""
-        url, server = mock_jira
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        jira.create("RHAIRFE-3", "Three", "Three.")
         _seed_snapshot(work_dirs, {})
-        server.issues = {
-            "RHAIRFE-1": "One.",
-            "RHAIRFE-2": "Two.",
-            "RHAIRFE-3": "Three.",
-        }
-        _jira_env(monkeypatch, url)
+        _jira_env(monkeypatch, jira.url)
 
         args = _fetch_args(tmp_path, limit=2)
         stdout = _run_fetch(args)
@@ -277,14 +214,13 @@ class TestCmdFetchWithDataDir:
         os.symlink("20260401-120000", os.path.join(data_dir, "latest"))
         return data_dir
 
-    def test_falls_back_to_data_dir(self, work_dirs, mock_jira, monkeypatch,
+    def test_falls_back_to_data_dir(self, work_dirs, jira, monkeypatch,
                                     tmp_path):
         """No local snapshot → uses data-dir snapshot for diffing."""
-        url, server = mock_jira
+        jira.create("RHAIRFE-1", "Issue one", "Changed content.")
         data_dir = self._make_data_dir(tmp_path,
                                        {"RHAIRFE-1": "old-hash"})
-        server.issues = {"RHAIRFE-1": "Changed content."}
-        _jira_env(monkeypatch, url)
+        _jira_env(monkeypatch, jira.url)
 
         args = _fetch_args(tmp_path, data_dir=data_dir)
         stdout = _run_fetch(args)
@@ -303,15 +239,12 @@ class TestMultiRunPipeline:
     unless a user changes the description in Jira.
     """
 
-    def test_steady_state_skips_unchanged(self, work_dirs, mock_jira,
+    def test_steady_state_skips_unchanged(self, work_dirs, jira,
                                           monkeypatch, tmp_path):
         """Run 1 processes everything. Run 2 sees nothing to do."""
-        url, server = mock_jira
-        server.issues = {
-            "RHAIRFE-1": "Description one.",
-            "RHAIRFE-2": "Description two.",
-        }
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Description one.")
+        jira.create("RHAIRFE-2", "Issue two", "Description two.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1: first fetch — all new
         stdout1 = _run_fetch(_fetch_args(tmp_path))
@@ -322,16 +255,13 @@ class TestMultiRunPipeline:
         stdout2 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout2
 
-    def test_user_edits_after_submit(self, work_dirs, mock_jira,
+    def test_user_edits_after_submit(self, work_dirs, jira,
                                      monkeypatch, tmp_path):
         """Run 1: fetch + submit. Run 2: user edits → re-process.
         Run 3: nothing changed → skip."""
-        url, server = mock_jira
-        server.issues = {
-            "RHAIRFE-1": "Original description.",
-            "RHAIRFE-2": "Another description.",
-        }
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Original description.")
+        jira.create("RHAIRFE-2", "Issue two", "Another description.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1: fetch all
         _run_fetch(_fetch_args(tmp_path))
@@ -341,10 +271,14 @@ class TestMultiRunPipeline:
             _text_to_adf("Auto-revised description."))
         update_snapshot_hashes(
             {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir)
-        server.issues["RHAIRFE-1"] = "Auto-revised description."
+        # Simulate Jira now has the revised description
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
+                      {"fields": {"description": "Auto-revised description."}})
 
         # Between runs: user edits RHAIRFE-1 in Jira
-        server.issues["RHAIRFE-1"] = "User rewrote this after our fix."
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
+                      {"fields": {"description":
+                                  "User rewrote this after our fix."}})
 
         # Run 2: detects user's edit, skips RHAIRFE-2
         args2 = _fetch_args(tmp_path)
@@ -358,13 +292,12 @@ class TestMultiRunPipeline:
         stdout3 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout3
 
-    def test_submit_without_user_edit(self, work_dirs, mock_jira,
+    def test_submit_without_user_edit(self, work_dirs, jira,
                                       monkeypatch, tmp_path):
         """Run 1: fetch + submit. Run 2: no user edits → skip our own
         changes."""
-        url, server = mock_jira
-        server.issues = {"RHAIRFE-1": "Original."}
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Original.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1: fetch
         _run_fetch(_fetch_args(tmp_path))
@@ -374,36 +307,39 @@ class TestMultiRunPipeline:
             _text_to_adf("We revised this."))
         update_snapshot_hashes(
             {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir)
-        server.issues["RHAIRFE-1"] = "We revised this."
+        # Simulate Jira now has our revision
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
+                      {"fields": {"description": "We revised this."}})
 
         # Run 2: our own change is in the snapshot — skip
         stdout2 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout2
 
-    def test_new_issue_created_by_submit(self, work_dirs, mock_jira,
+    def test_new_issue_created_by_submit(self, work_dirs, jira,
                                          monkeypatch, tmp_path):
         """Run 1: fetch + create new issue. Run 2: new issue not
         re-flagged. Run 3: user edits the new issue → detected."""
-        url, server = mock_jira
-        server.issues = {"RHAIRFE-1": "Existing."}
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Existing", "Existing.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1: fetch
         _run_fetch(_fetch_args(tmp_path))
 
         # Run 1: submit creates RHAIRFE-2, updates snapshot
+        jira.create("RHAIRFE-2", "We created this", "We created this.")
         new_hash = compute_content_hash(
             _text_to_adf("We created this."))
         update_snapshot_hashes(
             {"RHAIRFE-2": new_hash}, work_dirs.snapshot_dir)
-        server.issues["RHAIRFE-2"] = "We created this."
 
         # Run 2: our new issue is already in the snapshot — skip
         stdout2 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout2
 
         # Between runs: user edits the new issue
-        server.issues["RHAIRFE-2"] = "User improved our new issue."
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-2",
+                      {"fields": {"description":
+                                  "User improved our new issue."}})
 
         # Run 3: detects the edit
         args3 = _fetch_args(tmp_path)
@@ -412,36 +348,38 @@ class TestMultiRunPipeline:
         assert "CHANGED=1" in stdout3
         assert _read_ids(args3.ids_file) == ["RHAIRFE-2"]
 
-    def test_issue_leaves_scope(self, work_dirs, mock_jira,
+    def test_issue_leaves_scope(self, work_dirs, jira,
                                 monkeypatch, tmp_path):
         """Issue closed between runs → silently dropped, not flagged."""
-        url, server = mock_jira
-        server.issues = {
-            "RHAIRFE-1": "Open issue.",
-            "RHAIRFE-2": "Another open issue.",
-        }
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Open issue", "Open issue.")
+        jira.create("RHAIRFE-2", "Another", "Another open issue.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1
         stdout1 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=2" in stdout1
 
-        # Between runs: RHAIRFE-2 gets closed (no longer in JQL results)
-        del server.issues["RHAIRFE-2"]
+        # Between runs: RHAIRFE-2 gets closed (transitions to Done)
+        transitions = jira.request(
+            "GET", "/rest/api/3/issue/RHAIRFE-2/transitions")
+        done_t = next(
+            (t for t in transitions["transitions"]
+             if t["to"]["statusCategory"]["key"] == "done"), None)
+        if done_t:
+            jira.request( "POST",
+                          "/rest/api/3/issue/RHAIRFE-2/transitions",
+                          {"transition": {"id": done_t["id"]}})
 
         # Run 2: RHAIRFE-2 gone, RHAIRFE-1 unchanged — nothing to do
         stdout2 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout2
 
-    def test_mixed_activity_across_runs(self, work_dirs, mock_jira,
+    def test_mixed_activity_across_runs(self, work_dirs, jira,
                                         monkeypatch, tmp_path):
         """Multiple runs with a mix of edits, new issues, and closures."""
-        url, server = mock_jira
-        server.issues = {
-            "RHAIRFE-1": "Issue one.",
-            "RHAIRFE-2": "Issue two.",
-        }
-        _jira_env(monkeypatch, url)
+        jira.create("RHAIRFE-1", "Issue one", "Issue one.")
+        jira.create("RHAIRFE-2", "Issue two", "Issue two.")
+        _jira_env(monkeypatch, jira.url)
 
         # Run 1: first fetch — all new
         stdout1 = _run_fetch(_fetch_args(tmp_path))
@@ -453,11 +391,14 @@ class TestMultiRunPipeline:
             _text_to_adf("Revised issue one."))
         update_snapshot_hashes(
             {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir)
-        server.issues["RHAIRFE-1"] = "Revised issue one."
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
+                      {"fields": {"description": "Revised issue one."}})
 
         # Between runs: user edits RHAIRFE-2, new RHAIRFE-3 filed
-        server.issues["RHAIRFE-2"] = "User rewrote issue two."
-        server.issues["RHAIRFE-3"] = "Brand new issue three."
+        jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-2",
+                      {"fields": {"description":
+                                  "User rewrote issue two."}})
+        jira.create("RHAIRFE-3", "Issue three", "Brand new issue three.")
 
         # Run 2: RHAIRFE-1 skip (our change), RHAIRFE-2 changed,
         #         RHAIRFE-3 new
@@ -472,8 +413,111 @@ class TestMultiRunPipeline:
         assert "RHAIRFE-1" not in ids2
 
         # Between runs: RHAIRFE-2 closed, nothing else changes
-        del server.issues["RHAIRFE-2"]
+        transitions = jira.request(
+            "GET", "/rest/api/3/issue/RHAIRFE-2/transitions")
+        done_t = next(
+            (t for t in transitions["transitions"]
+             if t["to"]["statusCategory"]["key"] == "done"), None)
+        if done_t:
+            jira.request( "POST",
+                          "/rest/api/3/issue/RHAIRFE-2/transitions",
+                          {"transition": {"id": done_t["id"]}})
 
         # Run 3: RHAIRFE-2 gone, rest unchanged — nothing to do
         stdout3 = _run_fetch(_fetch_args(tmp_path))
         assert "TOTAL=0" in stdout3
+
+
+# ── End-to-End: Clone → Fetch with --data-dir ──────────────────────────────
+
+def _init_git_repo(path):
+    """Init a git repo for use as a data source."""
+    os.makedirs(path, exist_ok=True)
+    subprocess.run(["git", "init", path], check=True, capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.email", "test@test"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", path, "config", "user.name", "test"],
+                   check=True, capture_output=True)
+
+
+def _git_add_commit(repo, relpath, content, msg):
+    """Write a file, git add, git commit."""
+    full = os.path.join(repo, relpath)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w") as f:
+        f.write(content)
+    subprocess.run(["git", "-C", repo, "add", relpath],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", repo, "commit", "-m", msg],
+                   check=True, capture_output=True)
+
+
+class TestCloneThenFetch:
+    """End-to-end: clone a data repo, then use it as --data-dir for fetch.
+
+    Verifies that clone_results_repo.py sparse checkout produces a layout
+    that snapshot_fetch.py can read, and that incremental diffing works
+    across the full pipeline.
+    """
+
+    def test_clone_provides_baseline_for_incremental_fetch(
+            self, jira, monkeypatch, tmp_path):
+        """Clone data repo → fetch with --data-dir → unchanged skipped."""
+        _jira_env(monkeypatch, jira.url)
+
+        # Build a source git repo with a previous snapshot
+        src = str(tmp_path / "source")
+        _init_git_repo(src)
+
+        existing_hash = compute_content_hash(
+            _text_to_adf("Already processed."))
+        snap = yaml.dump({
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": {
+                "RHAIRFE-1": existing_hash,
+                "RHAIRFE-2": "old-hash-will-differ",
+            },
+        })
+        _git_add_commit(src,
+                        "20260401-120000/auto-fix-runs/"
+                        "issue-snapshot-20260401-120000.yaml",
+                        snap, "add snapshot")
+        # Add the latest symlink
+        os.symlink("20260401-120000", os.path.join(src, "latest"))
+        subprocess.run(["git", "-C", src, "add", "latest"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", src, "commit", "-m", "add latest"],
+                       check=True, capture_output=True)
+
+        # Clone it with clone_results_repo.py
+        clone_dest = str(tmp_path / "cloned")
+        r = subprocess.run(
+            [sys.executable, CLONE_SCRIPT, src, clone_dest],
+            capture_output=True, text=True,
+            env={**os.environ, "DATA_REPO_TOKEN": ""},
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Jira has the same issues — RHAIRFE-1 unchanged, RHAIRFE-2 changed
+        jira.create("RHAIRFE-1", "Already processed", "Already processed.")
+        jira.create("RHAIRFE-2", "Edited", "User edited this since last run.")
+        jira.create("RHAIRFE-3", "Brand new", "Brand new issue.")
+
+        # Fetch with --data-dir pointing at clone
+        snap_dir = str(tmp_path / "artifacts" / "auto-fix-runs")
+        os.makedirs(snap_dir)
+        monkeypatch.setattr(snapshot_fetch, "SNAPSHOT_DIR", snap_dir)
+        args = _fetch_args(tmp_path, data_dir=clone_dest)
+        stdout = _run_fetch(args)
+
+        # RHAIRFE-1: unchanged → skipped
+        # RHAIRFE-2: hash differs → changed
+        # RHAIRFE-3: new
+        assert "TOTAL=2" in stdout
+        assert "CHANGED=1" in stdout
+        assert "NEW=1" in stdout
+        ids = _read_ids(args.ids_file)
+        assert "RHAIRFE-1" not in ids
+        assert "RHAIRFE-2" in ids
+        assert "RHAIRFE-3" in ids
