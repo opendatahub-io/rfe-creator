@@ -376,7 +376,8 @@ def main():
     if report is not None:
         submitted_ids = [
             e["id"] for e in report.get("per_rfe", [])
-            if e.get("recommendation") == "submit" and e.get("auto_revised")
+            if e.get("auto_revised")
+            and e.get("recommendation") not in ("reject", "autorevise_reject")
         ]
         merged = 0
         for key in submitted_ids:
