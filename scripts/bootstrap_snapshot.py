@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from jira_utils import require_env, api_call_with_retry
+from jira_utils import require_env, api_call_with_retry, make_request
 from snapshot_fetch import (
     fetch_all_issues,
     compute_content_hash,
@@ -107,9 +107,12 @@ def _fetch_changelog(server, user, token, key):
 
 
 def _description_at_time(changelog, target_dt):
-    """Extract the description ADF at target_dt from changelog entries.
+    """Extract the description at target_dt from changelog entries.
 
-    Returns ADF dict, or None if no description changes exist.
+    Returns ADF dict or raw text string, or None if no description
+    changes exist.  On Jira Cloud the structured content lives in
+    from/to (ADF JSON).  On Jira Server/DC those fields are None and
+    the content is in fromString/toString (wiki markup).
     """
     desc_changes = []
     for entry in changelog:
@@ -117,8 +120,8 @@ def _description_at_time(changelog, target_dt):
             if item.get("field") == "description":
                 desc_changes.append({
                     "created": entry["created"],
-                    "from": item.get("from"),
-                    "to": item.get("to"),
+                    "from": item.get("from") if item.get("from") is not None else item.get("fromString"),
+                    "to": item.get("to") if item.get("to") is not None else item.get("toString"),
                 })
 
     if not desc_changes:
@@ -201,11 +204,25 @@ def get_description_at_time(server, user, token, key, target_dt):
     return _description_at_time(changelog, target_dt)
 
 
-def _parse_adf(value):
-    """Parse a changelog value as ADF.
+def _fetch_wiki_description(server, user, token, key):
+    """Fetch current description as wiki markup via v2 API.
 
-    Changelog stores ADF as a JSON string in from/to fields.
-    Returns dict (ADF), or None.
+    Used for apples-to-apples comparison with changelog toString
+    values (which are also wiki markup on Jira Server/DC).
+    """
+    url = f"{server.rstrip('/')}/rest/api/2/issue/{urllib.parse.quote(key, safe='')}?fields=description"
+    data = make_request(url, user, token)
+    return (data.get("fields") or {}).get("description") or ""
+
+
+def _parse_adf(value):
+    """Parse a changelog description value.
+
+    On Jira Cloud, from/to contain ADF as a JSON string → returns dict.
+    On Jira Server/DC, fromString/toString contain wiki markup → returns
+    the raw string (compute_content_hash handles strings via
+    adf_to_markdown pass-through).
+    Returns None only when value is None (empty description).
     """
     if value is None:
         return None
@@ -218,6 +235,8 @@ def _parse_adf(value):
                 return parsed
         except (json.JSONDecodeError, TypeError):
             pass
+        # Wiki markup or other non-JSON text — return as-is
+        return value
     return None
 
 
@@ -291,10 +310,25 @@ def main():
         if hist_desc is None:
             # No description changes — current is the original
             snapshot_issues[key] = data["content_hash"]
-        else:
+        elif isinstance(hist_desc, dict):
+            # ADF (Jira Cloud) — hash directly comparable
             hist_hash = compute_content_hash(hist_desc)
             snapshot_issues[key] = hist_hash
             if hist_hash != data["content_hash"]:
+                hist_changed += 1
+        else:
+            # Wiki markup (Jira Server/DC) — compare wiki-to-wiki
+            # via v2 API to avoid false positives from format
+            # differences (wiki h2. vs ADF ##)
+            current_wiki = _fetch_wiki_description(
+                server, user, token, key)
+            hist_hash = compute_content_hash(hist_desc)
+            current_wiki_hash = compute_content_hash(current_wiki)
+            if hist_hash == current_wiki_hash:
+                # Description unchanged — use current ADF hash
+                snapshot_issues[key] = data["content_hash"]
+            else:
+                snapshot_issues[key] = hist_hash
                 hist_changed += 1
 
     print(f"Changelog lookups: {lookups} "

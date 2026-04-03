@@ -308,13 +308,16 @@ def cmd_fetch(args):
     # Maintain Jira's original order across both sets
     changed_set = set(changed)
     new_set = set(new)
-    all_ids = [k for k in current.keys() if k in changed_set or k in new_set]
+    priority_ids = [k for k in current.keys()
+                    if k in changed_set or k in new_set]
+    unchanged_ids = [k for k in current.keys()
+                     if k not in changed_set and k not in new_set]
 
-    # Apply limit
-    limit = args.limit or len(all_ids)
-    all_ids = all_ids[:limit]
+    # Changed/new get priority ordering; total capped at limit
+    limit = args.limit or len(current)
+    all_ids = (priority_ids + unchanged_ids)[:limit]
 
-    # Re-split into changed/new after limit
+    # Split for downstream
     out_changed = [k for k in all_ids if k in changed_set]
     out_new = [k for k in all_ids if k in new_set]
 
@@ -326,6 +329,7 @@ def cmd_fetch(args):
     print(f"TOTAL={len(all_ids)}")
     print(f"CHANGED={len(out_changed)}")
     print(f"NEW={len(out_new)}")
+    print(f"UNCHANGED={len(all_ids) - len(out_changed) - len(out_new)}")
 
 
 def main():
