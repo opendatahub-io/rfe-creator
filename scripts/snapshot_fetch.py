@@ -323,9 +323,11 @@ def cmd_fetch(args):
     write_id_file(args.changed_file, out_changed)
 
     # Output counts only — IDs are in files
+    unchanged = len(current) - len(changed) - len(new)
     print(f"TOTAL={len(all_ids)}")
     print(f"CHANGED={len(out_changed)}")
     print(f"NEW={len(out_new)}")
+    print(f"UNCHANGED={unchanged}")
 
 
 def main():
