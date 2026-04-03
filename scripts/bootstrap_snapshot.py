@@ -52,6 +52,8 @@ def _load_run_report(results_dir, run_name):
     with open(path, encoding="utf-8") as f:
         report = yaml.safe_load(f)
     ids = {e["id"] for e in report.get("per_rfe", [])}
+    if not ids:
+        return None, None
     return ids, report
 
 

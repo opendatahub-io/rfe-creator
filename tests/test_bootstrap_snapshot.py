@@ -732,3 +732,41 @@ class TestBootstrapIntegration:
             snap = yaml.safe_load(f)
 
         assert len(snap["issues"]) == 2
+
+    def test_empty_per_rfe_includes_all(self, tmp_path, mock_jira):
+        """Run report with empty per_rfe falls back to including all."""
+        url, server = mock_jira
+        server.issues = {
+            "RHAIRFE-1": "Issue one.",
+            "RHAIRFE-2": "Issue two.",
+        }
+        # processed_ids=[] → run report exists but per_rfe is empty
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000",
+            processed_ids=[])
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT,
+             "--results-dir", results,
+             "--artifacts-dir", art_dir,
+             "project = RHAIRFE"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "no run report" in r.stderr
+
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        snapshots = [f for f in os.listdir(snapshot_dir)
+                     if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, snapshots[0])) as f:
+            snap = yaml.safe_load(f)
+
+        assert len(snap["issues"]) == 2

@@ -599,6 +599,49 @@ class TestCumulativeSnapshot:
         assert set(snap["issues"].keys()) == {
             "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"}
 
+    def test_post_submit_hash_composes_with_cumulative_merge(
+            self, work_dirs, jira, monkeypatch, tmp_path):
+        """Invariant 6: update_snapshot_hashes on a cumulative snapshot
+        correctly updates entries, and the next fetch sees them as
+        UNCHANGED."""
+        jira.create("RHAIRFE-1", "One", "One.")
+        jira.create("RHAIRFE-2", "Two", "Two.")
+        _jira_env(monkeypatch, jira.url)
+
+        # Run 1: both selected
+        _run_fetch(_fetch_args(tmp_path))
+        snap1 = _latest_snapshot(work_dirs)
+        assert len(snap1["issues"]) == 2
+        old_hash_1 = snap1["issues"]["RHAIRFE-1"]
+
+        # Simulate submit: update RHAIRFE-1's description in Jira and
+        # record the post-submit hash in the snapshot
+        jira.request("PUT", "/rest/api/3/issue/RHAIRFE-1",
+                     {"fields": {"description": "Revised by submit."}})
+        new_adf = _text_to_adf("Revised by submit.")
+        post_submit_hash = compute_content_hash(new_adf)
+        update_snapshot_hashes(
+            {"RHAIRFE-1": post_submit_hash},
+            snapshot_dir=work_dirs.snapshot_dir)
+
+        # Verify the snapshot was updated in place
+        snap_updated = _latest_snapshot(work_dirs)
+        assert snap_updated["issues"]["RHAIRFE-1"] == post_submit_hash
+        assert snap_updated["issues"]["RHAIRFE-1"] != old_hash_1
+        # RHAIRFE-2 untouched
+        assert snap_updated["issues"]["RHAIRFE-2"] == snap1["issues"]["RHAIRFE-2"]
+
+        # Run 2: RHAIRFE-1 should be UNCHANGED (post-submit hash matches)
+        args2 = _fetch_args(tmp_path)
+        stdout2 = _run_fetch(args2)
+        assert "CHANGED=0" in stdout2
+        assert "NEW=0" in stdout2
+
+        # Both still in snapshot (cumulative merge preserved)
+        snap2 = _latest_snapshot(work_dirs)
+        assert "RHAIRFE-1" in snap2["issues"]
+        assert "RHAIRFE-2" in snap2["issues"]
+
 
 # ── End-to-End: Clone → Fetch with --data-dir ──────────────────────────────
 
