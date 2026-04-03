@@ -368,27 +368,7 @@ def main():
         print(f"Excluded {done_excluded} issues (Done at run time)",
               file=sys.stderr)
 
-    # Step 5: Merge submitted hashes from run report
-    # Issues whose descriptions were changed by the run have historical
-    # (pre-submit) hashes in the snapshot, but Jira now has the post-submit
-    # content. Use current hashes for these so the next fetch doesn't
-    # re-flag our own changes.
-    if report is not None:
-        submitted_ids = [
-            e["id"] for e in report.get("per_rfe", [])
-            if e.get("auto_revised")
-            and e.get("recommendation") not in ("reject", "autorevise_reject")
-        ]
-        merged = 0
-        for key in submitted_ids:
-            if key in current and key in snapshot_issues:
-                snapshot_issues[key] = current[key]["content_hash"]
-                merged += 1
-        if merged:
-            print(f"Merged {merged} submitted hashes from run report",
-                  file=sys.stderr)
-
-    # Step 6: Write snapshot
+    # Step 5: Write snapshot
     if args.dry_run:
         print(f"\nDry run — would write snapshot with "
               f"{len(snapshot_issues)} issue hashes")
