@@ -297,17 +297,17 @@ def cmd_fetch(args):
     # Diff against previous snapshot
     changed, new = diff_snapshots(current, prev_data)
 
-    # Maintain Jira's original order across both sets
+    # Maintain Jira's original order within each category
     changed_set = set(changed)
     new_set = set(new)
-    priority_ids = [k for k in current.keys()
-                    if k in changed_set or k in new_set]
+    changed_ids = [k for k in current.keys() if k in changed_set]
+    new_ids = [k for k in current.keys() if k in new_set]
     unchanged_ids = [k for k in current.keys()
                      if k not in changed_set and k not in new_set]
 
-    # Changed/new get priority ordering; total capped at limit
+    # Changed get highest priority, then new, then unchanged; total capped at limit
     limit = args.limit or len(current)
-    all_ids = (priority_ids + unchanged_ids)[:limit]
+    all_ids = (changed_ids + new_ids + unchanged_ids)[:limit]
 
     # Build cumulative snapshot: previous entries + selected issues.
     # Only selected issues get their hashes recorded (or updated).
