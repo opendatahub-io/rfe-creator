@@ -611,14 +611,18 @@ def strip_metadata(markdown):
     - Legacy inline metadata lines (now in frontmatter):
       **Jira Key**, **Size**, **Split from**, **Priority**, **Source RFE**
     - Legacy revision notes (now in review files):
-      ### Revision Notes sections, > *Review note: ...* blockquotes,
-      <!-- REVISION NOTE: ... --> HTML comments
+      ### Revision Notes sections, > *Review note: ...* blockquotes
+    - ALL HTML comments (<!-- ... -->) — these are invisible in Jira's
+      rendered view and should never be pushed
     """
     # Strip YAML frontmatter if present
     frontmatter_match = re.match(r'^---\s*\n.*?\n---\s*\n', markdown,
                                  re.DOTALL)
     if frontmatter_match:
         markdown = markdown[frontmatter_match.end():]
+
+    # Strip all HTML comments (invisible in Jira rendered view)
+    markdown = re.sub(r'<!--.*?-->', '', markdown, flags=re.DOTALL)
 
     lines = markdown.split("\n")
     result = []
@@ -633,10 +637,6 @@ def strip_metadata(markdown):
         # Skip metadata lines (legacy inline format, now in frontmatter)
         if re.match(r'^\*\*(Jira Key|Size|Split from|Priority|'
                     r'Source RFE)\*\*:', line):
-            continue
-
-        # Skip HTML revision comments
-        if re.match(r'^\s*<!--\s*REVISION NOTE:', line):
             continue
 
         # Skip review note blockquotes
