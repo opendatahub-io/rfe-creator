@@ -33,7 +33,7 @@ def make_request(url, user, token, body=None, method=None):
         headers["Content-Type"] = "application/json"
         data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         if resp.status == 204:
             return None
         resp_body = resp.read()
