@@ -277,6 +277,80 @@ class TestRemoveLabels:
         assert "Would remove labels" in stdout
 
 
+class TestSplitRefusal:
+    """Tests for submit.py handling split_submit.py exit code 2."""
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nParent content.\n"
+    )
+
+    CHILD_TASK_TPL = (
+        "---\nrfe_id: RFE-{num:03d}\ntitle: Child RFE {num}\n"
+        "priority: Major\nstatus: Ready\n"
+        "parent_key: RHAIRFE-1000\n---\n\nChild {num} content.\n"
+    )
+
+    REVIEW = (
+        "---\nrfe_id: RHAIRFE-1000\nscore: 9\npass: true\n"
+        "recommendation: submit\nfeasibility: feasible\n"
+        "auto_revised: false\nneeds_attention: false\n"
+        "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n"
+        "  not_a_task: 2\n  right_sized: 1\n---\n\nLooks good.\n"
+    )
+
+    def _setup_oversized_split(self, art_dir, num_children=7):
+        """Create a parent with too many children to trigger refusal."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", self.REVIEW)
+        for i in range(1, num_children + 1):
+            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md",
+                   self.CHILD_TASK_TPL.format(num=i))
+
+    def test_refusal_sets_frontmatter_fields(self, art_dir):
+        """Exit code 2 → needs_attention + reason + error in review."""
+        self._setup_oversized_split(art_dir)
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert rc == 0  # submit.py continues after refusal
+
+        assert "Split refused" in stdout
+
+        # Check review frontmatter was updated
+        import yaml
+        review_path = f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md"
+        with open(review_path) as f:
+            content = f.read()
+        end = content.index("---", 3)
+        fm = yaml.safe_load(content[3:end])
+        assert fm["needs_attention"] is True
+        assert "too many child RFEs" in fm["needs_attention_reason"]
+        assert fm["error"] == "split_refused: too many leaf children"
+
+    def test_refusal_prints_needs_attention(self, art_dir):
+        """Exit code 2 → dry-run prints needs-attention comment."""
+        self._setup_oversized_split(art_dir)
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Would post needs-attention comment" in stdout
+
+    def test_refusal_continues_processing(self, art_dir):
+        """Refused split doesn't abort — other RFEs still submitted."""
+        self._setup_oversized_split(art_dir)
+
+        # Add a regular (non-split) RFE that should still be processed
+        _write(f"{art_dir}/rfe-tasks/RFE-099.md",
+               TASK_FM.format(rfe_id="RFE-099"))
+        _write(f"{art_dir}/rfe-reviews/RFE-099-review.md",
+               REVIEW_FM.format(rfe_id="RFE-099", auto_revised="false"))
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Split refused" in stdout
+        assert "Would create" in stdout  # RFE-099 still processed
+
+
 class TestSnapshotUpdate:
     """Tests for snapshot update after submission."""
 

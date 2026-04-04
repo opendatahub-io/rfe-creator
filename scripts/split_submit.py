@@ -55,6 +55,8 @@ from artifact_utils import (
     ValidationError,
 )
 
+MAX_LEAF_CHILDREN = 6
+
 
 # ─── Recovery / State Detection ──────────────────────────────────────────────
 
@@ -370,6 +372,12 @@ def main():
         print("Error: No child RFEs found with parent_key="
               f"{args.parent_key}.", file=sys.stderr)
         sys.exit(1)
+
+    if len(child_tasks) > MAX_LEAF_CHILDREN:
+        print(f"Error: {args.parent_key} has {len(child_tasks)} leaf children "
+              f"(max {MAX_LEAF_CHILDREN}). Refusing to submit — requires "
+              f"human review.", file=sys.stderr)
+        sys.exit(2)
 
     # Build children list: (rfe_id, title, priority, artifact_path)
     children = []

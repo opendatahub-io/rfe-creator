@@ -157,10 +157,11 @@ def main():
     # Find RHAIRFE parents that were split (Archived + have children)
     child_parent_keys = {data.get("parent_key") for _, data in tasks
                          if data.get("parent_key")}
-    split_parents = [data["rfe_id"] for _, data in tasks
-                     if data.get("status") == "Archived"
-                     and data["rfe_id"].startswith("RHAIRFE-")
-                     and data["rfe_id"] in child_parent_keys]
+    split_parent_data = {data["rfe_id"]: data for _, data in tasks
+                         if data.get("status") == "Archived"
+                         and data["rfe_id"].startswith("RHAIRFE-")
+                         and data["rfe_id"] in child_parent_keys}
+    split_parents = list(split_parent_data.keys())
 
     if split_parents:
         print(f"Phase 1: Submitting {len(split_parents)} split parent(s)\n")
@@ -174,7 +175,41 @@ def main():
                 cmd.append("--dry-run")
             print(f"--- {parent_key} ---")
             result = subprocess.run(cmd)
-            if result.returncode != 0:
+            if result.returncode == 2:
+                # Too many children — record refusal, flag for human review
+                print(f"  {parent_key}: Split refused — too many children")
+                review_path = os.path.join(args.artifacts_dir, "rfe-reviews",
+                                           f"{parent_key}-review.md")
+                attn_reason = (
+                    "Automatic splitting produced too many child RFEs. "
+                    "The decomposition needs human review to determine "
+                    "the right granularity."
+                )
+                update_frontmatter(review_path, {
+                    "error": "split_refused: too many leaf children",
+                    "needs_attention": True,
+                    "needs_attention_reason": attn_reason,
+                }, "rfe-review")
+
+                # Reuse the existing helper for the Jira comment
+                parent_labels = (split_parent_data[parent_key]
+                                 .get("original_labels") or [])
+                refusal_entry = {
+                    "rfe_id": parent_key,
+                    "attn_reason": attn_reason,
+                    "original_labels": parent_labels,
+                }
+                refusal_results = {parent_key: parent_key}
+                _post_needs_attention_comment(
+                    server, user, token, refusal_entry,
+                    refusal_results, args.dry_run)
+
+                # Add label (helper only posts comment)
+                if not args.dry_run:
+                    add_labels(server, user, token, parent_key,
+                               ["rfe-creator-needs-attention"])
+                continue
+            elif result.returncode != 0:
                 print(f"Error: split_submit.py failed for {parent_key} "
                       f"(exit code {result.returncode})", file=sys.stderr)
                 sys.exit(result.returncode)
