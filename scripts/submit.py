@@ -23,6 +23,10 @@ import re
 import subprocess
 import sys
 
+# Ensure progress output is visible immediately when stdout is redirected
+# to a file or pipe (Python defaults to full buffering in that case).
+sys.stdout.reconfigure(line_buffering=True)
+
 import yaml
 
 from jira_utils import (
