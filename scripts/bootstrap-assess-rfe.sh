@@ -2,6 +2,11 @@
 # Ensures the assess-rfe plugin is available locally.
 # Safe to run multiple times — clones on first run, pulls updates after.
 
+if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
+  echo "RFE_SKIP_BOOTSTRAP set - skipping dependency bootstrapping step"
+  exit 0
+fi
+
 CONTEXT_DIR=".context/assess-rfe"
 RUBRIC_FILE="$CONTEXT_DIR/scripts/agent_prompt.md"
 
