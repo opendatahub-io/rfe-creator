@@ -593,3 +593,69 @@ class TestSplitConflictDetection:
         # Check needs-attention label was added
         issue = jira.get("RHAIRFE-1000")
         assert "rfe-creator-needs-attention" in issue["fields"]["labels"]
+
+
+class TestSplitFieldInheritance:
+    """Integration test: children inherit parent's components and labels."""
+
+    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..",
+                                "scripts", "split_submit.py")
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nParent content.\n"
+    )
+    CHILD_TASK_TPL = (
+        "---\nrfe_id: RFE-{num:03d}\ntitle: Child RFE {num}\n"
+        "priority: Major\nstatus: Ready\n"
+        "parent_key: RHAIRFE-1000\n---\n\nChild {num} content.\n"
+    )
+
+    def test_children_inherit_components_and_labels(self, art_dir, jira):
+        """Split children get parent's components and non-automation labels."""
+        jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.",
+                    labels=["3.5-candidate", "rfe-creator-auto-revised"],
+                    components=["AI Safety"])
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
+               "Parent content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               self.CHILD_TASK_TPL.format(num=1))
+        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
+               self.CHILD_TASK_TPL.format(num=2))
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Find the created children
+        issues = jira.search("project = RHAIRFE",
+                             fields="key,labels,components")
+        children = [i for i in issues
+                    if i["key"] != "RHAIRFE-1000"]
+        assert len(children) == 2
+
+        for child in children:
+            child_detail = jira.get(child["key"])
+            labels = child_detail["fields"]["labels"]
+            components = [c["name"] for c in
+                          child_detail["fields"].get("components", [])]
+
+            # Should inherit non-automation label
+            assert "3.5-candidate" in labels
+            # Should NOT inherit automation labels
+            assert "rfe-creator-auto-revised" not in labels
+            # Should have its own automation labels
+            assert "rfe-creator-auto-created" in labels
+            assert "rfe-creator-split-result" in labels
+            # Should inherit component
+            assert "AI Safety" in components
