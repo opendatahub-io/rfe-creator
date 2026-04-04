@@ -83,6 +83,8 @@ class SubmissionState:
         self.phase2_done = {}   # child_index -> created Jira key
         self.parent_closed = False
         self.total_children = 0
+        self.parent_components = []  # inherited by children
+        self.parent_labels = []      # non-automation labels inherited
 
 
 def discover_state(server, user, token, parent_key, expected_children):
@@ -113,9 +115,9 @@ def discover_state(server, user, token, parent_key, expected_children):
             state.phase2_done[idx] = created_key
             continue
 
-    # 2. Check issue links for "Issue split" outward links
+    # 2. Check issue links, components, and labels
     issue = get_issue(server, user, token, parent_key,
-                      ["issuelinks", "status"])
+                      ["issuelinks", "status", "components", "labels"])
     for link in issue.get("fields", {}).get("issuelinks", []):
         if link.get("type", {}).get("name") != "Issue split":
             continue
@@ -127,6 +129,16 @@ def discover_state(server, user, token, parent_key, expected_children):
         for idx, (_, title, _, _) in enumerate(expected_children, 1):
             if title == child_summary and idx not in state.phase2_done:
                 state.phase2_done[idx] = child_key
+
+    # Capture parent's components and non-automation labels for inheritance
+    state.parent_components = [
+        c["name"] for c in
+        issue.get("fields", {}).get("components", [])
+    ]
+    state.parent_labels = [
+        l for l in issue.get("fields", {}).get("labels", [])
+        if not l.startswith("rfe-creator-")
+    ]
 
     # 3. Check parent status
     status_cat = (issue.get("fields", {}).get("status", {})
@@ -200,20 +212,27 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         if review_rec == "submit":
             labels.append("rfe-creator-autofix-rubric-pass")
 
+        # Inherit non-automation labels from parent
+        labels = state.parent_labels + labels
+
         if dry_run:
             print(f"  Phase 2: Would create RHAIRFE ticket for child "
                   f"{idx}/{total}: {title} (priority: {priority})")
             print(f"           Labels: {', '.join(labels)}")
+            if state.parent_components:
+                print(f"           Components: "
+                      f"{', '.join(state.parent_components)}")
             print(f"           Would link to {parent_key} via 'Issue split'")
             if attn_reason:
                 print(f"           Would post needs-attention comment")
             state.phase2_done[idx] = "RHAIRFE-DRY"
             continue
 
-        # 1. Create ticket with labels
+        # 1. Create ticket with labels and inherited components
         child_key = create_issue(server, user, token, "RHAIRFE",
                                  "Feature Request", title, description_adf,
-                                 priority, labels=labels)
+                                 priority, labels=labels,
+                                 components=state.parent_components)
         print(f"  Phase 2: Created {child_key} for child {idx}/{total}: "
               f"{title}")
         print(f"           Labels: {', '.join(labels)}")

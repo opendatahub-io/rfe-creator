@@ -95,7 +95,8 @@ def jira(jira_emu):
         url = jira_emu
 
         @staticmethod
-        def create(key, summary, description, labels=None):
+        def create(key, summary, description, labels=None,
+                   components=None):
             """Import an issue with a specific key."""
             issue = {
                 "key": key,
@@ -106,6 +107,8 @@ def jira(jira_emu):
             }
             if labels:
                 issue["labels"] = labels
+            if components:
+                issue["components"] = [{"name": c} for c in components]
             _jira_request(jira_emu, "POST", "/api/admin/import",
                           {"issues": [issue]})
 

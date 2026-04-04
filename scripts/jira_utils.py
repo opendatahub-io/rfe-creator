@@ -123,7 +123,7 @@ def add_comment(server, user, token, issue_key, body_adf):
 
 
 def create_issue(server, user, token, project, issue_type, summary,
-                 description_adf, priority, labels=None):
+                 description_adf, priority, labels=None, components=None):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
         "fields": {
@@ -136,6 +136,8 @@ def create_issue(server, user, token, project, issue_type, summary,
     }
     if labels:
         body["fields"]["labels"] = labels
+    if components:
+        body["fields"]["components"] = [{"name": c} for c in components]
     result = api_call_with_retry(server, "/issue", user, token, body=body)
     return result["key"]
 
