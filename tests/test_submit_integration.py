@@ -506,3 +506,90 @@ class TestSnapshotUpdate:
             data = yaml.safe_load(f)
         # Snapshot untouched — still just the original issue
         assert data["issues"] == {"RHAIRFE-1234": "existing"}
+
+
+class TestSplitConflictDetection:
+    """Integration test: split_submit.py detects parent conflict."""
+
+    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..",
+                                "scripts", "split_submit.py")
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nOriginal content.\n"
+    )
+    CHILD_TASK = (
+        "---\nrfe_id: RFE-001\ntitle: Child RFE\n"
+        "priority: Major\nstatus: Ready\n"
+        "parent_key: RHAIRFE-1000\n---\n\nChild content.\n"
+    )
+
+    def test_conflict_exits_code_3(self, art_dir, jira):
+        """Parent modified in Jira since fetch → exit code 3."""
+        # Jira has different content than our original
+        jira.create("RHAIRFE-1000", "Parent RFE", "Edited by someone.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
+               "Original content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 3
+        assert "modified in Jira since fetch" in r.stderr
+
+    def test_no_conflict_proceeds(self, art_dir, jira):
+        """Parent unchanged in Jira → no conflict exit."""
+        body = "Original content."
+        jira.create("RHAIRFE-1000", "Parent RFE", body)
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode != 3
+
+    def test_submit_handles_conflict_refusal(self, art_dir, jira):
+        """submit.py handles split conflict (exit 3) gracefully."""
+        # Parent in Jira has different content than our original
+        jira.create("RHAIRFE-1000", "Parent RFE", "Edited by someone.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
+               "Original content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK)
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md",
+               _review("RHAIRFE-1000"))
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0  # continues after refusal
+        assert "Jira conflict" in r.stdout
+
+        # Check review frontmatter was updated
+        fm = _read_frontmatter(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["needs_attention"] is True
+        assert "modified in Jira" in fm["needs_attention_reason"]
+        assert fm["error"] == "split_refused: jira conflict"
+
+        # Check needs-attention label was added
+        issue = jira.get("RHAIRFE-1000")
+        assert "rfe-creator-needs-attention" in issue["fields"]["labels"]

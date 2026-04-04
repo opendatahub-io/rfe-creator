@@ -38,6 +38,8 @@ from jira_utils import (
     get_transitions,
     do_transition,
     markdown_to_adf,
+    adf_to_markdown,
+    normalize_for_compare,
     text_to_adf_paragraph,
     archival_comment_adf,
     strip_metadata,
@@ -393,6 +395,35 @@ def main():
     for i, (rfe_id, title, priority, _) in enumerate(children, 1):
         print(f"  {i}. {rfe_id}: {title} (Priority: {priority})")
     print()
+
+    # Check for Jira conflicts on the parent before starting
+    if not args.dry_run:
+        original_path = os.path.join(
+            args.artifacts_dir, "rfe-originals", f"{args.parent_key}.md")
+        if os.path.exists(original_path):
+            try:
+                with open(original_path, encoding="utf-8") as f:
+                    orig_snap = normalize_for_compare(f.read())
+                issue = get_issue(server, user, token, args.parent_key,
+                                  fields=["description"])
+                desc_raw = issue.get("fields", {}).get("description")
+                if isinstance(desc_raw, dict):
+                    jira_desc = normalize_for_compare(
+                        adf_to_markdown(desc_raw))
+                elif desc_raw is None:
+                    jira_desc = ""
+                else:
+                    jira_desc = normalize_for_compare(str(desc_raw))
+                if orig_snap != jira_desc:
+                    print(f"Error: {args.parent_key} description was modified "
+                          f"in Jira since fetch. Refusing to split — requires "
+                          f"human review.", file=sys.stderr)
+                    sys.exit(3)
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"Warning: conflict check failed for "
+                      f"{args.parent_key}: {e}", file=sys.stderr)
 
     # Discover state (skip for dry-run without credentials)
     if args.dry_run and not all([server, user, token]):

@@ -209,6 +209,38 @@ def main():
                     add_labels(server, user, token, parent_key,
                                ["rfe-creator-needs-attention"])
                 continue
+            elif result.returncode == 3:
+                # Jira conflict — parent modified since fetch
+                print(f"  {parent_key}: Split refused — Jira conflict")
+                review_path = os.path.join(args.artifacts_dir, "rfe-reviews",
+                                           f"{parent_key}-review.md")
+                attn_reason = (
+                    "Parent RFE description was modified in Jira since "
+                    "fetch. Split submission skipped to avoid "
+                    "overwriting human edits."
+                )
+                update_frontmatter(review_path, {
+                    "error": "split_refused: jira conflict",
+                    "needs_attention": True,
+                    "needs_attention_reason": attn_reason,
+                }, "rfe-review")
+
+                parent_labels = (split_parent_data[parent_key]
+                                 .get("original_labels") or [])
+                refusal_entry = {
+                    "rfe_id": parent_key,
+                    "attn_reason": attn_reason,
+                    "original_labels": parent_labels,
+                }
+                refusal_results = {parent_key: parent_key}
+                _post_needs_attention_comment(
+                    server, user, token, refusal_entry,
+                    refusal_results, args.dry_run)
+
+                if not args.dry_run:
+                    add_labels(server, user, token, parent_key,
+                               ["rfe-creator-needs-attention"])
+                continue
             elif result.returncode != 0:
                 print(f"Error: split_submit.py failed for {parent_key} "
                       f"(exit code {result.returncode})", file=sys.stderr)
