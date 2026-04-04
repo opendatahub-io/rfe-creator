@@ -348,11 +348,14 @@ def markdown_to_adf(markdown):
             continue
 
         # Heading
-        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        heading_match = re.match(r'^(#{1,6})\s+(.*)', line)
         if heading_match:
             level = len(heading_match.group(1))
-            text = heading_match.group(2)
-            content.append(_adf_heading(level, _parse_inline(text)))
+            text = heading_match.group(2).strip()
+            if text:
+                content.append(_adf_heading(level, _parse_inline(text)))
+            else:
+                content.append(_adf_heading(level, [_adf_text("")]))
             i += 1
             continue
 
@@ -435,6 +438,12 @@ def markdown_to_adf(markdown):
         if para_lines:
             text = " ".join(para_lines)
             content.append(_adf_paragraph(_parse_inline(text)))
+        else:
+            # Safety net: no branch matched and i was not advanced.
+            # Treat the line as a standalone paragraph to prevent
+            # infinite loops on any unrecognized line format.
+            content.append(_adf_paragraph(_parse_inline(line)))
+            i += 1
 
     return _adf_doc(content) if content else \
         _adf_doc([_adf_paragraph([_adf_text("")])])
