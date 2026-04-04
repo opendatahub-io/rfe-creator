@@ -261,6 +261,37 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         state.phase2_done[idx] = child_key
 
 
+def build_split_summary_adf(server, children, state, total):
+    """Build ADF for the split summary comment with inlineCard smart links."""
+    list_items = []
+    for idx, (_, title, _, _) in enumerate(children, 1):
+        child_key = state.phase2_done[idx]
+        url = f"{server.rstrip('/')}/browse/{child_key}"
+        list_items.append({
+            "type": "listItem",
+            "content": [{"type": "paragraph", "content": [
+                {"type": "inlineCard", "attrs": {"url": url}},
+                {"type": "text", "text": f": {title}"},
+            ]}]
+        })
+    return {
+        "type": "doc", "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [
+                {"type": "text", "text": "[RFE Creator]",
+                 "marks": [{"type": "em"}]},
+                {"type": "text", "text": f" This RFE has been split into "
+                                         f"{total} child RFEs:"},
+            ]},
+            {"type": "bulletList", "content": list_items},
+            {"type": "paragraph", "content": [
+                {"type": "text",
+                 "text": "Original content preserved in comments above."},
+            ]},
+        ]
+    }
+
+
 def phase3_close(server, user, token, parent_key, children, state, dry_run):
     """Close the parent ticket with resolution Obsolete."""
     if state.parent_closed:
@@ -309,18 +340,9 @@ def phase3_close(server, user, token, parent_key, children, state, dry_run):
                   fields={"resolution": {"name": "Obsolete"}})
     print(f"  Phase 3: Transitioned {parent_key} to Closed (Obsolete)")
 
-    # Post summary comment
-    child_lines = []
-    for idx, (_, title, _, _) in enumerate(children, 1):
-        child_key = state.phase2_done[idx]
-        child_lines.append(f"- {child_key}: {title}")
-    summary = (
-        f"[RFE Creator] This RFE has been split into {total} child RFEs:\n"
-        + "\n".join(child_lines)
-        + "\n\nOriginal content preserved in comments above."
-    )
-    add_comment(server, user, token, parent_key,
-                text_to_adf_paragraph(summary))
+    # Post summary comment with smart-linked child keys
+    summary_adf = build_split_summary_adf(server, children, state, total)
+    add_comment(server, user, token, parent_key, summary_adf)
     print(f"  Phase 3: Posted summary comment")
 
 
