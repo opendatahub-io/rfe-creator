@@ -2,6 +2,11 @@
 # Fetches the latest RHOAI architecture context via sparse checkout.
 # Safe to run multiple times — pulls updates if already cloned.
 
+if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
+  echo "RFE_SKIP_BOOTSTRAP set - skipping dependency bootstrapping step"
+  exit 0
+fi
+
 CONTEXT_DIR=".context/architecture-context"
 
 LATEST=$(curl -sL https://api.github.com/repos/opendatahub-io/architecture-context/contents/architecture | python3 -c "import sys,json; entries=json.load(sys.stdin); names=sorted(e['name'] for e in entries if e['name'].startswith('rhoai-')); print(names[-1] if names else '')")
