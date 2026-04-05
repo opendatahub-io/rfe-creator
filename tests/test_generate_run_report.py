@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from generate_run_report import build_report
+from generate_run_report import build_report, _parse_run_id
 
 TASK_TEMPLATE = """\
 ---
@@ -56,7 +56,7 @@ def art_dir(tmp_path, monkeypatch):
     for d in ["rfe-tasks", "rfe-reviews"]:
         os.makedirs(tmp_path / "artifacts" / d)
     import generate_run_report
-    monkeypatch.setattr(generate_run_report, "ARTIFACTS_DIR",
+    monkeypatch.setattr(generate_run_report, "DEFAULT_ARTIFACTS_DIR",
                         str(tmp_path / "artifacts"))
     return str(tmp_path / "artifacts")
 
@@ -156,3 +156,99 @@ class TestSplitChildrenIncluded:
 
         assert len(report["per_rfe"]) == 1
         assert report["per_rfe"][0]["id"] == "RHAIRFE-1234"
+
+
+class TestParseRunId:
+    def test_yyyymmdd_hhmmss_format(self):
+        """YYYYMMDD-HHMMSS passes through unchanged."""
+        assert _parse_run_id("20260404-170041") == "20260404-170041"
+
+    def test_iso_format(self):
+        """ISO timestamp is converted to YYYYMMDD-HHMMSS."""
+        assert _parse_run_id("2026-04-04T17:00:41Z") == "20260404-170041"
+
+    def test_iso_format_with_offset(self):
+        """ISO timestamp with UTC offset."""
+        assert _parse_run_id("2026-04-04T17:00:41+00:00") == "20260404-170041"
+
+
+class TestScanReviewFiles:
+    def test_build_report_with_artifacts_dir(self, art_dir):
+        """build_report accepts artifacts_dir parameter."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=9,
+                                      pass_val="true", recommendation="submit",
+                                      right_sized=2))
+
+        report = build_report(["RHAIRFE-1234"], "20260404-170041", 5,
+                              [], [], artifacts_dir=art_dir)
+
+        assert report["run_id"] == "20260404-170041"
+        assert len(report["per_rfe"]) == 1
+
+    def test_cli_scan_review_files(self, tmp_path):
+        """When no IDs passed on CLI, scan review files."""
+        art = str(tmp_path / "artifacts")
+        for d in ["rfe-tasks", "rfe-reviews"]:
+            os.makedirs(os.path.join(art, d))
+        _write(f"{art}/rfe-tasks/RHAIRFE-100.md",
+               TASK_TEMPLATE.format(rfe_id="RHAIRFE-100", extra=""))
+        _write(f"{art}/rfe-reviews/RHAIRFE-100-review.md",
+               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-100", score=8,
+                                      pass_val="true", recommendation="submit",
+                                      right_sized=2))
+        _write(f"{art}/rfe-tasks/RHAIRFE-200.md",
+               TASK_TEMPLATE.format(rfe_id="RHAIRFE-200", extra=""))
+        _write(f"{art}/rfe-reviews/RHAIRFE-200-review.md",
+               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-200", score=7,
+                                      pass_val="true", recommendation="submit",
+                                      right_sized=1))
+
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__),
+             "..", "scripts", "generate_run_report.py"),
+             "--start-time", "20260404-170041",
+             "--artifacts-dir", art],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        # Should have found both review files
+        import yaml
+        out_path = result.stdout.strip()
+        with open(out_path) as f:
+            report = yaml.safe_load(f)
+        ids = [e["id"] for e in report["per_rfe"]]
+        assert "RHAIRFE-100" in ids
+        assert "RHAIRFE-200" in ids
+
+
+class TestGenerateReviewPdfArtifactsDir:
+    def test_artifacts_dir_uses_correct_paths(self, tmp_path):
+        """generate_review_pdf.py --artifacts-dir reads from the given dir."""
+        art = str(tmp_path / "custom-artifacts")
+        for d in ["rfe-tasks", "rfe-reviews", "rfe-originals"]:
+            os.makedirs(os.path.join(art, d))
+        _write(f"{art}/rfe-tasks/RHAIRFE-500.md",
+               TASK_TEMPLATE.format(rfe_id="RHAIRFE-500", extra=""))
+        _write(f"{art}/rfe-reviews/RHAIRFE-500-review.md",
+               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-500", score=8,
+                                      pass_val="true", recommendation="submit",
+                                      right_sized=2))
+
+        out_file = str(tmp_path / "report.html")
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__),
+             "..", "scripts", "generate_review_pdf.py"),
+             "--artifacts-dir", art,
+             "--output", out_file],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert os.path.exists(out_file)
+        with open(out_file) as f:
+            html = f.read()
+        assert "RHAIRFE-500" in html
