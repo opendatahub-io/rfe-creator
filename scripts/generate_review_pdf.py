@@ -477,19 +477,33 @@ def main():
     }
     .score-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 9pt;
+        border-radius: 4pt;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+        overflow: hidden;
     }
+    .score-table thead tr:first-child th:first-child { border-top-left-radius: 4pt; }
+    .score-table thead tr:first-child th:last-child { border-top-right-radius: 4pt; }
     .score-table th {
         background: #0f3460;
         color: white;
-        padding: 4pt 8pt;
+        padding: 4pt 13pt 4pt 13pt;
         text-align: left;
         font-weight: 600;
+        border: 1px solid #0f3460;
     }
     .score-table td {
-        padding: 3pt 8pt;
-        border-bottom: 1px solid #eee;
+        padding: 3pt 8pt 3pt 13pt;
+        border-top: 1px solid #eee;
+    }
+    .score-table td:first-child { border-left: 1px solid #a0b0c0; }
+    .score-table td:last-child { border-right: 1px solid #a0b0c0; }
+    .score-table tr:last-child td { border-bottom: 1px solid #a0b0c0; }
+    .score-table th:first-child,
+    .score-table td:first-child {
+        width: 50%;
     }
     .score-table tr:nth-child(even) { background: #fafafa; }
     .criterion { font-weight: 600; color: #333; }
@@ -577,20 +591,30 @@ def main():
     .stat-arrow { font-size: 18pt; color: #999; }
     .summary-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 9pt;
         margin: 12pt 0;
+        border-radius: 4pt;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+        overflow: hidden;
     }
+    .summary-table thead tr:first-child th:first-child { border-top-left-radius: 4pt; }
+    .summary-table thead tr:first-child th:last-child { border-top-right-radius: 4pt; }
     .summary-table th {
         background: #0f3460;
         color: white;
-        padding: 5pt 8pt;
+        padding: 5pt 13pt 5pt 13pt;
         text-align: left;
+        border: 1px solid #0f3460;
     }
     .summary-table td {
-        padding: 4pt 8pt;
-        border-bottom: 1px solid #eee;
+        padding: 4pt 8pt 4pt 13pt;
+        border-top: 1px solid #eee;
     }
+    .summary-table td:first-child { border-left: 1px solid #a0b0c0; }
+    .summary-table td:last-child { border-right: 1px solid #a0b0c0; }
+    .summary-table tr:last-child td { border-bottom: 1px solid #a0b0c0; }
     .summary-table tr:nth-child(even) { background: #fafafa; }
     .key-col {
         font-family: monospace;
@@ -709,7 +733,7 @@ def main():
         <h1>RFE Review &amp; Remediation Report</h1>
         <p class="subtitle">{", ".join(subtitle_parts)}</p>
 
-        <h3>Existing RFEs</h3>
+        <h3><a href="#section-existing" class="jira-link">Existing RFEs</a></h3>
         <div class="summary-stats">
             <div class="stat-box">
                 <div class="stat-value">{ex_before_passing}/{ex_scored}</div>
@@ -717,7 +741,7 @@ def main():
             </div>
             <div class="stat-arrow">&rarr;</div>
             <div class="stat-box">
-                <div class="stat-value">{ex_after_passing}/{ex_scored}</div>
+                <div class="stat-value">{ex_after_passing}/{ex_scored}{' <span style="color:#2d6a2d;">&#x2191;</span>' if ex_after_passing > ex_before_passing else ''}</div>
                 <div class="stat-label">Passing After</div>
             </div>
             <div class="stat-box">
@@ -726,7 +750,7 @@ def main():
             </div>
             <div class="stat-arrow">&rarr;</div>
             <div class="stat-box">
-                <div class="stat-value">{ex_avg_after:.1f}</div>
+                <div class="stat-value">{ex_avg_after:.1f}{' <span style="color:#2d6a2d;">&#x2191;</span>' if ex_avg_after > ex_avg_before else ''}</div>
                 <div class="stat-label">Avg Score After</div>
             </div>
 {f"""            <div class="stat-box" style="border-color: #e67e22;">
@@ -734,7 +758,7 @@ def main():
                 <div class="stat-label">Errors</div>
             </div>""" if ex_errors else ''}
         </div>
-{f"""        <h3>Split RFEs</h3>
+{f"""        <h3><a href="#section-splits" class="jira-link">Split RFEs</a></h3>
         <div class="summary-stats">
             <div class="stat-box">
                 <div class="stat-value">{len(split_parents)}</div>
@@ -903,7 +927,7 @@ def main():
         return rows
 
     if existing:
-        html += f'''        <tr><td colspan="8" style="background:#e8eaf6;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#0f3460;">Existing RFEs ({len(existing)})</td></tr>
+        html += f'''        <tr id="section-existing"><td colspan="8" style="background:#e8eaf6;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#0f3460;">Existing RFEs ({len(existing)})</td></tr>
 '''
         html += render_table_rows(existing)
 
@@ -913,12 +937,12 @@ def main():
         if sp_error_count:
             sp_header += f', {sp_error_count} refused'
         sp_header += ')'
-        html += f'''        <tr><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
+        html += f'''        <tr id="section-splits"><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
 '''
         html += render_split_parent_rows(split_parents)
 
     if intermediaries:
-        html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split (superseded) ({len(intermediaries)})</td></tr>
+        html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split Intermediaries ({len(intermediaries)}) &mdash; superseded by children</td></tr>
 '''
         for r in intermediaries:
             leaves = get_leaf_descendants(r['rfe_id'])
@@ -1122,17 +1146,27 @@ def main():
                         child_prefix = prefix + ('    ' if last else '&#x2502;   ')
                         tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
                     else:
-                        pass_icon = '&#x2713;' if c['after_pass'] else '&#x2717;'
-                        pass_color = '#2d6a2d' if c['after_pass'] else '#c0392b'
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} ({c["after_total"]}/10) <span style="color:{pass_color};font-weight:700;">{pass_icon}</span>{hl_end}</div>\n'
+                        if c.get('parent_refused'):
+                            score_style = 'color:#999;font-style:italic;'
+                            suffix = ' not submitted'
+                        elif c['after_pass']:
+                            score_style = 'color:#2d6a2d;font-weight:700;'
+                            suffix = ''
+                        else:
+                            score_style = 'color:#c0392b;font-weight:700;'
+                            suffix = ''
+                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a> <span style="{score_style}">[{c["after_total"]}/10]{suffix}</span>  {html_escape(c["title"])}{hl_end}</div>\n'
                 return tree_html
 
             # For intermediaries, show the full tree from the root ancestor
             tree_root = find_tree_root(r) if r.get('is_intermediary') else r
-            highlight_id = r['rfe_id'] if r.get('is_intermediary') else None
+            highlight_id = r['rfe_id']
+            root_hl = (tree_root['rfe_id'] == highlight_id)
+            hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if root_hl else ''
+            hl_end = ' &#x25C0;</span>' if root_hl else ''
             html += '            <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">\n'
             # Root node
-            html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{html_escape(tree_root["rfe_id"])}  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10)</div>\n'
+            html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{hl_start}<a href="#{tree_root["rfe_id"]}" style="color:inherit;">{html_escape(tree_root["rfe_id"])}</a>  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10){hl_end}</div>\n'
             html += render_tree(tree_root['rfe_id'], highlight_id=highlight_id)
             html += '            </div>\n'
 
@@ -1202,7 +1236,7 @@ def main():
             if tree_root['rfe_id'] != r['rfe_id']:
                 html += '            <h3>Split Tree</h3>\n'
                 html += '            <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">\n'
-                html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{html_escape(tree_root["rfe_id"])}  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10)</div>\n'
+                html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;"><a href="#{tree_root["rfe_id"]}" style="color:inherit;">{html_escape(tree_root["rfe_id"])}</a>  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10)</div>\n'
                 html += render_tree(tree_root['rfe_id'], highlight_id=r['rfe_id'])
                 html += '            </div>\n'
 
