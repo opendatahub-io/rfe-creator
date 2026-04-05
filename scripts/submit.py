@@ -261,14 +261,19 @@ def main():
     # Re-scan after splits may have renamed files
     tasks = scan_task_files(args.artifacts_dir)
 
-    # Filter to non-archived RFEs without a parent (split children were
-    # already handled by split_submit.py in Phase 1)
+    # Filter to non-archived, non-submitted RFEs without a parent (split
+    # children were already handled by split_submit.py in Phase 1).
+    # Filtering Submitted makes replay safe: already-submitted entries are
+    # skipped, preventing duplicate Jira creates.
     submittable = [(path, data) for path, data in tasks
-                   if data.get("status") != "Archived"
+                   if data.get("status") not in ("Archived", "Submitted")
                    and not data.get("parent_key")]
+    any_submitted = any(data.get("status") == "Submitted"
+                        for _, data in tasks
+                        if not data.get("parent_key"))
     if not submittable:
-        if split_parents:
-            # All RFEs were splits — nothing left for Phase 2
+        if split_parents or any_submitted:
+            # Splits-only run, or replay where Phase 2 already completed
             rebuild_index(args.artifacts_dir)
             print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
             return
@@ -460,6 +465,9 @@ def main():
                 else:
                     add_labels(server, user, token, rfe_id, labels)
                     print(f"  {rfe_id}: Labels: {', '.join(labels)}")
+                    update_frontmatter(entry["task_path"],
+                                       {"status": "Submitted"},
+                                       "rfe-task")
                 results[rfe_id] = rfe_id
                 _post_needs_attention_comment(
                     server, user, token, entry, results, args.dry_run)
@@ -487,6 +495,9 @@ def main():
                         print(f"           Labels: {', '.join(labels)}")
                     submitted_hashes[rfe_id] = compute_content_hash(
                         description_adf)
+                    update_frontmatter(entry["task_path"],
+                                       {"status": "Submitted"},
+                                       "rfe-task")
                 results[rfe_id] = rfe_id
             else:
                 # Create new ticket
@@ -526,6 +537,14 @@ def main():
             _post_needs_attention_comment(
                 server, user, token, entry, results, args.dry_run)
 
+            # Rename new RFEs after all Jira ops succeed (must be after
+            # comment posting which looks up files by original rfe_id)
+            if not entry["is_existing"] and not args.dry_run:
+                new_key = results.get(rfe_id)
+                if new_key and new_key != "RHAIRFE-DRY":
+                    rename_to_jira_key(args.artifacts_dir, rfe_id, new_key)
+                    print(f"  {rfe_id}: Renamed to {new_key}")
+
         except Exception as exc:
             msg = str(exc)
             print(f"  {rfe_id}: ERROR — {msg}", file=sys.stderr)
@@ -544,26 +563,6 @@ def main():
                     pass  # best-effort
 
     print()
-
-    # Post-submit: update frontmatter and rename files
-    for entry in plan:
-        rfe_id = entry["rfe_id"]
-        if entry["skip_reason"]:
-            continue
-
-        assigned_key = results.get(rfe_id)
-        if not assigned_key or assigned_key == "RHAIRFE-DRY":
-            continue
-
-        if not entry["is_existing"]:
-            # New RFE: rename files from RFE-NNN to RHAIRFE-NNNN
-            rename_to_jira_key(args.artifacts_dir, rfe_id, assigned_key)
-            print(f"  {rfe_id}: Renamed artifacts to {assigned_key}")
-        else:
-            # Existing: just update status
-            update_frontmatter(entry["task_path"],
-                               {"status": "Submitted"},
-                               "rfe-task")
 
     # Update snapshot with post-submit hashes so the next fetch
     # doesn't re-flag our own changes

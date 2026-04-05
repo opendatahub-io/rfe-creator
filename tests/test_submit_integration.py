@@ -659,3 +659,118 @@ class TestSplitFieldInheritance:
             assert "rfe-creator-split-result" in labels
             # Should inherit component
             assert "AI Safety" in components
+
+
+class TestReplayIdempotency:
+    """Submit replay must be safe: no duplicate creates, no re-updates."""
+
+    def test_replay_new_rfe_no_duplicate(self, art_dir, jira):
+        """Create RFE, replay → no duplicate issue in Jira."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               _review("RFE-001"))
+
+        # First run: creates the issue + renames file
+        r1 = _run_submit(art_dir, jira.url)
+        assert r1.returncode == 0, r1.stderr
+        assert "Created" in r1.stdout
+
+        issues_after_first = jira.search("project = RHAIRFE")
+        assert len(issues_after_first) == 1
+        key = issues_after_first[0]["key"]
+
+        # File should be renamed and marked Submitted
+        assert os.path.exists(f"{art_dir}/rfe-tasks/{key}.md")
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        fm = _read_frontmatter(f"{art_dir}/rfe-tasks/{key}.md")
+        assert fm["status"] == "Submitted"
+
+        # Second run (replay): should skip, no new issue
+        r2 = _run_submit(art_dir, jira.url)
+        assert r2.returncode == 0, r2.stderr
+        assert "Created" not in r2.stdout
+
+        issues_after_second = jira.search("project = RHAIRFE")
+        assert len(issues_after_second) == 1  # No duplicate
+
+    def test_replay_existing_rfe_no_resubmit(self, art_dir, jira):
+        """Update existing RFE, replay → second run skips it."""
+        jira.create("RHAIRFE-1234", "Test RFE", "Original.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised content.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234", auto_revised="true"))
+
+        # First run: updates the issue
+        r1 = _run_submit(art_dir, jira.url)
+        assert r1.returncode == 0, r1.stderr
+        assert "Updated" in r1.stdout
+
+        fm = _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")
+        assert fm["status"] == "Submitted"
+
+        # Second run (replay): should skip
+        r2 = _run_submit(art_dir, jira.url)
+        assert r2.returncode == 0, r2.stderr
+        assert "Updated" not in r2.stdout
+        assert "Created" not in r2.stdout
+
+    def test_replay_after_partial_failure(self, art_dir, jira):
+        """First RFE succeeds, second fails → replay only submits second."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
+               TASK_FM.format(rfe_id="RFE-002").replace(
+                   "title: Test RFE", "title: Second RFE"))
+        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md",
+               _review("RFE-002"))
+
+        # First run: both succeed
+        r1 = _run_submit(art_dir, jira.url)
+        assert r1.returncode == 0, r1.stderr
+
+        issues = jira.search("project = RHAIRFE")
+        assert len(issues) == 2
+
+        # Both renamed and marked Submitted
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RFE-002.md")
+
+        # Replay: nothing to do
+        r2 = _run_submit(art_dir, jira.url)
+        assert r2.returncode == 0, r2.stderr
+        assert "Created" not in r2.stdout
+
+        # Still only 2 issues
+        issues_final = jira.search("project = RHAIRFE")
+        assert len(issues_final) == 2
+
+    def test_replay_label_only_skipped(self, art_dir, jira):
+        """Label-only action, replay → second run skips it."""
+        body = "Same content.\n"
+        jira.create("RHAIRFE-1234", "Test RFE", body)
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\n{body}")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234"))
+
+        # First run: label-only
+        r1 = _run_submit(art_dir, jira.url)
+        assert r1.returncode == 0, r1.stderr
+        assert "Labels" in r1.stdout
+
+        fm = _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")
+        assert fm["status"] == "Submitted"
+
+        # Second run (replay): should skip
+        r2 = _run_submit(art_dir, jira.url)
+        assert r2.returncode == 0, r2.stderr
+        assert "Labels" not in r2.stdout
+        assert "Updated" not in r2.stdout
