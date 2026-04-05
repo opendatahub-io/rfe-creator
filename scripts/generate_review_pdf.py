@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate an HTML review report from RFE review artifacts."""
 
+from collections import Counter
 import json
 import os
 import re
@@ -305,6 +306,45 @@ def main():
     genuine_blocks = sum(1 for r in rfes if r['removed_context'] for b in r['removed_context'].get('blocks', []) if b.get('type') == 'genuine')
     reworded_blocks = sum(1 for r in rfes if r['removed_context'] for b in r['removed_context'].get('blocks', []) if b.get('type') == 'reworded')
 
+    # Per-criterion score distributions for existing RFEs
+    criterion_keys = ['what', 'why', 'open_to_how', 'not_a_task', 'right_sized']
+    criterion_labels_map = {'what': 'WHAT', 'why': 'WHY', 'open_to_how': 'HOW',
+                            'not_a_task': 'Task', 'right_sized': 'Scope'}
+    ex_no_errors = [r for r in existing if not r.get('error')]
+    criterion_dist = {}
+    for key in criterion_keys:
+        before_counts = Counter(r['before_scores'].get(key, 0) for r in ex_no_errors)
+        after_counts = Counter(r['after_scores'].get(key, 0) for r in ex_no_errors)
+        n = len(ex_no_errors) or 1
+        criterion_dist[key] = {
+            'before': {s: before_counts.get(s, 0) / n * 100 for s in [0, 1, 2]},
+            'after': {s: after_counts.get(s, 0) / n * 100 for s in [0, 1, 2]},
+        }
+
+    # Score distribution for existing RFEs
+    before_dist = Counter(r['before_total'] for r in ex_no_errors)
+    after_dist = Counter(r['after_total'] for r in ex_no_errors)
+    all_scores = sorted(set(before_dist.keys()) | set(after_dist.keys()))
+    max_count = max(max(before_dist.values(), default=0), max(after_dist.values(), default=0), 1)
+
+    # Auto-revision stats
+    ex_auto_revised = [r for r in ex_no_errors if r.get('auto_revised')]
+    ex_revised_count = len(ex_auto_revised)
+    ex_revised_avg_delta = (sum(r['after_total'] - r['before_total'] for r in ex_auto_revised)
+                            / ex_revised_count if ex_revised_count else 0)
+
+    # Needs-attention counts
+    ex_needs_attn = sum(1 for r in existing if r.get('needs_attention') and not r.get('error'))
+    sc_needs_attn = sum(1 for r in submitted_leaf_children if r.get('needs_attention') and not r.get('error'))
+
+    # Removed-context heading frequency
+    heading_counter = Counter()
+    for r in rfes:
+        if r['removed_context']:
+            for b in r['removed_context'].get('blocks', []):
+                heading_counter[b.get('heading', 'unknown')] += 1
+    top_headings = heading_counter.most_common(5)
+
     css = '''
     @page {
         size: letter;
@@ -593,6 +633,216 @@ def main():
         margin-top: 2pt;
     }
     .stat-arrow { font-size: 18pt; color: #999; }
+    .callout {
+        font-size: 9pt;
+        color: #555;
+        margin: 8pt 0 12pt 0;
+        padding: 6pt 12pt;
+        background: #f0f4ff;
+        border-left: 3px solid #0f3460;
+        border-radius: 0 4pt 4pt 0;
+    }
+    .callout strong { color: #0f3460; }
+    .analysis-row {
+        display: flex;
+        gap: 16pt;
+        margin: 0 0 16pt 0;
+        align-items: stretch;
+    }
+    .analysis-tile {
+        flex: 1;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6pt;
+        padding: 12pt 16pt;
+    }
+    .chart-container {
+        display: flex;
+        align-items: stretch;
+    }
+    .chart-y-label {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        font-size: 7.5pt;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5pt;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-right: 4pt;
+    }
+    .chart-x-label {
+        font-size: 7.5pt;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5pt;
+        text-align: center;
+        margin-top: 4pt;
+    }
+    .criterion-area {
+        flex: 1;
+        position: relative;
+    }
+    .criterion-grid {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+    .criterion-gridline {
+        position: absolute;
+        left: 0;
+        right: 0;
+        border-top: 1px solid #e0e0e0;
+    }
+    .criterion-grid-label {
+        position: absolute;
+        left: -20pt;
+        font-size: 7pt;
+        color: #aaa;
+        transform: translateY(-50%);
+    }
+    .criterion-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 0;
+        justify-content: space-around;
+        position: relative;
+        z-index: 1;
+        height: 100%;
+    }
+    .criterion-group {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+    }
+    .criterion-bars {
+        display: flex;
+        gap: 3pt;
+        align-items: flex-end;
+    }
+    .criterion-bar {
+        width: 24pt;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        border-radius: 2pt 2pt 0 0;
+        overflow: hidden;
+    }
+    .criterion-bar-seg {
+        width: 100%;
+    }
+    .criterion-label {
+        font-size: 8pt;
+        font-weight: 600;
+        color: #555;
+        margin-top: 4pt;
+        text-align: center;
+    }
+    .criterion-heading {
+        font-size: 9pt;
+        color: #0f3460;
+        font-weight: 600;
+        margin: 0 0 14pt 24pt;
+    }
+    .histogram { font-size: 8.5pt; }
+    .histogram h4 {
+        font-size: 9pt;
+        color: #0f3460;
+        margin: 0 0 14pt 0;
+        font-weight: 600;
+    }
+    .hist-chart-area {
+        position: relative;
+        margin-left: 28pt;
+        padding-top: 2pt;
+    }
+    .hist-gridline {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-left: 1px solid #e0e0e0;
+        z-index: 0;
+    }
+    .hist-x-ticks {
+        display: flex;
+        margin-left: 28pt;
+        margin-top: 2pt;
+        position: relative;
+    }
+    .hist-x-tick {
+        position: absolute;
+        font-size: 7pt;
+        color: #aaa;
+        transform: translateX(-50%);
+    }
+    .hist-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 3pt;
+        gap: 4pt;
+        position: relative;
+        z-index: 1;
+    }
+    .hist-label {
+        width: 24pt;
+        text-align: right;
+        font-weight: 600;
+        color: #555;
+        font-size: 8pt;
+        margin-left: -28pt;
+    }
+    .hist-bars {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1pt;
+    }
+    .hist-bar {
+        height: 10pt;
+        border-radius: 2pt;
+        display: flex;
+        align-items: center;
+        padding-left: 4pt;
+        font-size: 7pt;
+        font-weight: 600;
+        color: white;
+        min-width: 16pt;
+    }
+    .hist-pass-line {
+        border-top: 2px dashed #5b9bd5;
+        margin: 2pt 0;
+        position: relative;
+        z-index: 2;
+    }
+    .hist-pass-label {
+        position: absolute;
+        right: 0;
+        top: -10pt;
+        font-size: 7.5pt;
+        font-weight: 700;
+        color: #5b9bd5;
+    }
+    .hist-legend {
+        display: flex;
+        gap: 12pt;
+        margin-top: 6pt;
+        font-size: 7.5pt;
+        color: #888;
+    }
+    .hist-legend-swatch {
+        display: inline-block;
+        width: 10pt;
+        height: 10pt;
+        border-radius: 2pt;
+        vertical-align: middle;
+        margin-right: 3pt;
+    }
     .summary-table {
         width: 100%;
         border-collapse: separate;
@@ -620,6 +870,41 @@ def main():
     .summary-table td:last-child { border-right: 1px solid #a0b0c0; }
     .summary-table tr:last-child td { border-bottom: 1px solid #a0b0c0; }
     .summary-table tr:nth-child(even) { background: #fafafa; }
+    .table-wrapper {
+        position: relative;
+        overflow: hidden;
+        margin: 12pt 0;
+    }
+    .table-wrapper .summary-table { margin: 0; }
+    .table-wrapper.collapsed { max-height: 400pt; }
+    .table-fade {
+        display: none;
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 80pt;
+        background: linear-gradient(transparent, white);
+        pointer-events: none;
+    }
+    .table-wrapper.collapsed .table-fade { display: block; }
+    .table-see-all {
+        display: none;
+        position: absolute;
+        bottom: 16pt;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #0f3460;
+        color: white;
+        border: none;
+        padding: 8pt 28pt;
+        border-radius: 4pt;
+        font-size: 10pt;
+        font-weight: 600;
+        cursor: pointer;
+        z-index: 10;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .table-see-all:hover { background: #1a4a8a; }
+    .table-wrapper.collapsed .table-see-all { display: block; }
     .key-col {
         font-family: monospace;
         font-weight: 600;
@@ -760,47 +1045,145 @@ def main():
 {f"""            <div class="stat-box" style="border-color: #e67e22;">
                 <div class="stat-value" style="color: #e67e22;">{ex_errors}</div>
                 <div class="stat-label">Errors</div>
-            </div>""" if ex_errors else ''}
+            </div>""" if ex_errors else ''}\
+{f"""
+            <div class="stat-box" style="border-color: #f39c12;">
+                <div class="stat-value" style="color: #f39c12;">{ex_needs_attn}</div>
+                <div class="stat-label">Needs Attention</div>
+            </div>""" if ex_needs_attn else ''}
         </div>
-{f"""        <h3><a href="#section-splits" class="jira-link">Split RFEs</a></h3>
-        <div class="summary-stats">
-            <div class="stat-box">
-                <div class="stat-value">{len(split_parents)}</div>
-                <div class="stat-label">RFEs Split</div>
-            </div>
-            <div class="stat-arrow">&rarr;</div>
-            <div class="stat-box">
-                <div class="stat-value">{sp_total_children}</div>
-                <div class="stat-label">New RFEs Created</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value">{sc_passing}/{sc_scored}</div>
-                <div class="stat-label">Children Passing</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value">{sc_avg:.1f}</div>
-                <div class="stat-label">Avg Child Score</div>
-            </div>
-{f'''            <div class="stat-box" style="border-color: #e67e22;">
-                <div class="stat-value" style="color: #e67e22;">{sp_refused_count}</div>
-                <div class="stat-label">Refused</div>
-            </div>''' if sp_refused_count else ''}
-        </div>""" if split_parents else ''}
+'''
 
-        <table class="summary-table">
-            <thead>
-                <tr>
-                    <th>RFE</th>
-                    <th>Before</th>
-                    <th></th>
-                    <th>After</th>
-                    <th></th>
-                    <th>&Delta;</th>
-                    <th>Technical Feasibility</th>
-                    <th>Removed Content</th>
-                </tr>
-            </thead>
-            <tbody>
+    # Auto-revision callout
+    if ex_revised_count:
+        html += f'''        <div class="callout">
+            <strong>Auto-revision:</strong> {ex_revised_count} of {ex_scored} existing RFEs revised, avg score improvement <span class="{"score-up" if ex_revised_avg_delta > 0 else "score-same"}">{ex_revised_avg_delta:+.1f}</span>
+        </div>
+'''
+
+    # Per-criterion stacked bar chart + score distribution histogram
+    # Colors: score 0 = red, score 1 = amber, score 2 = green
+    seg_colors = {0: '#e05555', 1: '#f5a623', 2: '#4caf50'}
+    seg_colors_muted = {0: '#f4c4c0', 1: '#fde0a8', 2: '#c8e6c0'}
+
+    crit_area_height = 140  # pt total (bars + labels)
+    crit_label_space = 18  # pt reserved for labels below bars
+    crit_bar_height = crit_area_height - crit_label_space  # pt for bars
+
+    html += f'''        <div class="analysis-row">
+            <div class="analysis-tile">
+                <div class="criterion-heading">Score Distribution by Criterion</div>
+                <div class="chart-container">
+                    <div class="chart-y-label">% of RFEs</div>
+                    <div class="criterion-area" style="height:{crit_area_height}pt;margin-left:24pt;">
+                        <div class="criterion-grid">
+'''
+    # Gridlines at 0%, 20%, 40%, 60%, 80%, 100%
+    for pct in [0, 20, 40, 60, 80, 100]:
+        pos = (100 - pct) / 100 * crit_bar_height
+        html += f'                            <div class="criterion-gridline" style="top:{pos:.0f}pt;"></div>\n'
+        html += f'                            <div class="criterion-grid-label" style="top:{pos:.0f}pt;">{pct}</div>\n'
+
+    html += '''                        </div>
+                        <div class="criterion-chart">
+'''
+    for key in criterion_keys:
+        dist = criterion_dist[key]
+        html += f'''                            <div class="criterion-group">
+                                <div class="criterion-bars" style="height:{crit_bar_height}pt;">
+                                    <div class="criterion-bar">
+'''
+        for score in [0, 1, 2]:
+            pct = dist['before'][score]
+            if pct > 0:
+                html += f'                                        <div class="criterion-bar-seg" style="height:{pct / 100 * crit_bar_height:.1f}pt;background:{seg_colors_muted[score]};"></div>\n'
+        html += '''                                    </div>
+                                    <div class="criterion-bar">
+'''
+        for score in [0, 1, 2]:
+            pct = dist['after'][score]
+            if pct > 0:
+                html += f'                                        <div class="criterion-bar-seg" style="height:{pct / 100 * crit_bar_height:.1f}pt;background:{seg_colors[score]};"></div>\n'
+        html += f'''                                    </div>
+                                </div>
+                                <div class="criterion-label">{criterion_labels_map[key]}</div>
+                            </div>
+'''
+    html += '''                        </div>
+                    </div>
+                </div>
+                <div class="hist-legend" style="margin-top:8pt;justify-content:center;">
+                    <span><span class="hist-legend-swatch" style="background:#f4c4c0;"></span>0</span>
+                    <span><span class="hist-legend-swatch" style="background:#fde0a8;"></span>1</span>
+                    <span><span class="hist-legend-swatch" style="background:#c8e6c0;"></span>2</span>
+                    <span style="margin-left:8pt;color:#aaa;">|</span>
+                    <span style="margin-left:8pt;">Before &rarr; After</span>
+                </div>
+            </div>
+            <div class="analysis-tile histogram">
+                <h4>Total Score Distribution</h4>
+                <div class="chart-container">
+                    <div class="chart-y-label">Total Score</div>
+                    <div style="flex:1;">
+'''
+    def hist_color(score, muted=False):
+        """Return bar color based on score: green>=7, amber 5-6, red<=4."""
+        if score >= 7:
+            return '#c8e6c0' if muted else '#4caf50'
+        elif score >= 5:
+            return '#fde0a8' if muted else '#f5a623'
+        else:
+            return '#f4c4c0' if muted else '#e05555'
+
+    # Compute gridline tick positions
+    tick_step = max(1, 10 ** (len(str(max_count)) - 1))
+    if max_count / tick_step <= 2:
+        tick_step = tick_step // 2 or 1
+    hist_ticks = list(range(0, max_count + tick_step, tick_step))
+
+    html += '                        <div class="hist-chart-area">\n'
+    # Vertical gridlines
+    for t in hist_ticks:
+        pct = t / max_count * 100
+        html += f'                            <div class="hist-gridline" style="left:{pct:.1f}%;"></div>\n'
+
+    for s in reversed(all_scores):
+        bc = before_dist.get(s, 0)
+        ac = after_dist.get(s, 0)
+        bw = max(bc / max_count * 100, 0)
+        aw = max(ac / max_count * 100, 0)
+        # Insert pass line between 7 and 6
+        if s == 6 and any(x >= 7 for x in all_scores):
+            html += '''                            <div class="hist-pass-line"><span class="hist-pass-label">Pass</span></div>
+'''
+        zero_bar = '<div class="hist-bar" style="width:12pt;min-width:12pt;background:white;border:1px solid #ccc;color:#aaa;padding-left:2pt;">0</div>'
+        before_bar = f'<div class="hist-bar" style="width:{bw:.0f}%;background:{hist_color(s, muted=True)};color:#555;">{bc}</div>' if bc else zero_bar
+        after_bar = f'<div class="hist-bar" style="width:{aw:.0f}%;background:{hist_color(s)};">{ac}</div>' if ac else zero_bar
+        html += f'''                            <div class="hist-row">
+                                <div class="hist-label">{s}</div>
+                                <div class="hist-bars">
+                                    {before_bar}
+                                    {after_bar}
+                                </div>
+                            </div>
+'''
+    html += '                        </div>\n'
+
+    # X-axis tick labels
+    html += '                        <div class="hist-x-ticks" style="height:12pt;">\n'
+    for t in hist_ticks:
+        pct = t / max_count * 100
+        html += f'                            <div class="hist-x-tick" style="left:{pct:.1f}%;">{t}</div>\n'
+    html += '                        </div>\n'
+    html += '''                        <div class="chart-x-label">Count</div>
+                        <div class="hist-legend" style="margin-top:4pt;">
+                            <span><span class="hist-legend-swatch" style="background:#c8e6c0;"></span>Before</span>
+                            <span><span class="hist-legend-swatch" style="background:#4caf50;"></span>After</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 '''
 
     def feasibility_text(f):
@@ -930,34 +1313,99 @@ def main():
 '''
         return rows
 
+    TABLE_HEADER = '''        <table class="summary-table">
+            <thead>
+                <tr>
+                    <th>RFE</th>
+                    <th>Before</th>
+                    <th></th>
+                    <th>After</th>
+                    <th></th>
+                    <th>&Delta;</th>
+                    <th>Technical Feasibility</th>
+                    <th>Removed Content</th>
+                </tr>
+            </thead>
+            <tbody>
+'''
+
+    # --- Existing RFEs table ---
     if existing:
+        ex_collapsed = ' collapsed' if len(existing) > 10 else ''
+        html += f'        <div class="table-wrapper{ex_collapsed}">\n'
+        html += TABLE_HEADER
         html += f'''        <tr id="section-existing"><td colspan="8" style="background:#e8eaf6;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#0f3460;">Existing RFEs ({len(existing)})</td></tr>
 '''
         html += render_table_rows(existing)
+        html += '            </tbody>\n        </table>\n'
+        if len(existing) > 10:
+            html += f'        <div class="table-fade"></div>\n'
+            html += f'        <button class="table-see-all" onclick="toggleTable(this)">See all {len(existing)} RFEs</button>\n'
+        html += '        </div>\n'
 
+    # --- Split RFEs heading + stat boxes ---
     if split_parents:
-        sp_error_count = sum(1 for r in split_parents if r.get('error'))
-        sp_header = f'Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children'
-        if sp_error_count:
-            sp_header += f', {sp_error_count} refused'
-        sp_header += ')'
-        html += f'''        <tr id="section-splits"><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
-'''
-        html += render_split_parent_rows(split_parents)
+        html += f"""        <h3><a href="#section-splits" class="jira-link">Split RFEs</a></h3>
+        <div class="summary-stats">
+            <div class="stat-box">
+                <div class="stat-value">{len(split_parents)}</div>
+                <div class="stat-label">RFEs Split</div>
+            </div>
+            <div class="stat-arrow">&rarr;</div>
+            <div class="stat-box">
+                <div class="stat-value">{sp_total_children}</div>
+                <div class="stat-label">New RFEs Created</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{sc_passing}/{sc_scored}</div>
+                <div class="stat-label">Children Passing</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{sc_avg:.1f}</div>
+                <div class="stat-label">Avg Child Score</div>
+            </div>
+{f'''            <div class="stat-box" style="border-color: #e67e22;">
+                <div class="stat-value" style="color: #e67e22;">{sp_refused_count}</div>
+                <div class="stat-label">Refused</div>
+            </div>''' if sp_refused_count else ''}\
+{f'''
+            <div class="stat-box" style="border-color: #f39c12;">
+                <div class="stat-value" style="color: #f39c12;">{sc_needs_attn}</div>
+                <div class="stat-label">Needs Attention</div>
+            </div>''' if sc_needs_attn else ''}
+        </div>
+"""
 
-    if intermediaries:
-        html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split Intermediaries ({len(intermediaries)}) &mdash; superseded by children</td></tr>
+    # --- Split RFEs table ---
+    split_row_count = len(split_parents) + len(intermediaries) + len(leaf_children)
+    if split_row_count:
+        sp_collapsed = ' collapsed' if split_row_count > 10 else ''
+        html += f'        <div class="table-wrapper{sp_collapsed}">\n'
+        html += TABLE_HEADER
+
+        if split_parents:
+            sp_error_count = sum(1 for r in split_parents if r.get('error'))
+            sp_header = f'Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children'
+            if sp_error_count:
+                sp_header += f', {sp_error_count} refused'
+            sp_header += ')'
+            html += f'''        <tr id="section-splits"><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
 '''
-        for r in intermediaries:
-            leaves = get_leaf_descendants(r['rfe_id'])
-            leaf_scored = [c for c in leaves if not c.get('error')]
-            leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
-            leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
-            feas = feasibility_text(r.get('feasibility', ''))
-            is_refused = r.get('parent_refused')
-            refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(CHILDREN NOT SUBMITTED)</span>' if is_refused else ''
-            if is_refused:
-                html += f'''        <tr style="opacity:0.6;">
+            html += render_split_parent_rows(split_parents)
+
+        if intermediaries:
+            html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split Intermediaries ({len(intermediaries)}) &mdash; superseded by children</td></tr>
+'''
+            for r in intermediaries:
+                leaves = get_leaf_descendants(r['rfe_id'])
+                leaf_scored = [c for c in leaves if not c.get('error')]
+                leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
+                leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
+                feas = feasibility_text(r.get('feasibility', ''))
+                is_refused = r.get('parent_refused')
+                refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(CHILDREN NOT SUBMITTED)</span>' if is_refused else ''
+                if is_refused:
+                    html += f'''        <tr style="opacity:0.6;">
             <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{refused_marker}</td>
             <td>&mdash;</td>
             <td></td>
@@ -967,8 +1415,8 @@ def main():
             <td>&mdash;</td>
         </tr>
 '''
-            else:
-                html += f'''        <tr>
+                else:
+                    html += f'''        <tr>
             <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}</td>
             <td>&mdash;</td>
             <td></td>
@@ -979,10 +1427,16 @@ def main():
         </tr>
 '''
 
-    if leaf_children:
-        html += f'''        <tr><td colspan="8" style="background:#e8f5e9;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#2e7d32;">New RFEs from Splits ({len(leaf_children)})</td></tr>
+        if leaf_children:
+            html += f'''        <tr><td colspan="8" style="background:#e8f5e9;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#2e7d32;">New RFEs from Splits ({len(leaf_children)})</td></tr>
 '''
-        html += render_table_rows(leaf_children)
+            html += render_table_rows(leaf_children)
+
+        html += '            </tbody>\n        </table>\n'
+        if split_row_count > 10:
+            html += f'        <div class="table-fade"></div>\n'
+            html += f'        <button class="table-see-all" onclick="toggleTable(this)">See all {split_row_count} RFEs</button>\n'
+        html += '        </div>\n'
 
     # Build revision summary bullets dynamically
     summary_bullets = []
@@ -1009,11 +1463,11 @@ def main():
             summary_bullets.append(f'<li><strong>{label} gap:</strong> {len(below_max)} RFE{"s" if len(below_max)!=1 else ""} still below 2/2 (requires author input).</li>')
 
     if removed_count:
-        summary_bullets.append(f'<li><strong>Removed context:</strong> {removed_count} RFE{"s" if removed_count!=1 else ""} had content removed during revision ({total_blocks} block{"s" if total_blocks!=1 else ""} total: {reworded_blocks} reworded, {genuine_blocks} genuine implementation context preserved for strategy reference).</li>')
+        heading_list = ', '.join(f'{h} ({c})' for h, c in top_headings) if top_headings else ''
+        heading_detail = f'<br/><span style="color:#888;font-size:8.5pt;">Most common: {heading_list}</span>' if heading_list else ''
+        summary_bullets.append(f'<li><strong>Removed context:</strong> {removed_count} RFE{"s" if removed_count!=1 else ""} had content removed during revision ({total_blocks} block{"s" if total_blocks!=1 else ""} total: {reworded_blocks} reworded, {genuine_blocks} genuine implementation context preserved for strategy reference).{heading_detail}</li>')
 
-    html += '''            </tbody>
-        </table>
-
+    html += '''
         <div class="revision-summary">
             <h3>Revision Summary</h3>
             <ul>
@@ -1040,6 +1494,32 @@ def main():
                     or r['is_split_parent']]
     if args.revised_only:
         detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent'] or r.get('is_leaf_child')]
+
+    def render_tree(parent_id, prefix='', is_last=True, highlight_id=None):
+        tree_html = ''
+        direct = children_by_parent.get(parent_id, [])
+        for i, c in enumerate(direct):
+            last = (i == len(direct) - 1)
+            connector = '&#x2514;&#x2500;&#x2500; ' if last else '&#x251C;&#x2500;&#x2500; '
+            is_highlighted = (c['rfe_id'] == highlight_id)
+            hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if is_highlighted else ''
+            hl_end = ' &#x25C0;</span>' if is_highlighted else ''
+            if c.get('is_intermediary'):
+                tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span>{hl_end}</div>\n'
+                child_prefix = prefix + ('    ' if last else '&#x2502;   ')
+                tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
+            else:
+                if c.get('parent_refused'):
+                    score_style = 'color:#999;font-style:italic;'
+                    suffix = ' not submitted'
+                elif c['after_pass']:
+                    score_style = 'color:#2d6a2d;font-weight:700;'
+                    suffix = ''
+                else:
+                    score_style = 'color:#c0392b;font-weight:700;'
+                    suffix = ''
+                tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a> <span style="{score_style}">[{c["after_total"]}/10]{suffix}</span>  {html_escape(c["title"])}{hl_end}</div>\n'
+        return tree_html
 
     for r in detail_rfes:
         d = r['after_total'] - r['before_total']
@@ -1135,33 +1615,6 @@ def main():
 
             <h3>Split Tree</h3>
 '''
-            # Render tree visualization
-            def render_tree(parent_id, prefix='', is_last=True, highlight_id=None):
-                tree_html = ''
-                direct = children_by_parent.get(parent_id, [])
-                for i, c in enumerate(direct):
-                    last = (i == len(direct) - 1)
-                    connector = '&#x2514;&#x2500;&#x2500; ' if last else '&#x251C;&#x2500;&#x2500; '
-                    is_highlighted = (c['rfe_id'] == highlight_id)
-                    hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if is_highlighted else ''
-                    hl_end = ' &#x25C0;</span>' if is_highlighted else ''
-                    if c.get('is_intermediary'):
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span>{hl_end}</div>\n'
-                        child_prefix = prefix + ('    ' if last else '&#x2502;   ')
-                        tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
-                    else:
-                        if c.get('parent_refused'):
-                            score_style = 'color:#999;font-style:italic;'
-                            suffix = ' not submitted'
-                        elif c['after_pass']:
-                            score_style = 'color:#2d6a2d;font-weight:700;'
-                            suffix = ''
-                        else:
-                            score_style = 'color:#c0392b;font-weight:700;'
-                            suffix = ''
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a> <span style="{score_style}">[{c["after_total"]}/10]{suffix}</span>  {html_escape(c["title"])}{hl_end}</div>\n'
-                return tree_html
-
             # For intermediaries, show the full tree from the root ancestor
             tree_root = find_tree_root(r) if r.get('is_intermediary') else r
             highlight_id = r['rfe_id']
@@ -1324,6 +1777,10 @@ window.addEventListener('scroll', function() {
     btn.style.opacity = window.scrollY > 300 ? '1' : '0';
     btn.style.pointerEvents = window.scrollY > 300 ? 'auto' : 'none';
 });
+function toggleTable(el) {
+    var w = el.closest('.table-wrapper');
+    w.classList.remove('collapsed');
+}
 </script>
 </body>
 </html>
