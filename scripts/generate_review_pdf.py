@@ -870,6 +870,41 @@ def main():
     .summary-table td:last-child { border-right: 1px solid #a0b0c0; }
     .summary-table tr:last-child td { border-bottom: 1px solid #a0b0c0; }
     .summary-table tr:nth-child(even) { background: #fafafa; }
+    .table-wrapper {
+        position: relative;
+        overflow: hidden;
+        margin: 12pt 0;
+    }
+    .table-wrapper .summary-table { margin: 0; }
+    .table-wrapper.collapsed { max-height: 400pt; }
+    .table-fade {
+        display: none;
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 80pt;
+        background: linear-gradient(transparent, white);
+        pointer-events: none;
+    }
+    .table-wrapper.collapsed .table-fade { display: block; }
+    .table-see-all {
+        display: none;
+        position: absolute;
+        bottom: 16pt;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #0f3460;
+        color: white;
+        border: none;
+        padding: 8pt 28pt;
+        border-radius: 4pt;
+        font-size: 10pt;
+        font-weight: 600;
+        cursor: pointer;
+        z-index: 10;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .table-see-all:hover { background: #1a4a8a; }
+    .table-wrapper.collapsed .table-see-all { display: block; }
     .key-col {
         font-family: monospace;
         font-weight: 600;
@@ -1152,53 +1187,6 @@ def main():
         </div>
 '''
 
-    html += f'''\
-{f"""        <h3><a href="#section-splits" class="jira-link">Split RFEs</a></h3>
-        <div class="summary-stats">
-            <div class="stat-box">
-                <div class="stat-value">{len(split_parents)}</div>
-                <div class="stat-label">RFEs Split</div>
-            </div>
-            <div class="stat-arrow">&rarr;</div>
-            <div class="stat-box">
-                <div class="stat-value">{sp_total_children}</div>
-                <div class="stat-label">New RFEs Created</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value">{sc_passing}/{sc_scored}</div>
-                <div class="stat-label">Children Passing</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value">{sc_avg:.1f}</div>
-                <div class="stat-label">Avg Child Score</div>
-            </div>
-{f'''            <div class="stat-box" style="border-color: #e67e22;">
-                <div class="stat-value" style="color: #e67e22;">{sp_refused_count}</div>
-                <div class="stat-label">Refused</div>
-            </div>''' if sp_refused_count else ''}\
-{f'''
-            <div class="stat-box" style="border-color: #f39c12;">
-                <div class="stat-value" style="color: #f39c12;">{sc_needs_attn}</div>
-                <div class="stat-label">Needs Attention</div>
-            </div>''' if sc_needs_attn else ''}
-        </div>""" if split_parents else ''}
-
-        <table class="summary-table">
-            <thead>
-                <tr>
-                    <th>RFE</th>
-                    <th>Before</th>
-                    <th></th>
-                    <th>After</th>
-                    <th></th>
-                    <th>&Delta;</th>
-                    <th>Technical Feasibility</th>
-                    <th>Removed Content</th>
-                </tr>
-            </thead>
-            <tbody>
-'''
-
     def feasibility_text(f):
         if f == 'feasible':
             return '<span style="color:#2d6a2d;">Feasible</span>'
@@ -1326,34 +1314,99 @@ def main():
 '''
         return rows
 
+    TABLE_HEADER = '''        <table class="summary-table">
+            <thead>
+                <tr>
+                    <th>RFE</th>
+                    <th>Before</th>
+                    <th></th>
+                    <th>After</th>
+                    <th></th>
+                    <th>&Delta;</th>
+                    <th>Technical Feasibility</th>
+                    <th>Removed Content</th>
+                </tr>
+            </thead>
+            <tbody>
+'''
+
+    # --- Existing RFEs table ---
     if existing:
+        ex_collapsed = ' collapsed' if len(existing) > 10 else ''
+        html += f'        <div class="table-wrapper{ex_collapsed}">\n'
+        html += TABLE_HEADER
         html += f'''        <tr id="section-existing"><td colspan="8" style="background:#e8eaf6;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#0f3460;">Existing RFEs ({len(existing)})</td></tr>
 '''
         html += render_table_rows(existing)
+        html += '            </tbody>\n        </table>\n'
+        if len(existing) > 10:
+            html += f'        <div class="table-fade"></div>\n'
+            html += f'        <button class="table-see-all" onclick="toggleTable(this)">See all {len(existing)} RFEs</button>\n'
+        html += '        </div>\n'
 
+    # --- Split RFEs heading + stat boxes ---
     if split_parents:
-        sp_error_count = sum(1 for r in split_parents if r.get('error'))
-        sp_header = f'Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children'
-        if sp_error_count:
-            sp_header += f', {sp_error_count} refused'
-        sp_header += ')'
-        html += f'''        <tr id="section-splits"><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
-'''
-        html += render_split_parent_rows(split_parents)
+        html += f"""        <h3><a href="#section-splits" class="jira-link">Split RFEs</a></h3>
+        <div class="summary-stats">
+            <div class="stat-box">
+                <div class="stat-value">{len(split_parents)}</div>
+                <div class="stat-label">RFEs Split</div>
+            </div>
+            <div class="stat-arrow">&rarr;</div>
+            <div class="stat-box">
+                <div class="stat-value">{sp_total_children}</div>
+                <div class="stat-label">New RFEs Created</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{sc_passing}/{sc_scored}</div>
+                <div class="stat-label">Children Passing</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{sc_avg:.1f}</div>
+                <div class="stat-label">Avg Child Score</div>
+            </div>
+{f'''            <div class="stat-box" style="border-color: #e67e22;">
+                <div class="stat-value" style="color: #e67e22;">{sp_refused_count}</div>
+                <div class="stat-label">Refused</div>
+            </div>''' if sp_refused_count else ''}\
+{f'''
+            <div class="stat-box" style="border-color: #f39c12;">
+                <div class="stat-value" style="color: #f39c12;">{sc_needs_attn}</div>
+                <div class="stat-label">Needs Attention</div>
+            </div>''' if sc_needs_attn else ''}
+        </div>
+"""
 
-    if intermediaries:
-        html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split Intermediaries ({len(intermediaries)}) &mdash; superseded by children</td></tr>
+    # --- Split RFEs table ---
+    split_row_count = len(split_parents) + len(intermediaries) + len(leaf_children)
+    if split_row_count:
+        sp_collapsed = ' collapsed' if split_row_count > 10 else ''
+        html += f'        <div class="table-wrapper{sp_collapsed}">\n'
+        html += TABLE_HEADER
+
+        if split_parents:
+            sp_error_count = sum(1 for r in split_parents if r.get('error'))
+            sp_header = f'Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children'
+            if sp_error_count:
+                sp_header += f', {sp_error_count} refused'
+            sp_header += ')'
+            html += f'''        <tr id="section-splits"><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
 '''
-        for r in intermediaries:
-            leaves = get_leaf_descendants(r['rfe_id'])
-            leaf_scored = [c for c in leaves if not c.get('error')]
-            leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
-            leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
-            feas = feasibility_text(r.get('feasibility', ''))
-            is_refused = r.get('parent_refused')
-            refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(CHILDREN NOT SUBMITTED)</span>' if is_refused else ''
-            if is_refused:
-                html += f'''        <tr style="opacity:0.6;">
+            html += render_split_parent_rows(split_parents)
+
+        if intermediaries:
+            html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split Intermediaries ({len(intermediaries)}) &mdash; superseded by children</td></tr>
+'''
+            for r in intermediaries:
+                leaves = get_leaf_descendants(r['rfe_id'])
+                leaf_scored = [c for c in leaves if not c.get('error')]
+                leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
+                leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
+                feas = feasibility_text(r.get('feasibility', ''))
+                is_refused = r.get('parent_refused')
+                refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(CHILDREN NOT SUBMITTED)</span>' if is_refused else ''
+                if is_refused:
+                    html += f'''        <tr style="opacity:0.6;">
             <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{refused_marker}</td>
             <td>&mdash;</td>
             <td></td>
@@ -1363,8 +1416,8 @@ def main():
             <td>&mdash;</td>
         </tr>
 '''
-            else:
-                html += f'''        <tr>
+                else:
+                    html += f'''        <tr>
             <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}</td>
             <td>&mdash;</td>
             <td></td>
@@ -1375,10 +1428,16 @@ def main():
         </tr>
 '''
 
-    if leaf_children:
-        html += f'''        <tr><td colspan="8" style="background:#e8f5e9;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#2e7d32;">New RFEs from Splits ({len(leaf_children)})</td></tr>
+        if leaf_children:
+            html += f'''        <tr><td colspan="8" style="background:#e8f5e9;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#2e7d32;">New RFEs from Splits ({len(leaf_children)})</td></tr>
 '''
-        html += render_table_rows(leaf_children)
+            html += render_table_rows(leaf_children)
+
+        html += '            </tbody>\n        </table>\n'
+        if split_row_count > 10:
+            html += f'        <div class="table-fade"></div>\n'
+            html += f'        <button class="table-see-all" onclick="toggleTable(this)">See all {split_row_count} RFEs</button>\n'
+        html += '        </div>\n'
 
     # Build revision summary bullets dynamically
     summary_bullets = []
@@ -1409,9 +1468,7 @@ def main():
         heading_detail = f'<br/><span style="color:#888;font-size:8.5pt;">Most common: {heading_list}</span>' if heading_list else ''
         summary_bullets.append(f'<li><strong>Removed context:</strong> {removed_count} RFE{"s" if removed_count!=1 else ""} had content removed during revision ({total_blocks} block{"s" if total_blocks!=1 else ""} total: {reworded_blocks} reworded, {genuine_blocks} genuine implementation context preserved for strategy reference).{heading_detail}</li>')
 
-    html += '''            </tbody>
-        </table>
-
+    html += '''
         <div class="revision-summary">
             <h3>Revision Summary</h3>
             <ul>
@@ -1438,6 +1495,32 @@ def main():
                     or r['is_split_parent']]
     if args.revised_only:
         detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent'] or r.get('is_leaf_child')]
+
+    def render_tree(parent_id, prefix='', is_last=True, highlight_id=None):
+        tree_html = ''
+        direct = children_by_parent.get(parent_id, [])
+        for i, c in enumerate(direct):
+            last = (i == len(direct) - 1)
+            connector = '&#x2514;&#x2500;&#x2500; ' if last else '&#x251C;&#x2500;&#x2500; '
+            is_highlighted = (c['rfe_id'] == highlight_id)
+            hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if is_highlighted else ''
+            hl_end = ' &#x25C0;</span>' if is_highlighted else ''
+            if c.get('is_intermediary'):
+                tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span>{hl_end}</div>\n'
+                child_prefix = prefix + ('    ' if last else '&#x2502;   ')
+                tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
+            else:
+                if c.get('parent_refused'):
+                    score_style = 'color:#999;font-style:italic;'
+                    suffix = ' not submitted'
+                elif c['after_pass']:
+                    score_style = 'color:#2d6a2d;font-weight:700;'
+                    suffix = ''
+                else:
+                    score_style = 'color:#c0392b;font-weight:700;'
+                    suffix = ''
+                tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a> <span style="{score_style}">[{c["after_total"]}/10]{suffix}</span>  {html_escape(c["title"])}{hl_end}</div>\n'
+        return tree_html
 
     for r in detail_rfes:
         d = r['after_total'] - r['before_total']
@@ -1533,33 +1616,6 @@ def main():
 
             <h3>Split Tree</h3>
 '''
-            # Render tree visualization
-            def render_tree(parent_id, prefix='', is_last=True, highlight_id=None):
-                tree_html = ''
-                direct = children_by_parent.get(parent_id, [])
-                for i, c in enumerate(direct):
-                    last = (i == len(direct) - 1)
-                    connector = '&#x2514;&#x2500;&#x2500; ' if last else '&#x251C;&#x2500;&#x2500; '
-                    is_highlighted = (c['rfe_id'] == highlight_id)
-                    hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if is_highlighted else ''
-                    hl_end = ' &#x25C0;</span>' if is_highlighted else ''
-                    if c.get('is_intermediary'):
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span>{hl_end}</div>\n'
-                        child_prefix = prefix + ('    ' if last else '&#x2502;   ')
-                        tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
-                    else:
-                        if c.get('parent_refused'):
-                            score_style = 'color:#999;font-style:italic;'
-                            suffix = ' not submitted'
-                        elif c['after_pass']:
-                            score_style = 'color:#2d6a2d;font-weight:700;'
-                            suffix = ''
-                        else:
-                            score_style = 'color:#c0392b;font-weight:700;'
-                            suffix = ''
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a> <span style="{score_style}">[{c["after_total"]}/10]{suffix}</span>  {html_escape(c["title"])}{hl_end}</div>\n'
-                return tree_html
-
             # For intermediaries, show the full tree from the root ancestor
             tree_root = find_tree_root(r) if r.get('is_intermediary') else r
             highlight_id = r['rfe_id']
@@ -1722,6 +1778,10 @@ window.addEventListener('scroll', function() {
     btn.style.opacity = window.scrollY > 300 ? '1' : '0';
     btn.style.pointerEvents = window.scrollY > 300 ? 'auto' : 'none';
 });
+function toggleTable(el) {
+    var w = el.closest('.table-wrapper');
+    w.classList.remove('collapsed');
+}
 </script>
 </body>
 </html>
