@@ -434,90 +434,114 @@ def main():
     # Execute
     results = {}  # rfe_id -> assigned jira key
     submitted_hashes = {}  # assigned_key -> content_hash
+    submit_errors = []  # (rfe_id, error_msg) for entries that failed
     for entry in plan:
         rfe_id = entry["rfe_id"]
         if entry["skip_reason"]:
             print(f"  {rfe_id}: Skipping — {entry['skip_reason']}")
             continue
 
-        if entry["action"] == "Remove labels":
-            remove = entry["remove_labels"]
-            if args.dry_run:
-                print(f"  {rfe_id}: Would remove labels: "
-                      f"{', '.join(remove)}")
-            else:
-                remove_labels(server, user, token, rfe_id, remove)
-                print(f"  {rfe_id}: Removed labels: {', '.join(remove)}")
-            continue
+        try:
+            if entry["action"] == "Remove labels":
+                remove = entry["remove_labels"]
+                if args.dry_run:
+                    print(f"  {rfe_id}: Would remove labels: "
+                          f"{', '.join(remove)}")
+                else:
+                    remove_labels(server, user, token, rfe_id, remove)
+                    print(f"  {rfe_id}: Removed labels: "
+                          f"{', '.join(remove)}")
+                continue
+            if entry["action"] == "Label only":
+                labels = entry["labels"]
+                if args.dry_run:
+                    print(f"  {rfe_id}: Would add labels: "
+                          f"{', '.join(labels)}")
+                else:
+                    add_labels(server, user, token, rfe_id, labels)
+                    print(f"  {rfe_id}: Labels: {', '.join(labels)}")
+                results[rfe_id] = rfe_id
+                _post_needs_attention_comment(
+                    server, user, token, entry, results, args.dry_run)
+                continue
 
-        if entry["action"] == "Label only":
+            # Read and clean artifact content
+            with open(entry["task_path"], encoding="utf-8") as f:
+                raw_content = f.read()
+            cleaned = strip_metadata(raw_content)
+            description_adf = markdown_to_adf(cleaned)
+
+            title = entry["title"]
             labels = entry["labels"]
-            if args.dry_run:
-                print(f"  {rfe_id}: Would add labels: {', '.join(labels)}")
+
+            if entry["is_existing"]:
+                # Update existing ticket (rfe_id is the Jira key)
+                if args.dry_run:
+                    print(f"  {rfe_id}: Would update")
+                else:
+                    update_issue(server, user, token, rfe_id, title,
+                                 description_adf)
+                    print(f"  {rfe_id}: Updated")
+                    if labels:
+                        add_labels(server, user, token, rfe_id, labels)
+                        print(f"           Labels: {', '.join(labels)}")
+                    submitted_hashes[rfe_id] = compute_content_hash(
+                        description_adf)
+                results[rfe_id] = rfe_id
             else:
-                add_labels(server, user, token, rfe_id, labels)
-                print(f"  {rfe_id}: Labels: {', '.join(labels)}")
-            results[rfe_id] = rfe_id
+                # Create new ticket
+                if args.dry_run:
+                    print(f"  {rfe_id}: Would create RHAIRFE ticket: "
+                          f"{title}")
+                    results[rfe_id] = "RHAIRFE-DRY"
+                else:
+                    new_key = create_issue(server, user, token, "RHAIRFE",
+                                           "Feature Request", title,
+                                           description_adf,
+                                           entry["priority"],
+                                           labels=labels)
+                    print(f"  {rfe_id}: Created {new_key}")
+                    if labels:
+                        print(f"           Labels: {', '.join(labels)}")
+                    results[rfe_id] = new_key
+                    submitted_hashes[new_key] = compute_content_hash(
+                        description_adf)
+
+            # Post removed-context Jira comment if applicable
+            yaml_path = find_removed_context_yaml(args.artifacts_dir, rfe_id)
+            if yaml_path:
+                comment_md = _render_jira_comment(yaml_path)
+                target_key = results.get(rfe_id)
+                if not comment_md:
+                    pass  # No postable blocks
+                elif args.dry_run:
+                    print(f"  {rfe_id}: Would post removed-context comment "
+                          f"({len(comment_md)} chars)")
+                elif target_key:
+                    comment_adf = markdown_to_adf(comment_md)
+                    add_comment(server, user, token, target_key, comment_adf)
+                    print(f"  {rfe_id}: Posted removed-context comment")
+
+            # Post needs-attention comment if newly flagged
             _post_needs_attention_comment(
                 server, user, token, entry, results, args.dry_run)
-            continue
 
-        # Read and clean artifact content
-        with open(entry["task_path"], encoding="utf-8") as f:
-            raw_content = f.read()
-        cleaned = strip_metadata(raw_content)
-        description_adf = markdown_to_adf(cleaned)
-
-        title = entry["title"]
-        labels = entry["labels"]
-
-        if entry["is_existing"]:
-            # Update existing ticket (rfe_id is the Jira key)
-            if args.dry_run:
-                print(f"  {rfe_id}: Would update")
-            else:
-                update_issue(server, user, token, rfe_id, title,
-                             description_adf)
-                print(f"  {rfe_id}: Updated")
-                if labels:
-                    add_labels(server, user, token, rfe_id, labels)
-                    print(f"           Labels: {', '.join(labels)}")
-                submitted_hashes[rfe_id] = compute_content_hash(description_adf)
-            results[rfe_id] = rfe_id
-        else:
-            # Create new ticket
-            if args.dry_run:
-                print(f"  {rfe_id}: Would create RHAIRFE ticket: {title}")
-                results[rfe_id] = "RHAIRFE-DRY"
-            else:
-                new_key = create_issue(server, user, token, "RHAIRFE",
-                                       "Feature Request", title,
-                                       description_adf, entry["priority"],
-                                       labels=labels)
-                print(f"  {rfe_id}: Created {new_key}")
-                if labels:
-                    print(f"           Labels: {', '.join(labels)}")
-                results[rfe_id] = new_key
-                submitted_hashes[new_key] = compute_content_hash(description_adf)
-
-        # Post removed-context Jira comment if applicable
-        yaml_path = find_removed_context_yaml(args.artifacts_dir, rfe_id)
-        if yaml_path:
-            comment_md = _render_jira_comment(yaml_path)
-            target_key = results.get(rfe_id)
-            if not comment_md:
-                pass  # No postable blocks
-            elif args.dry_run:
-                print(f"  {rfe_id}: Would post removed-context comment "
-                      f"({len(comment_md)} chars)")
-            elif target_key:
-                comment_adf = markdown_to_adf(comment_md)
-                add_comment(server, user, token, target_key, comment_adf)
-                print(f"  {rfe_id}: Posted removed-context comment")
-
-        # Post needs-attention comment if newly flagged
-        _post_needs_attention_comment(
-            server, user, token, entry, results, args.dry_run)
+        except Exception as exc:
+            msg = str(exc)
+            print(f"  {rfe_id}: ERROR — {msg}", file=sys.stderr)
+            submit_errors.append((rfe_id, msg))
+            # Mark in review frontmatter so the report picks it up
+            review_path = find_review_file(args.artifacts_dir, rfe_id)
+            if review_path:
+                try:
+                    update_frontmatter(review_path, {
+                        "needs_attention": True,
+                        "needs_attention_reason":
+                            f"Submit failed: {msg}",
+                        "error": f"submit_failed: {msg}",
+                    }, "rfe-review")
+                except Exception:
+                    pass  # best-effort
 
     print()
 
@@ -557,6 +581,12 @@ def main():
     rebuild_index(args.artifacts_dir)
     print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
 
+    if submit_errors:
+        print(f"\n{len(submit_errors)} RFE(s) failed during submit:",
+              file=sys.stderr)
+        for eid, emsg in submit_errors:
+            print(f"  {eid}: {emsg}", file=sys.stderr)
+
     # Generate reports if requested
     if args.generate_report:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -589,6 +619,9 @@ def main():
         if result.returncode != 0:
             print(f"Warning: HTML report generation failed: "
                   f"{result.stderr}", file=sys.stderr)
+
+    if submit_errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

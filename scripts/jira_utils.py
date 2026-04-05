@@ -397,10 +397,23 @@ def markdown_to_adf(markdown):
                 i += 1
             quote_md = "\n".join(quote_lines)
             inner = markdown_to_adf(quote_md)
-            content.append({
-                "type": "blockquote",
-                "content": inner.get("content", []),
-            })
+            inner_content = inner.get("content", [])
+            has_headings = any(n.get("type") == "heading"
+                               for n in inner_content)
+            if has_headings:
+                # ADF blockquotes cannot contain headings, but panels
+                # can. Quoted headings originate from Jira panels that
+                # were converted to markdown blockquotes on fetch.
+                content.append({
+                    "type": "panel",
+                    "attrs": {"panelType": "info"},
+                    "content": inner_content,
+                })
+            else:
+                content.append({
+                    "type": "blockquote",
+                    "content": inner_content,
+                })
             continue
 
         # Table
@@ -598,7 +611,9 @@ def adf_to_markdown(node, list_depth=0):
 
     if node_type == "panel":
         inner = adf_to_markdown(content, list_depth)
-        return f"> {inner.strip()}\n\n"
+        lines = inner.strip().split("\n")
+        quoted = "\n".join(f"> {line}" for line in lines)
+        return f"{quoted}\n\n"
 
     if node_type == "expand":
         title = attrs.get("title", "")

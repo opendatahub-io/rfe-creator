@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from jira_utils import markdown_to_adf
+from jira_utils import adf_to_markdown, markdown_to_adf
 
 
 # ── Timeout helper ──────────────────────────────────────────────────────────
@@ -147,12 +147,36 @@ class TestCIFailurePatterns:
         assert len(result["content"]) == 4  # 3 empty headings + 1 paragraph
 
     def test_malformed_heading_in_blockquote(self):
-        """Blockquote prefix stripping can produce malformed headings."""
+        """Blockquote with headings (even malformed) becomes a panel."""
         md = "> ### \n> **Some text**"
+        result = markdown_to_adf(md)
+        node = result["content"][0]
+        assert node["type"] == "panel"
+        assert len(node["content"]) >= 1
+
+    def test_heading_in_blockquote_becomes_panel(self):
+        """Blockquote with headings becomes an ADF panel (not blockquote).
+
+        ADF blockquotes cannot contain headings (Jira returns HTTP 400).
+        Quoted headings originate from Jira panels converted to markdown
+        blockquotes on fetch, so they round-trip back as panels.
+        Regression: RHAIRFE-584 in 20260405-012640 run.
+        """
+        md = "> ### **Problem**\n> \n> Description here.\n\nText after."
+        result = markdown_to_adf(md)
+        panel = result["content"][0]
+        assert panel["type"] == "panel"
+        assert panel["attrs"]["panelType"] == "info"
+        # Heading preserved as a real heading inside the panel
+        assert panel["content"][0]["type"] == "heading"
+        assert panel["content"][0]["attrs"]["level"] == 3
+
+    def test_plain_blockquote_stays_blockquote(self):
+        """Blockquote without headings stays as a blockquote."""
+        md = "> Some quoted text.\n> More text."
         result = markdown_to_adf(md)
         bq = result["content"][0]
         assert bq["type"] == "blockquote"
-        assert len(bq["content"]) >= 1
 
     def test_full_document_with_malformed_headings(self):
         """Simulates a full RFE with the problematic pattern throughout."""
@@ -177,6 +201,60 @@ class TestCIFailurePatterns:
         assert "heading" in types
         assert "paragraph" in types
         assert "bulletList" in types
+
+
+# ── Panel round-trip tests ────────────────────────────────────────────────
+
+class TestPanelRoundTrip:
+    """Verify ADF panel → markdown → ADF survives the fetch/edit/submit cycle."""
+
+    def test_multiline_panel_all_lines_quoted(self):
+        """adf_to_markdown must prefix every line with '> ', not just the first."""
+        panel_adf = {
+            "type": "doc", "version": 1,
+            "content": [{
+                "type": "panel",
+                "attrs": {"panelType": "info"},
+                "content": [
+                    {"type": "heading", "attrs": {"level": 3},
+                     "content": [{"type": "text", "text": "Problem",
+                                  "marks": [{"type": "strong"}]}]},
+                    {"type": "paragraph",
+                     "content": [{"type": "text",
+                                  "text": "Description here."}]},
+                ],
+            }],
+        }
+        md = adf_to_markdown(panel_adf)
+        # Every non-empty line should be quoted
+        for line in md.strip().split("\n"):
+            if line.strip():
+                assert line.startswith("> "), \
+                    f"Line not quoted: {line!r}"
+
+    def test_panel_round_trip_preserves_headings(self):
+        """Panel with headings round-trips: panel → markdown → panel."""
+        panel_adf = {
+            "type": "doc", "version": 1,
+            "content": [{
+                "type": "panel",
+                "attrs": {"panelType": "info"},
+                "content": [
+                    {"type": "heading", "attrs": {"level": 3},
+                     "content": [{"type": "text", "text": "Problem",
+                                  "marks": [{"type": "strong"}]}]},
+                    {"type": "paragraph",
+                     "content": [{"type": "text",
+                                  "text": "Description here."}]},
+                ],
+            }],
+        }
+        md = adf_to_markdown(panel_adf)
+        result = markdown_to_adf(md)
+        node = result["content"][0]
+        assert node["type"] == "panel"
+        assert node["content"][0]["type"] == "heading"
+        assert node["content"][1]["type"] == "paragraph"
 
 
 # ── Safety net tests ──────────────────────────────────────────────────────
