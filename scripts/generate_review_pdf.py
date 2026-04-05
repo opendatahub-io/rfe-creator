@@ -1136,7 +1136,6 @@ def main():
             return '#f4c4c0' if muted else '#e05555'
 
     # Compute gridline tick positions
-    import math
     tick_step = max(1, 10 ** (len(str(max_count)) - 1))
     if max_count / tick_step <= 2:
         tick_step = tick_step // 2 or 1
