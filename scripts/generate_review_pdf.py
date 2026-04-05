@@ -11,10 +11,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import find_artifact_file_including_archived, read_frontmatter
 
-ARTIFACTS = os.path.join(os.path.dirname(__file__), '..', 'artifacts')
-REVIEWS_DIR = os.path.join(ARTIFACTS, 'rfe-reviews')
-TASKS_DIR = os.path.join(ARTIFACTS, 'rfe-tasks')
-ORIGINALS_DIR = os.path.join(ARTIFACTS, 'rfe-originals')
+DEFAULT_ARTIFACTS = os.path.join(os.path.dirname(__file__), '..', 'artifacts')
 
 def get_revision_history(body):
     """Extract revision history section from review body."""
@@ -39,18 +36,18 @@ def parse_before_scores(revision_history, after_scores):
             before[key] = before_val
     return before
 
-def read_removed_context(rfe_id):
+def read_removed_context(rfe_id, tasks_dir):
     """Read removed-context YAML file if it exists."""
-    path = os.path.join(TASKS_DIR, f'{rfe_id}-removed-context.yaml')
+    path = os.path.join(tasks_dir, f'{rfe_id}-removed-context.yaml')
     if not os.path.exists(path):
         return None
     with open(path) as f:
         return yaml.safe_load(f)
 
-def generate_diff(rfe_id):
+def generate_diff(rfe_id, tasks_dir, originals_dir):
     """Generate unified diff between original and revised RFE."""
-    orig = os.path.join(ORIGINALS_DIR, f'{rfe_id}.md')
-    revised = os.path.join(TASKS_DIR, f'{rfe_id}.md')
+    orig = os.path.join(originals_dir, f'{rfe_id}.md')
+    revised = os.path.join(tasks_dir, f'{rfe_id}.md')
     if not os.path.exists(orig) or not os.path.exists(revised):
         return None
 
@@ -145,19 +142,26 @@ def main():
                              '(summary table still shows all)')
     parser.add_argument('--output', type=str, default=None,
                         help='Output file path (default: artifacts/review-report.html)')
+    parser.add_argument('--artifacts-dir', type=str, default=None,
+                        help='Artifacts directory (default: ../artifacts relative to script)')
     args = parser.parse_args()
+
+    artifacts_dir = args.artifacts_dir or DEFAULT_ARTIFACTS
+    reviews_dir = os.path.join(artifacts_dir, 'rfe-reviews')
+    tasks_dir = os.path.join(artifacts_dir, 'rfe-tasks')
+    originals_dir = os.path.join(artifacts_dir, 'rfe-originals')
 
     jira_server = os.environ.get('JIRA_SERVER', '').rstrip('/')
 
     rfes = []
-    review_files = sorted([f for f in os.listdir(REVIEWS_DIR) if f.endswith('-review.md')])
+    review_files = sorted([f for f in os.listdir(reviews_dir) if f.endswith('-review.md')])
 
     for rf in review_files:
         rfe_id = rf.replace('-review.md', '')
-        review_fm, review_body = read_frontmatter(os.path.join(REVIEWS_DIR, rf))
+        review_fm, review_body = read_frontmatter(os.path.join(reviews_dir, rf))
 
         task_path = find_artifact_file_including_archived(
-            os.path.dirname(TASKS_DIR), rfe_id)
+            os.path.dirname(tasks_dir), rfe_id)
         task_fm = {}
         if task_path and os.path.exists(task_path):
             task_fm, _ = read_frontmatter(task_path)
@@ -180,8 +184,8 @@ def main():
         before_pass = before_total >= 7 and all(v > 0 for v in before_scores.values())
         after_pass = review_fm.get('pass', False)
 
-        diff_text = generate_diff(rfe_id)
-        removed_context = read_removed_context(rfe_id)
+        diff_text = generate_diff(rfe_id, tasks_dir, originals_dir)
+        removed_context = read_removed_context(rfe_id, tasks_dir)
 
         error = review_fm.get('error')
 
@@ -1325,7 +1329,7 @@ window.addEventListener('scroll', function() {
 </html>
 '''
 
-    output_path = args.output or os.path.join(ARTIFACTS, 'review-report.html')
+    output_path = args.output or os.path.join(artifacts_dir, 'review-report.html')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write(html)

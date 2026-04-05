@@ -29,6 +29,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 import yaml
 
+from generate_run_report import _parse_run_id
 from jira_utils import (
     require_env,
     create_issue,
@@ -136,7 +137,16 @@ def main():
                         help="Print planned actions without making API calls")
     parser.add_argument("--artifacts-dir", default="artifacts",
                         help="Artifacts directory (default: artifacts)")
+    parser.add_argument("--generate-report", action="store_true",
+                        help="Generate YAML and HTML reports after submission")
+    parser.add_argument("--report-timestamp",
+                        help="Run timestamp for report naming "
+                             "(required with --generate-report)")
     args = parser.parse_args()
+
+    if args.generate_report and not args.report_timestamp:
+        parser.error("--report-timestamp is required when "
+                     "--generate-report is set")
 
     server, user, token = require_env()
 
@@ -546,6 +556,39 @@ def main():
     # Rebuild index
     rebuild_index(args.artifacts_dir)
     print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
+
+    # Generate reports if requested
+    if args.generate_report:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        ts = args.report_timestamp
+        run_id = _parse_run_id(ts)
+
+        print("\nGenerating reports...")
+
+        # YAML report
+        yaml_cmd = [sys.executable,
+                    os.path.join(script_dir, "generate_run_report.py"),
+                    "--start-time", ts,
+                    "--artifacts-dir", args.artifacts_dir]
+        result = subprocess.run(yaml_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  YAML report: {result.stdout.strip()}")
+        else:
+            print(f"Warning: YAML report generation failed: "
+                  f"{result.stderr}", file=sys.stderr)
+
+        # HTML report
+        html_output = os.path.join(args.artifacts_dir, "auto-fix-runs",
+                                   f"{run_id}-report.html")
+        html_cmd = [sys.executable,
+                    os.path.join(script_dir, "generate_review_pdf.py"),
+                    "--revised-only",
+                    "--artifacts-dir", args.artifacts_dir,
+                    "--output", html_output]
+        result = subprocess.run(html_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Warning: HTML report generation failed: "
+                  f"{result.stderr}", file=sys.stderr)
 
 
 if __name__ == "__main__":

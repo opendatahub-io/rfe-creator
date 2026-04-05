@@ -366,3 +366,44 @@ class TestSnapshotUpdate:
         # Dry run should NOT create any snapshot files
         snap_dir = os.path.join(art_dir, "auto-fix-runs")
         assert not os.path.exists(snap_dir)
+
+
+class TestGenerateReportFlag:
+    """Tests for --generate-report / --report-timestamp validation."""
+
+    def test_generate_report_without_timestamp_fails(self):
+        """--generate-report without --report-timestamp → error exit."""
+        env = {
+            **os.environ,
+            "JIRA_SERVER": "",
+            "JIRA_USER": "",
+            "JIRA_TOKEN": "",
+        }
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--dry-run", "--generate-report"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode != 0
+        assert "--report-timestamp is required" in result.stderr
+
+    def test_generate_report_with_timestamp_accepted(self, art_dir):
+        """--generate-report with --report-timestamp → no validation error."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": "https://fake.atlassian.net",
+            "JIRA_USER": "fake@example.com",
+            "JIRA_TOKEN": "fake-token",
+        }
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--dry-run",
+             "--generate-report", "--report-timestamp", "20260404-170041",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0
+        assert "--report-timestamp is required" not in result.stderr

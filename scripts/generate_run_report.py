@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -11,16 +12,27 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import find_review_file, read_frontmatter, scan_task_files
 
-ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "..", "artifacts")
+DEFAULT_ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "artifacts")
 SCORE_FIELDS = ["what", "why", "open_to_how", "not_a_task", "right_sized"]
 
 
-def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids):
+def _parse_run_id(start_time):
+    """Derive run_id from a timestamp. Accepts YYYYMMDD-HHMMSS or ISO format."""
+    if re.match(r'^\d{8}-\d{6}$', start_time):
+        return start_time
+    return (datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            .strftime("%Y%m%d-%H%M%S"))
+
+
+def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids,
+                 artifacts_dir=None):
+    if artifacts_dir is None:
+        artifacts_dir = DEFAULT_ARTIFACTS_DIR
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Build parent->children map from task files
     children_map = {}
-    for _, task_data in scan_task_files(ARTIFACTS_DIR):
+    for _, task_data in scan_task_files(artifacts_dir):
         parent = task_data.get("parent_key")
         if parent:
             children_map.setdefault(parent, []).append(task_data["rfe_id"])
@@ -36,7 +48,7 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
     counts = {"passed": 0, "failed": 0, "split": 0, "errors": 0}
 
     for rfe_id in expanded_ids:
-        review_path = find_review_file(ARTIFACTS_DIR, rfe_id)
+        review_path = find_review_file(artifacts_dir, rfe_id)
         if not review_path:
             per_rfe.append({"id": rfe_id, "error": "review file not found"})
             counts["errors"] += 1
@@ -97,8 +109,7 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
         return round(sum(lst) / len(lst), 1) if lst else 0.0
 
     report = {
-        "run_id": datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                  .strftime("%Y%m%d-%H%M%S"),
+        "run_id": _parse_run_id(start_time),
         "started": start_time,
         "completed": now,
         "batch_size": batch_size,
@@ -124,21 +135,33 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
 
 def main():
     parser = argparse.ArgumentParser(description="Generate auto-fix run report")
-    parser.add_argument("--start-time", required=True, help="ISO timestamp")
+    parser.add_argument("--start-time", required=True,
+                        help="Timestamp (YYYYMMDD-HHMMSS or ISO format)")
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument("--retried", default="", help="Comma-separated retried IDs")
     parser.add_argument("--retry-successes", default="",
                         help="Comma-separated retry success IDs")
-    parser.add_argument("rfe_ids", nargs="+", help="RFE IDs to include")
+    parser.add_argument("--artifacts-dir", default=None,
+                        help="Artifacts directory (default: ../artifacts relative to script)")
+    parser.add_argument("rfe_ids", nargs="*", help="RFE IDs (default: scan review files)")
     args = parser.parse_args()
+
+    artifacts_dir = args.artifacts_dir or DEFAULT_ARTIFACTS_DIR
+
+    # If no IDs provided, scan review files
+    if not args.rfe_ids:
+        reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")
+        args.rfe_ids = [f.replace("-review.md", "")
+                        for f in sorted(os.listdir(reviews_dir))
+                        if f.endswith("-review.md")]
 
     retried = [x for x in args.retried.split(",") if x]
     retry_ok = [x for x in args.retry_successes.split(",") if x]
 
     report = build_report(args.rfe_ids, args.start_time, args.batch_size,
-                          retried, retry_ok)
+                          retried, retry_ok, artifacts_dir=artifacts_dir)
 
-    out_dir = os.path.join(ARTIFACTS_DIR, "auto-fix-runs")
+    out_dir = os.path.join(artifacts_dir, "auto-fix-runs")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{report['run_id']}.yaml")
 
