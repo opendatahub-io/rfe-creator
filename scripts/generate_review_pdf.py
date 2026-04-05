@@ -98,9 +98,10 @@ def diff_to_html(diff_text):
 
     return '\n'.join(html_parts)
 
-def badge(passed, error=None):
+def badge(passed, error=None, tooltip=None):
     if error:
-        return '<span class="badge-error">ERROR</span>'
+        tip = tooltip or str(error)
+        return f'<span class="badge-tip"><span class="badge-error">ERROR</span><span class="tip-text">{html_escape(tip)}</span></span>'
     if passed:
         return '<span class="badge-pass">PASS</span>'
     return '<span class="badge-fail">FAIL</span>'
@@ -145,6 +146,8 @@ def main():
     parser.add_argument('--output', type=str, default=None,
                         help='Output file path (default: artifacts/review-report.html)')
     args = parser.parse_args()
+
+    jira_server = os.environ.get('JIRA_SERVER', '').rstrip('/')
 
     rfes = []
     review_files = sorted([f for f in os.listdir(REVIEWS_DIR) if f.endswith('-review.md')])
@@ -201,6 +204,7 @@ def main():
             'feasibility': review_fm.get('feasibility', ''),
             'auto_revised': review_fm.get('auto_revised', False),
             'needs_attention': review_fm.get('needs_attention', False),
+            'needs_attention_reason': review_fm.get('needs_attention_reason', ''),
             'recommendation': review_fm.get('recommendation', ''),
             'error': error,
             'diff_text': diff_text,
@@ -231,16 +235,46 @@ def main():
                 leaves.extend(get_leaf_descendants(child['rfe_id']))
         return leaves
 
+    def find_tree_root(r):
+        """Walk parent_key links up to the root ancestor."""
+        root = r
+        pk = r.get('parent_key')
+        while pk:
+            ancestor = rfe_by_id.get(pk)
+            if not ancestor:
+                break
+            root = ancestor
+            pk = ancestor.get('parent_key')
+        return root
+
     # Partition into four categories
+    # Note: intermediaries are by definition also split parents (is_split_child
+    # AND has children), so we exclude them from split_parents to avoid
+    # double-counting in the summary table.
     existing = [r for r in rfes if not r['is_split_child'] and not r['is_split_parent']]
-    split_parents = [r for r in rfes if r['is_split_parent']]
     intermediaries = [r for r in rfes if r.get('is_intermediary')]
+    intermediary_ids = {r['rfe_id'] for r in intermediaries}
+    split_parents = [r for r in rfes if r['is_split_parent']
+                     and r['rfe_id'] not in intermediary_ids]
     leaf_children = [r for r in rfes if r.get('is_leaf_child')]
 
     # Cache leaf descendants per parent
     leaves_by_parent = {}
     for sp in split_parents:
         leaves_by_parent[sp['rfe_id']] = get_leaf_descendants(sp['rfe_id'])
+
+    # Tag children of refused/errored split parents so stats exclude them
+    refused_parents = {sp['rfe_id'] for sp in split_parents if sp.get('error')}
+    def _has_refused_ancestor(r):
+        pk = r.get('parent_key')
+        while pk:
+            if pk in refused_parents:
+                return True
+            parent = rfe_by_id.get(pk)
+            pk = parent.get('parent_key') if parent else None
+        return False
+    for r in rfes:
+        r['parent_refused'] = (r['is_split_child'] and _has_refused_ancestor(r))
 
     n = len(rfes)
     error_count = sum(1 for r in rfes if r.get('error'))
@@ -253,12 +287,14 @@ def main():
     ex_avg_before = sum(r['before_total'] for r in existing if not r.get('error')) / ex_scored if ex_scored else 0
     ex_avg_after = sum(r['after_total'] for r in existing if not r.get('error')) / ex_scored if ex_scored else 0
 
-    # Split stats (leaf children only)
-    sp_total_children = len(leaf_children)
-    sc_errors = sum(1 for r in leaf_children if r.get('error'))
-    sc_scored = len(leaf_children) - sc_errors
-    sc_passing = sum(1 for r in leaf_children if not r.get('error') and r['after_pass'])
-    sc_avg = sum(r['after_total'] for r in leaf_children if not r.get('error')) / sc_scored if sc_scored else 0
+    # Split stats (leaf children only, excluding children of refused parents)
+    submitted_leaf_children = [r for r in leaf_children if not r.get('parent_refused')]
+    sp_total_children = len(submitted_leaf_children)
+    sp_refused_count = len(refused_parents)
+    sc_errors = sum(1 for r in submitted_leaf_children if r.get('error'))
+    sc_scored = len(submitted_leaf_children) - sc_errors
+    sc_passing = sum(1 for r in submitted_leaf_children if not r.get('error') and r['after_pass'])
+    sc_avg = sum(r['after_total'] for r in submitted_leaf_children if not r.get('error')) / sc_scored if sc_scored else 0
 
     removed_count = sum(1 for r in rfes if r['removed_context'])
     total_blocks = sum(len(r['removed_context'].get('blocks', [])) for r in rfes if r['removed_context'])
@@ -354,9 +390,9 @@ def main():
         display: inline-block;
         background: #2d6a2d;
         color: white;
-        font-size: 8pt;
+        font-size: 7pt;
         font-weight: 700;
-        padding: 2pt 8pt;
+        padding: 1pt 5pt;
         border-radius: 3pt;
         letter-spacing: 0.5pt;
     }
@@ -364,21 +400,80 @@ def main():
         display: inline-block;
         background: #c0392b;
         color: white;
-        font-size: 8pt;
+        font-size: 7pt;
         font-weight: 700;
-        padding: 2pt 8pt;
+        padding: 1pt 5pt;
         border-radius: 3pt;
         letter-spacing: 0.5pt;
     }
     .badge-error {
         display: inline-block;
-        background: #e67e22;
+        background: #c0392b;
         color: white;
-        font-size: 8pt;
+        font-size: 7pt;
         font-weight: 700;
-        padding: 2pt 8pt;
+        padding: 1pt 5pt;
         border-radius: 3pt;
         letter-spacing: 0.5pt;
+    }
+    .badge-attention {
+        display: inline-block;
+        background: #f39c12;
+        color: white;
+        font-size: 7pt;
+        font-weight: 700;
+        padding: 1pt 5pt;
+        border-radius: 3pt;
+        letter-spacing: 0.5pt;
+    }
+    .badge-rejected {
+        display: inline-block;
+        background: #8e44ad;
+        color: white;
+        font-size: 7pt;
+        font-weight: 700;
+        padding: 1pt 5pt;
+        border-radius: 3pt;
+        letter-spacing: 0.5pt;
+    }
+    .badge-tip {
+        position: relative;
+        cursor: help;
+    }
+    .badge-tip .tip-text {
+        visibility: hidden;
+        opacity: 0;
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a2e;
+        color: #f0f0f0;
+        font-size: 8pt;
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 1.4;
+        padding: 6pt 10pt;
+        border-radius: 4pt;
+        white-space: normal;
+        width: 240px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        z-index: 100;
+        transition: opacity 0.15s;
+        pointer-events: none;
+    }
+    .badge-tip .tip-text::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: #1a1a2e;
+    }
+    .badge-tip:hover .tip-text {
+        visibility: visible;
+        opacity: 1;
     }
     .score-table {
         width: 100%;
@@ -578,6 +673,14 @@ def main():
     .back-to-top:hover {
         background: #e94560;
     }
+    .jira-link {
+        color: inherit;
+        text-decoration: none;
+        transition: color 0.15s;
+    }
+    .jira-link:hover {
+        color: #e94560;
+    }
     @media print {
         .back-to-top { display: none; }
     }
@@ -585,7 +688,10 @@ def main():
 
     subtitle_parts = [f'{len(existing)} existing RFEs assessed and auto-revised']
     if split_parents:
-        subtitle_parts.append(f'{len(split_parents)} split into {sp_total_children} new RFEs')
+        split_desc = f'{len(split_parents)} split into {sp_total_children} new RFEs'
+        if sp_refused_count:
+            split_desc += f' ({sp_refused_count} refused)'
+        subtitle_parts.append(split_desc)
     if error_count:
         subtitle_parts.append(f'{error_count} error{"s" if error_count != 1 else ""}')
 
@@ -647,6 +753,10 @@ def main():
                 <div class="stat-value">{sc_avg:.1f}</div>
                 <div class="stat-label">Avg Child Score</div>
             </div>
+{f'''            <div class="stat-box" style="border-color: #e67e22;">
+                <div class="stat-value" style="color: #e67e22;">{sp_refused_count}</div>
+                <div class="stat-label">Refused</div>
+            </div>''' if sp_refused_count else ''}
         </div>""" if split_parents else ''}
 
         <table class="summary-table">
@@ -674,6 +784,37 @@ def main():
             return '<span style="color:#b8860b;font-weight:600;">Indeterminate</span>'
         return '&mdash;'
 
+    def jira_link(rfe_id):
+        """Wrap an RFE ID in a Jira link if it's a real key and server is configured."""
+        if jira_server and rfe_id.startswith('RHAIRFE-'):
+            return f'<a href="{jira_server}/browse/{html_escape(rfe_id)}" target="_blank" class="jira-link" title="Open in Jira">{html_escape(rfe_id)} &#x1F517;</a>'
+        return html_escape(rfe_id)
+
+    def jira_ext(rfe_id):
+        """Small external link icon for Jira keys in summary table."""
+        if jira_server and rfe_id.startswith('RHAIRFE-'):
+            return f' <a href="{jira_server}/browse/{html_escape(rfe_id)}" target="_blank" style="color:#0f3460;text-decoration:none;font-size:9pt;" title="Open in Jira">&#x1F517;</a>'
+        return ''
+
+    def revision_rejected(r):
+        """Check if auto-revision was rejected (score decreased or explicit rejection)."""
+        return (r.get('auto_revised') and not r.get('is_split_child')
+                and (r.get('recommendation') == 'autorevise_reject'
+                     or r['after_total'] < r['before_total']))
+
+    def rejected_badge(r):
+        if revision_rejected(r):
+            return ' <span class="badge-tip"><span class="badge-rejected">REVISION REJECTED</span><span class="tip-text">Auto-revision decreased the score — original description kept, changes not submitted.</span></span>'
+        return ''
+
+    def attn_badge(r):
+        if r.get('needs_attention') and not r.get('error'):
+            reason = r.get('needs_attention_reason', '')
+            if reason:
+                return f' <span class="badge-tip"><span class="badge-attention">NEEDS ATTENTION</span><span class="tip-text">{html_escape(reason)}</span></span>'
+            return ' <span class="badge-attention">NEEDS ATTENTION</span>'
+        return ''
+
     def render_table_rows(rfe_list):
         rows = ''
         for r in rfe_list:
@@ -681,24 +822,29 @@ def main():
             rc = r['removed_context']
             if rc:
                 blocks = rc.get('blocks', [])
+                genuine = sum(1 for b in blocks if b.get('type') == 'genuine')
                 rc_text = f'{len(blocks)} block{"s" if len(blocks)!=1 else ""}'
+                if genuine:
+                    rc_text += f' ({genuine} genuine)'
             else:
                 rc_text = '&mdash;'
 
             feas = feasibility_text(r.get('feasibility', ''))
             error = r.get('error')
             if error:
+                tip = r.get('needs_attention_reason', str(error))
                 rows += f'''        <tr>
-            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a></td>
-            <td colspan="4" style="background: #fef3e6;">{badge(False, error=error)} &nbsp; <span style="color: #8b4513; font-weight: 600;">{html_escape(str(error))}</span></td>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])} {badge(False, error=error, tooltip=tip)}</td>
+            <td colspan="4" style="color:#8b4513;font-size:8pt;">{html_escape(str(error))}</td>
             <td>&mdash;</td>
             <td>{feas}</td>
             <td>{rc_text}</td>
         </tr>
 '''
             elif r['is_split_child']:
-                rows += f'''        <tr>
-            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a></td>
+                refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(NOT SUBMITTED)</span>' if r.get('parent_refused') else ''
+                rows += f'''        <tr{' style="opacity:0.6;"' if r.get('parent_refused') else ''}>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{refused_marker}{attn_badge(r)}</td>
             <td>&mdash;</td>
             <td></td>
             <td>{r['after_total']}/10</td>
@@ -710,7 +856,7 @@ def main():
 '''
             else:
                 rows += f'''        <tr>
-            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a></td>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{rejected_badge(r)}{attn_badge(r)}</td>
             <td>{r['before_total']}/10</td>
             <td>{badge(r['before_pass'])}</td>
             <td>{r['after_total']}/10</td>
@@ -726,16 +872,31 @@ def main():
         rows = ''
         for r in parent_list:
             leaves = leaves_by_parent.get(r['rfe_id'], [])
-            leaf_scored = [c for c in leaves if not c.get('error')]
-            leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
-            leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
-            rows += f'''        <tr>
-            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a></td>
+            error = r.get('error')
+            feas = feasibility_text(r.get('feasibility', ''))
+            if error:
+                tip = r.get('needs_attention_reason', str(error))
+                rows += f'''        <tr>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])} {badge(False, error=error, tooltip=tip)}</td>
+            <td>{r['before_total']}/10</td>
+            <td>{badge(r['before_pass'])}</td>
+            <td colspan="2" style="font-size:8pt;color:#8b4513;font-weight:600;">&rarr; {len(leaves)} children (not submitted)</td>
+            <td>&mdash;</td>
+            <td>{feas}</td>
+            <td>&mdash;</td>
+        </tr>
+'''
+            else:
+                leaf_scored = [c for c in leaves if not c.get('error')]
+                leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
+                leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
+                rows += f'''        <tr>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{attn_badge(r)}</td>
             <td>{r['before_total']}/10</td>
             <td>{badge(r['before_pass'])}</td>
             <td colspan="2" style="font-size:8pt;">&rarr; {len(leaves)} children ({leaf_passing}/{len(leaf_scored)} passing, avg {leaf_avg:.1f})</td>
             <td>&mdash;</td>
-            <td>{feasibility_text(r.get('feasibility', ''))}</td>
+            <td>{feas}</td>
             <td>&mdash;</td>
         </tr>
 '''
@@ -747,9 +908,48 @@ def main():
         html += render_table_rows(existing)
 
     if split_parents:
-        html += f'''        <tr><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children)</td></tr>
+        sp_error_count = sum(1 for r in split_parents if r.get('error'))
+        sp_header = f'Split RFEs ({len(split_parents)} &rarr; {sp_total_children} children'
+        if sp_error_count:
+            sp_header += f', {sp_error_count} refused'
+        sp_header += ')'
+        html += f'''        <tr><td colspan="8" style="background:#fff3e0;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#e65100;">{sp_header}</td></tr>
 '''
         html += render_split_parent_rows(split_parents)
+
+    if intermediaries:
+        html += f'''        <tr><td colspan="8" style="background:#fff8e1;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#f57f17;">Re-split (superseded) ({len(intermediaries)})</td></tr>
+'''
+        for r in intermediaries:
+            leaves = get_leaf_descendants(r['rfe_id'])
+            leaf_scored = [c for c in leaves if not c.get('error')]
+            leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
+            leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
+            feas = feasibility_text(r.get('feasibility', ''))
+            is_refused = r.get('parent_refused')
+            refused_marker = ' <span style="color:#e67e22;font-size:7pt;font-weight:700;">(CHILDREN NOT SUBMITTED)</span>' if is_refused else ''
+            if is_refused:
+                html += f'''        <tr style="opacity:0.6;">
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}{refused_marker}</td>
+            <td>&mdash;</td>
+            <td></td>
+            <td colspan="2" style="font-size:8pt;">superseded &rarr; {len(leaves)} children (not submitted)</td>
+            <td>&mdash;</td>
+            <td>{feas}</td>
+            <td>&mdash;</td>
+        </tr>
+'''
+            else:
+                html += f'''        <tr>
+            <td class="key-col"><a href="#{r['rfe_id']}">{html_escape(r['rfe_id'])}</a>{jira_ext(r['rfe_id'])}</td>
+            <td>&mdash;</td>
+            <td></td>
+            <td colspan="2" style="font-size:8pt;">superseded &rarr; {len(leaves)} children ({leaf_passing}/{len(leaf_scored)} passing, avg {leaf_avg:.1f})</td>
+            <td>&mdash;</td>
+            <td>{feas}</td>
+            <td>&mdash;</td>
+        </tr>
+'''
 
     if leaf_children:
         html += f'''        <tr><td colspan="8" style="background:#e8f5e9;font-weight:700;font-size:9pt;padding:6pt 8pt;color:#2e7d32;">New RFEs from Splits ({len(leaf_children)})</td></tr>
@@ -806,7 +1006,10 @@ def main():
         ('Right-sized', 'right_sized'),
     ]
 
-    detail_rfes = [r for r in rfes if not r.get('error')]
+    # Errored split parents get detail pages (to show refusal banner + tree),
+    # but other errored RFEs are excluded since there's no useful detail to show.
+    detail_rfes = [r for r in rfes if not r.get('error')
+                    or r['is_split_parent']]
     if args.revised_only:
         detail_rfes = [r for r in detail_rfes if r['auto_revised'] or r['is_split_parent'] or r.get('is_leaf_child')]
 
@@ -815,9 +1018,48 @@ def main():
 
         html += f'''
         <div class="page">
-            <h1 id="{r['rfe_id']}">{html_escape(r['rfe_id'])}</h1>
+            <h1 id="{r['rfe_id']}">{jira_link(r['rfe_id'])}</h1>
             <h2>{html_escape(r['title'])}</h2>
             <p style="margin:0 0 10pt 0;font-size:9pt;">{'Split from: <a href="#' + r['parent_key'] + '">' + html_escape(r['parent_key']) + '</a> &nbsp;|&nbsp; ' if r.get('parent_key') else ''}Technical Feasibility: {feasibility_text(r.get('feasibility', ''))}</p>
+'''
+        if r.get('parent_refused'):
+            # Find the refused ancestor by walking up the tree
+            refused_ancestor = {}
+            node = r
+            while node.get('parent_key'):
+                parent = rfe_by_id.get(node['parent_key'], {})
+                if parent.get('rfe_id') in refused_parents:
+                    refused_ancestor = parent
+                    break
+                node = parent
+            parent_reason = refused_ancestor.get('needs_attention_reason', refused_ancestor.get('error', ''))
+            html += f'''
+            <div style="background:#fef3e6;border:2px solid #e67e22;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">
+                <div style="font-size:10pt;font-weight:700;color:#e67e22;">&#x26A0; Not Submitted</div>
+                <div style="font-size:9pt;color:#8b4513;margin-top:4pt;">Parent <a href="#{html_escape(refused_ancestor.get('rfe_id', ''))}" style="color:#8b4513;font-weight:600;">{html_escape(refused_ancestor.get('rfe_id', ''))}</a> split was refused: {html_escape(str(parent_reason))}</div>
+            </div>
+'''
+        elif r.get('is_intermediary'):
+            html += f'''
+            <div style="background:#fff8e1;border:2px solid #f57f17;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">
+                <div style="font-size:10pt;font-weight:700;color:#f57f17;">Superseded &mdash; Re-split into children below</div>
+                <div style="font-size:9pt;color:#8b6914;margin-top:4pt;">This RFE was not submitted to Jira. It was further decomposed and its children were submitted instead.</div>
+            </div>
+'''
+        if r.get('needs_attention') and not r.get('error') and not r.get('parent_refused') and not r.get('is_intermediary'):
+            attn_reason = r.get('needs_attention_reason', '')
+            html += f'''
+            <div style="background:#fef9e6;border:2px solid #f39c12;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">
+                <div style="font-size:10pt;font-weight:700;color:#f39c12;">&#x26A0; Needs Attention</div>
+                {f'<div style="font-size:9pt;color:#8b6914;margin-top:4pt;">{html_escape(attn_reason)}</div>' if attn_reason else ''}
+            </div>
+'''
+        if revision_rejected(r):
+            html += '''
+            <div style="background:#f3e8ff;border:2px solid #8e44ad;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">
+                <div style="font-size:10pt;font-weight:700;color:#8e44ad;">Auto-revision Rejected</div>
+                <div style="font-size:9pt;color:#5b2c6f;margin-top:4pt;">Auto-revision decreased the score &mdash; original description kept, changes not submitted to Jira.</div>
+            </div>
 '''
 
         if r['is_split_parent'] or r.get('is_intermediary'):
@@ -826,6 +1068,17 @@ def main():
             leaf_scored = [c for c in leaves if not c.get('error')]
             leaf_passing = sum(1 for c in leaf_scored if c['after_pass'])
             leaf_avg = sum(c['after_total'] for c in leaf_scored) / len(leaf_scored) if leaf_scored else 0
+            split_error = r.get('error')
+
+            if split_error:
+                attn_reason = r.get('needs_attention_reason', '')
+                reason_text = f': {html_escape(attn_reason)}' if attn_reason else ''
+                html += f'''
+            <div style="background:#fef3e6;border:2px solid #e67e22;border-radius:6pt;padding:12pt 16pt;margin-bottom:14pt;">
+                <div style="font-size:11pt;font-weight:700;color:#e67e22;margin-bottom:4pt;">&#x26A0; Split Refused &mdash; Not Submitted</div>
+                <div style="font-size:9pt;color:#8b4513;">{html_escape(str(split_error))}{reason_text}</div>
+            </div>
+'''
 
             html += f'''
             <div class="score-section">
@@ -839,7 +1092,7 @@ def main():
                     <div class="stat-box">
                         <div class="stat-label">Split Into</div>
                         <div class="stat-value">{len(leaves)}</div>
-                        <div class="stat-label">children</div>
+                        <div class="stat-label">children{' (not submitted)' if split_error else ''}</div>
                     </div>
                     <div class="stat-box">
                         <div class="stat-label">Children Passing</div>
@@ -855,26 +1108,32 @@ def main():
             <h3>Split Tree</h3>
 '''
             # Render tree visualization
-            def render_tree(parent_id, prefix='', is_last=True):
+            def render_tree(parent_id, prefix='', is_last=True, highlight_id=None):
                 tree_html = ''
                 direct = children_by_parent.get(parent_id, [])
                 for i, c in enumerate(direct):
                     last = (i == len(direct) - 1)
                     connector = '&#x2514;&#x2500;&#x2500; ' if last else '&#x251C;&#x2500;&#x2500; '
+                    is_highlighted = (c['rfe_id'] == highlight_id)
+                    hl_start = '<span style="background:#fff3cd;padding:1pt 4pt;border-radius:3pt;">' if is_highlighted else ''
+                    hl_end = ' &#x25C0;</span>' if is_highlighted else ''
                     if c.get('is_intermediary'):
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span></div>\n'
+                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#e65100;font-weight:600;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} <span style="color:#888;font-style:italic;">(re-split)</span>{hl_end}</div>\n'
                         child_prefix = prefix + ('    ' if last else '&#x2502;   ')
-                        tree_html += render_tree(c['rfe_id'], child_prefix, last)
+                        tree_html += render_tree(c['rfe_id'], child_prefix, last, highlight_id)
                     else:
                         pass_icon = '&#x2713;' if c['after_pass'] else '&#x2717;'
                         pass_color = '#2d6a2d' if c['after_pass'] else '#c0392b'
-                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} ({c["after_total"]}/10) <span style="color:{pass_color};font-weight:700;">{pass_icon}</span></div>\n'
+                        tree_html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;">{prefix}{connector}{hl_start}<a href="#{c["rfe_id"]}" style="color:#0f3460;">{html_escape(c["rfe_id"])}</a>  {html_escape(c["title"])} ({c["after_total"]}/10) <span style="color:{pass_color};font-weight:700;">{pass_icon}</span>{hl_end}</div>\n'
                 return tree_html
 
+            # For intermediaries, show the full tree from the root ancestor
+            tree_root = find_tree_root(r) if r.get('is_intermediary') else r
+            highlight_id = r['rfe_id'] if r.get('is_intermediary') else None
             html += '            <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">\n'
             # Root node
-            html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{html_escape(r["rfe_id"])}  {html_escape(r["title"])} ({r["before_total"]}/10)</div>\n'
-            html += render_tree(r['rfe_id'])
+            html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{html_escape(tree_root["rfe_id"])}  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10)</div>\n'
+            html += render_tree(tree_root['rfe_id'], highlight_id=highlight_id)
             html += '            </div>\n'
 
             html += '''
@@ -893,7 +1152,7 @@ def main():
 '''
             for c in leaves:
                 html += f'''                    <tr>
-                        <td class="key-col"><a href="#{c['rfe_id']}">{html_escape(c['rfe_id'])}</a></td>
+                        <td class="key-col"><a href="#{c['rfe_id']}">{html_escape(c['rfe_id'])}</a>{jira_ext(c['rfe_id'])}</td>
                         <td>{html_escape(c['title'])}</td>
                         <td>{c['after_total']}/10</td>
                         <td>{badge(c['after_pass'])}</td>
@@ -938,6 +1197,15 @@ def main():
             </div>
 
 '''
+            # Show full split tree with this child highlighted
+            tree_root = find_tree_root(r)
+            if tree_root['rfe_id'] != r['rfe_id']:
+                html += '            <h3>Split Tree</h3>\n'
+                html += '            <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6pt;padding:10pt 14pt;margin-bottom:14pt;">\n'
+                html += f'<div style="white-space:pre;font-family:monospace;font-size:9pt;line-height:1.6;font-weight:700;">{html_escape(tree_root["rfe_id"])}  {html_escape(tree_root["title"])} ({tree_root["before_total"]}/10)</div>\n'
+                html += render_tree(tree_root['rfe_id'], highlight_id=r['rfe_id'])
+                html += '            </div>\n'
+
         else:
             # Regular detail: before/after scores
             html += f'''
