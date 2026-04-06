@@ -200,8 +200,8 @@ def diff_snapshots(current_issues, previous_data):
     """Compare current fetch against previous snapshot.
 
     Returns (changed_keys, new_keys) preserving Jira's fetch order.
-    - changed: hash differs from previous snapshot
-    - new: not in previous snapshot at all
+    - changed: hash differs from previous snapshot (and was previously processed)
+    - new: not in previous snapshot, or previously unprocessed
     """
     if previous_data is None:
         # First run — all issues are "new"
@@ -213,12 +213,24 @@ def diff_snapshots(current_issues, previous_data):
 
     for key, data in current_issues.items():
         current_hash = data["content_hash"]
+        prev_entry = prev_issues.get(key)
 
-        if key not in prev_issues:
+        if prev_entry is None:
             new.append(key)
             continue
 
-        if current_hash != prev_issues[key]:
+        # Handle both old format (plain string) and new format (dict)
+        if isinstance(prev_entry, dict):
+            prev_hash = prev_entry.get("hash")
+            processed = prev_entry.get("processed", True)
+        else:
+            prev_hash = prev_entry
+            processed = True  # old format entries are implicitly processed
+
+        if not processed:
+            # Never successfully processed — treat as new
+            new.append(key)
+        elif current_hash != prev_hash:
             changed.append(key)
 
     return changed, new
@@ -232,11 +244,14 @@ def write_id_file(path, ids):
             f.write(f"{id_}\n")
 
 
-def update_snapshot_hashes(hashes, snapshot_dir=None):
+def update_snapshot_hashes(hashes, snapshot_dir=None, mark_processed=None):
     """Update the latest snapshot with post-submit content hashes.
 
     Called by submit.py after Jira writes so the next fetch sees
     the post-submit state and doesn't re-flag our own changes.
+
+    Also marks additional IDs as processed without changing their hash
+    (e.g., reviewed but no content changes needed).
     """
     snap_dir = snapshot_dir or SNAPSHOT_DIR
     pattern = os.path.join(snap_dir, "issue-snapshot-*.yaml")
@@ -247,7 +262,20 @@ def update_snapshot_hashes(hashes, snapshot_dir=None):
             with open(f, encoding="utf-8") as fh:
                 data = yaml.safe_load(fh)
             if data and isinstance(data.get("issues"), dict):
-                data["issues"].update(hashes)
+                issues = data["issues"]
+                # Update submitted IDs with new hash + processed
+                for key, hash_val in hashes.items():
+                    issues[key] = {"hash": hash_val, "processed": True}
+                # Mark additional IDs as processed (keep existing hash)
+                if mark_processed:
+                    for key in mark_processed:
+                        entry = issues.get(key)
+                        if entry is not None:
+                            if isinstance(entry, dict):
+                                entry["processed"] = True
+                            else:
+                                issues[key] = {"hash": entry,
+                                               "processed": True}
                 with open(f, "w", encoding="utf-8") as fh:
                     yaml.dump(data, fh, default_flow_style=False,
                               sort_keys=False)
@@ -318,7 +346,27 @@ def cmd_fetch(args):
     prev_issues = prev_data.get("issues", {}) if prev_data else {}
     merged_issues = dict(prev_issues)
     for key in all_ids:
-        merged_issues[key] = current[key]["content_hash"]
+        current_hash = current[key]["content_hash"]
+        prev = prev_issues.get(key)
+
+        # Determine processed state using the invariant:
+        # processed=true only stays true if hash unchanged
+        if prev is not None:
+            if isinstance(prev, dict):
+                prev_hash = prev.get("hash")
+                prev_processed = prev.get("processed", True)
+            else:
+                prev_hash = prev
+                prev_processed = True
+
+            if prev_processed and current_hash == prev_hash:
+                processed = True
+            else:
+                processed = False
+        else:
+            processed = False
+
+        merged_issues[key] = {"hash": current_hash, "processed": processed}
 
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
     snapshot = {

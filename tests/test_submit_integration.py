@@ -350,10 +350,11 @@ class TestRemoveLabels:
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
 
-        # Snapshot should be unchanged (no submitted hashes)
+        # Snapshot hash preserved, but marked processed (pipeline completed)
         with open(snap_path) as f:
             data = yaml.safe_load(f)
-        assert data["issues"]["RHAIRFE-1234"] == "original-hash"
+        entry = data["issues"]["RHAIRFE-1234"]
+        assert entry == {"hash": "original-hash", "processed": True}
 
 
 class TestConflictDetection:
@@ -464,8 +465,10 @@ class TestSnapshotUpdate:
         issues = jira.search("project = RHAIRFE")
         key = issues[0]["key"]
         assert key in data["issues"]
-        assert isinstance(data["issues"][key], str)
-        assert len(data["issues"][key]) == 64  # SHA256 hex
+        entry = data["issues"][key]
+        assert isinstance(entry, dict)
+        assert len(entry["hash"]) == 64  # SHA256 hex
+        assert entry["processed"] is True
         # Other issues in snapshot still present
         assert data["issues"]["RHAIRFE-9000"] == "existing"
 
@@ -487,8 +490,11 @@ class TestSnapshotUpdate:
         with open(snap_path) as f:
             data = yaml.safe_load(f)
         assert "RHAIRFE-1234" in data["issues"]
-        assert len(data["issues"]["RHAIRFE-1234"]) == 64
-        assert data["issues"]["RHAIRFE-1234"] != "old-hash"
+        entry = data["issues"]["RHAIRFE-1234"]
+        assert isinstance(entry, dict)
+        assert len(entry["hash"]) == 64
+        assert entry["hash"] != "old-hash"
+        assert entry["processed"] is True
 
     def test_no_update_when_all_skipped(self, art_dir, jira):
         """All RFEs rejected/skipped → snapshot unchanged."""
@@ -504,7 +510,66 @@ class TestSnapshotUpdate:
 
         with open(snap_path) as f:
             data = yaml.safe_load(f)
-        # Snapshot untouched — still just the original issue
+        # Rejected entries are marked processed (pipeline completed)
+        entry = data["issues"]["RHAIRFE-1234"]
+        assert entry == {"hash": "existing", "processed": True}
+
+    def test_dry_run_does_not_update_snapshot(self, art_dir, jira):
+        """Dry-run must not write processed flags or hashes to snapshot."""
+        snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-1234": "existing"})
+
+        # Set up a passing RFE that would normally be submitted
+        jira.create("RHAIRFE-1234", "Test RFE", "Original.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234"))
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
+             "--dry-run"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Snapshot must be completely untouched
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"] == {"RHAIRFE-1234": "existing"}
+
+    def test_dry_run_does_not_mark_processed(self, art_dir, jira):
+        """Dry-run with all-skipped entries must not mark processed."""
+        snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-1234": "existing"})
+
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
+             "--dry-run"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Snapshot untouched — dry-run must not mark processed
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
         assert data["issues"] == {"RHAIRFE-1234": "existing"}
 
 

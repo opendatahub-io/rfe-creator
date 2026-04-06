@@ -87,6 +87,11 @@ def _latest_snapshot(work_dirs):
         return yaml.safe_load(f)
 
 
+def _mark_processed(work_dirs, ids):
+    """Simulate pipeline completion: mark selected IDs as processed."""
+    update_snapshot_hashes({}, work_dirs.snapshot_dir, mark_processed=ids)
+
+
 def _seed_snapshot(work_dirs, issues, query_ts="2026-04-01T00:00:00Z"):
     """Write a previous snapshot."""
     snap = {
@@ -139,7 +144,10 @@ class TestCmdFetchFirstRun:
             snap = yaml.safe_load(f)
         assert "RHAIRFE-1" in snap["issues"]
         assert "query_timestamp" in snap
-        assert len(snap["issues"]["RHAIRFE-1"]) == 64
+        entry = snap["issues"]["RHAIRFE-1"]
+        assert isinstance(entry, dict)
+        assert len(entry["hash"]) == 64
+        assert entry["processed"] is False
 
 
 # ── cmd_fetch: Incremental Run ───────────────────────────────────────────────
@@ -296,6 +304,11 @@ class TestMultiRunPipeline:
         assert "TOTAL=2" in stdout1
         assert "NEW=2" in stdout1
 
+        # Run 1: simulate pipeline completing for both IDs
+        update_snapshot_hashes(
+            {}, work_dirs.snapshot_dir,
+            mark_processed=["RHAIRFE-1", "RHAIRFE-2"])
+
         # Run 2: nothing changed — all unchanged, none in changed file
         args2 = _fetch_args(tmp_path)
         stdout2 = _run_fetch(args2)
@@ -315,11 +328,13 @@ class TestMultiRunPipeline:
         # Run 1: fetch all
         _run_fetch(_fetch_args(tmp_path))
 
-        # Run 1: submit revises RHAIRFE-1, updates snapshot
+        # Run 1: submit revises RHAIRFE-1, updates snapshot;
+        # also mark RHAIRFE-2 as processed (reviewed, no changes)
         revised_hash = compute_content_hash(
             _text_to_adf("Auto-revised description."))
         update_snapshot_hashes(
-            {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir)
+            {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir,
+            mark_processed=["RHAIRFE-2"])
         # Simulate Jira now has the revised description
         jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
                       {"fields": {"description": "Auto-revised description."}})
@@ -335,6 +350,11 @@ class TestMultiRunPipeline:
         assert "TOTAL=2" in stdout2
         assert "CHANGED=1" in stdout2
         assert _read_ids(args2.changed_file) == ["RHAIRFE-1"]
+
+        # Run 2: simulate pipeline completing for both
+        update_snapshot_hashes(
+            {}, work_dirs.snapshot_dir,
+            mark_processed=["RHAIRFE-1", "RHAIRFE-2"])
 
         # Run 3: nothing changed — all unchanged
         args3 = _fetch_args(tmp_path)
@@ -444,11 +464,12 @@ class TestMultiRunPipeline:
         assert "TOTAL=2" in stdout1
         assert "NEW=2" in stdout1
 
-        # Run 1: submit revises RHAIRFE-1
+        # Run 1: submit revises RHAIRFE-1, mark RHAIRFE-2 processed
         revised_hash = compute_content_hash(
             _text_to_adf("Revised issue one."))
         update_snapshot_hashes(
-            {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir)
+            {"RHAIRFE-1": revised_hash}, work_dirs.snapshot_dir,
+            mark_processed=["RHAIRFE-2"])
         jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
                       {"fields": {"description": "Revised issue one."}})
 
@@ -529,24 +550,30 @@ class TestCumulativeSnapshot:
         _jira_env(monkeypatch, jira.url)
 
         # Run 1: limit=1, 3 NEW → select 1
-        stdout1 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        args1 = _fetch_args(tmp_path, limit=1)
+        stdout1 = _run_fetch(args1)
         assert "NEW=1" in stdout1
         snap1 = _latest_snapshot(work_dirs)
         assert len(snap1["issues"]) == 1
+        _mark_processed(work_dirs, _read_ids(args1.ids_file))
 
-        # Run 2: prev has 1, 2 still NEW → select 1 NEW (priority)
-        stdout2 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        # Run 2: prev has 1 processed, 2 still NEW → select 1 NEW (priority)
+        args2 = _fetch_args(tmp_path, limit=1)
+        stdout2 = _run_fetch(args2)
         assert "NEW=1" in stdout2
         snap2 = _latest_snapshot(work_dirs)
         assert len(snap2["issues"]) == 2
+        _mark_processed(work_dirs, _read_ids(args2.ids_file))
 
-        # Run 3: prev has 2, 1 still NEW → select 1 NEW
-        stdout3 = _run_fetch(_fetch_args(tmp_path, limit=1))
+        # Run 3: prev has 2 processed, 1 still NEW → select 1 NEW
+        args3 = _fetch_args(tmp_path, limit=1)
+        stdout3 = _run_fetch(args3)
         assert "NEW=1" in stdout3
         snap3 = _latest_snapshot(work_dirs)
         assert len(snap3["issues"]) == 3
+        _mark_processed(work_dirs, _read_ids(args3.ids_file))
 
-        # Run 4: all in snapshot → 0 NEW, 0 CHANGED
+        # Run 4: all in snapshot + processed → 0 NEW, 0 CHANGED
         stdout4 = _run_fetch(_fetch_args(tmp_path, limit=1))
         assert "NEW=0" in stdout4
         assert "CHANGED=0" in stdout4
@@ -562,6 +589,7 @@ class TestCumulativeSnapshot:
         _run_fetch(_fetch_args(tmp_path))
         snap1 = _latest_snapshot(work_dirs)
         assert len(snap1["issues"]) == 2
+        _mark_processed(work_dirs, ["RHAIRFE-1", "RHAIRFE-2"])
 
         # Close RHAIRFE-2
         transitions = jira.request(
@@ -594,11 +622,13 @@ class TestCumulativeSnapshot:
         _run_fetch(args1)
         snap1 = _latest_snapshot(work_dirs)
         assert len(snap1["issues"]) == 2
+        _mark_processed(work_dirs, _read_ids(args1.ids_file))
 
         # Run 2: limit=1, RHAIRFE-3 is NEW (priority), selected
         args2 = _fetch_args(tmp_path, limit=1)
         stdout2 = _run_fetch(args2)
         assert "NEW=1" in stdout2
+        _mark_processed(work_dirs, _read_ids(args2.ids_file))
 
         # Edit RHAIRFE-2 (already in snapshot with stale hash)
         jira.request("PUT", "/rest/api/3/issue/RHAIRFE-2",
@@ -638,24 +668,28 @@ class TestCumulativeSnapshot:
         _run_fetch(_fetch_args(tmp_path))
         snap1 = _latest_snapshot(work_dirs)
         assert len(snap1["issues"]) == 2
-        old_hash_1 = snap1["issues"]["RHAIRFE-1"]
+        old_entry_1 = snap1["issues"]["RHAIRFE-1"]
 
         # Simulate submit: update RHAIRFE-1's description in Jira and
-        # record the post-submit hash in the snapshot
+        # record the post-submit hash in the snapshot;
+        # also mark RHAIRFE-2 as processed (no changes)
         jira.request("PUT", "/rest/api/3/issue/RHAIRFE-1",
                      {"fields": {"description": "Revised by submit."}})
         new_adf = _text_to_adf("Revised by submit.")
         post_submit_hash = compute_content_hash(new_adf)
         update_snapshot_hashes(
             {"RHAIRFE-1": post_submit_hash},
-            snapshot_dir=work_dirs.snapshot_dir)
+            snapshot_dir=work_dirs.snapshot_dir,
+            mark_processed=["RHAIRFE-2"])
 
         # Verify the snapshot was updated in place
         snap_updated = _latest_snapshot(work_dirs)
-        assert snap_updated["issues"]["RHAIRFE-1"] == post_submit_hash
-        assert snap_updated["issues"]["RHAIRFE-1"] != old_hash_1
-        # RHAIRFE-2 untouched
-        assert snap_updated["issues"]["RHAIRFE-2"] == snap1["issues"]["RHAIRFE-2"]
+        entry_1 = snap_updated["issues"]["RHAIRFE-1"]
+        assert entry_1 == {"hash": post_submit_hash, "processed": True}
+        assert entry_1 != old_entry_1
+        # RHAIRFE-2 marked processed, hash preserved
+        entry_2 = snap_updated["issues"]["RHAIRFE-2"]
+        assert entry_2["processed"] is True
 
         # Run 2: RHAIRFE-1 should be UNCHANGED (post-submit hash matches)
         args2 = _fetch_args(tmp_path)

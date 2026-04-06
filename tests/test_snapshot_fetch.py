@@ -14,6 +14,7 @@ from snapshot_fetch import (
     compute_content_hash,
     diff_snapshots,
     load_snapshot_from_dir,
+    update_snapshot_hashes,
     write_id_file,
 )
 
@@ -184,6 +185,161 @@ class TestDiffSnapshots:
         changed, new = diff_snapshots(current, previous)
         assert changed == ["RHAIRFE-1", "RHAIRFE-3"]
         assert new == ["RHAIRFE-4"]
+
+    # ── New dict format with processed flag ──
+
+    def test_processed_true_same_hash_unchanged(self):
+        """Processed + same hash → not in changed or new (unchanged)."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == []
+        assert new == []
+
+    def test_processed_true_different_hash_changed(self):
+        """Processed + different hash → in changed list."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa-new", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == ["RHAIRFE-1"]
+        assert new == []
+
+    def test_processed_false_treated_as_new(self):
+        """Unprocessed entry → treated as new regardless of hash."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": {"hash": "aaa", "processed": False},
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == []
+        assert new == ["RHAIRFE-1"]
+
+    def test_processed_false_different_hash_still_new(self):
+        """Unprocessed + different hash → still treated as new, not changed."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa-new", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": {"hash": "aaa", "processed": False},
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == []
+        assert new == ["RHAIRFE-1"]
+
+    def test_mixed_old_and_new_format(self):
+        """Mix of old string format and new dict format in same snapshot."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
+            "RHAIRFE-2": {"content_hash": "bbb", "labels": []},
+            "RHAIRFE-3": {"content_hash": "ccc", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": "aaa",  # old format, implicitly processed
+            "RHAIRFE-2": {"hash": "bbb", "processed": True},  # new, processed
+            "RHAIRFE-3": {"hash": "ccc", "processed": False},  # new, unprocessed
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == []
+        assert new == ["RHAIRFE-3"]
+
+    def test_dict_missing_processed_defaults_true(self):
+        """Dict entry without processed key → defaults to True."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
+        }
+        previous = {"issues": {
+            "RHAIRFE-1": {"hash": "aaa"},  # no processed key
+        }}
+        changed, new = diff_snapshots(current, previous)
+        assert changed == []
+        assert new == []
+
+
+class TestUpdateSnapshotHashes:
+    def _seed(self, tmp_path, issues):
+        snap_dir = str(tmp_path / "snapshots")
+        os.makedirs(snap_dir)
+        snap = {
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": issues,
+        }
+        path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
+        with open(path, "w") as f:
+            yaml.dump(snap, f, default_flow_style=False, sort_keys=False)
+        return snap_dir, path
+
+    def test_submitted_hashes_written_as_dict(self, tmp_path):
+        """Submitted hashes written in new dict format with processed=True."""
+        snap_dir, path = self._seed(tmp_path, {"K1": "old-hash"})
+        result = update_snapshot_hashes({"K1": "new-hash"}, snap_dir)
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == {"hash": "new-hash", "processed": True}
+
+    def test_mark_processed_preserves_hash(self, tmp_path):
+        """mark_processed sets processed=True without changing hash."""
+        snap_dir, path = self._seed(tmp_path, {
+            "K1": {"hash": "aaa", "processed": False},
+        })
+        result = update_snapshot_hashes({}, snap_dir, mark_processed=["K1"])
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == {"hash": "aaa", "processed": True}
+
+    def test_mark_processed_old_format(self, tmp_path):
+        """mark_processed on old string format → converts to dict."""
+        snap_dir, path = self._seed(tmp_path, {"K1": "aaa"})
+        result = update_snapshot_hashes({}, snap_dir, mark_processed=["K1"])
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == {"hash": "aaa", "processed": True}
+
+    def test_mark_processed_skips_missing_key(self, tmp_path):
+        """mark_processed with key not in snapshot → no error, no change."""
+        snap_dir, path = self._seed(tmp_path, {"K1": "aaa"})
+        result = update_snapshot_hashes(
+            {}, snap_dir, mark_processed=["MISSING"])
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == "aaa"  # untouched
+
+    def test_submitted_and_mark_processed_together(self, tmp_path):
+        """Both hashes and mark_processed in single call."""
+        snap_dir, path = self._seed(tmp_path, {
+            "K1": {"hash": "old", "processed": False},
+            "K2": {"hash": "bbb", "processed": False},
+        })
+        result = update_snapshot_hashes(
+            {"K1": "new-hash"}, snap_dir, mark_processed=["K2"])
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == {"hash": "new-hash", "processed": True}
+        assert data["issues"]["K2"] == {"hash": "bbb", "processed": True}
+
+    def test_empty_hashes_and_no_mark_processed(self, tmp_path):
+        """Empty hashes + no mark_processed → snapshot still written."""
+        snap_dir, path = self._seed(tmp_path, {"K1": "aaa"})
+        result = update_snapshot_hashes({}, snap_dir)
+        assert result is not None
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["K1"] == "aaa"  # untouched
 
 
 def _make_results_dir(tmp_path, runs):

@@ -440,9 +440,12 @@ def main():
     results = {}  # rfe_id -> assigned jira key
     submitted_hashes = {}  # assigned_key -> content_hash
     submit_errors = []  # (rfe_id, error_msg) for entries that failed
+    mark_processed_ids = []  # IDs where pipeline completed but no Jira content
     for entry in plan:
         rfe_id = entry["rfe_id"]
         if entry["skip_reason"]:
+            if "Jira conflict" not in entry["skip_reason"]:
+                mark_processed_ids.append(rfe_id)
             print(f"  {rfe_id}: Skipping — {entry['skip_reason']}")
             continue
 
@@ -456,6 +459,7 @@ def main():
                     remove_labels(server, user, token, rfe_id, remove)
                     print(f"  {rfe_id}: Removed labels: "
                           f"{', '.join(remove)}")
+                mark_processed_ids.append(rfe_id)
                 continue
             if entry["action"] == "Label only":
                 labels = entry["labels"]
@@ -471,6 +475,7 @@ def main():
                 results[rfe_id] = rfe_id
                 _post_needs_attention_comment(
                     server, user, token, entry, results, args.dry_run)
+                mark_processed_ids.append(rfe_id)
                 continue
 
             # Read and clean artifact content
@@ -545,6 +550,8 @@ def main():
                     rename_to_jira_key(args.artifacts_dir, rfe_id, new_key)
                     print(f"  {rfe_id}: Renamed to {new_key}")
 
+            mark_processed_ids.append(rfe_id)
+
         except Exception as exc:
             msg = str(exc)
             print(f"  {rfe_id}: ERROR — {msg}", file=sys.stderr)
@@ -566,12 +573,14 @@ def main():
 
     # Update snapshot with post-submit hashes so the next fetch
     # doesn't re-flag our own changes
-    if submitted_hashes and not args.dry_run:
+    if (submitted_hashes or mark_processed_ids) and not args.dry_run:
         snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
-        updated = update_snapshot_hashes(submitted_hashes, snap_dir)
+        updated = update_snapshot_hashes(submitted_hashes, snap_dir,
+                                         mark_processed=mark_processed_ids)
         if updated:
             print(f"  Updated snapshot with {len(submitted_hashes)} "
-                  f"post-submit hashes: {updated}")
+                  f"post-submit hashes, {len(mark_processed_ids)} "
+                  f"mark-processed: {updated}")
         else:
             print("  Warning: no snapshot found to update",
                   file=sys.stderr)
