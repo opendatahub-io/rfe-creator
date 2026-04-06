@@ -86,7 +86,20 @@ def jira(jira_emu):
             jira.create("RHAIRFE-1", "Summary", "Description text")
             # ... run code under test against jira.url ...
     """
-    # Reset all data before each test
+    # Patch emulator seed data to include link types this project needs
+    from jira_emulator.services import seed_service
+    _extra_link_types = [
+        {"name": "Issue split",
+         "inward_description": "is split from",
+         "outward_description": "split to"},
+    ]
+    _orig = seed_service.LINK_TYPES
+    seed_service.LINK_TYPES = _orig + [
+        lt for lt in _extra_link_types
+        if lt["name"] not in {x["name"] for x in _orig}
+    ]
+
+    # Reset all data before each test (re-seeds with patched link types)
     req = urllib.request.Request(
         f"{jira_emu}/api/admin/reset", method="POST", data=b"")
     urllib.request.urlopen(req)
