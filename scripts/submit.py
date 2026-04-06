@@ -257,6 +257,41 @@ def main():
                 sys.exit(result.returncode)
             print()
 
+    # Collect and persist content hashes for split children so the snapshot
+    # records them.  split_submit.py creates child tickets but doesn't update
+    # the snapshot, so without this the children appear as "new" on the next
+    # run.  Persisted immediately so no downstream code path can skip them.
+    if split_parents and not args.dry_run:
+        try:
+            split_child_hashes = {}
+            post_split_tasks = scan_task_files(args.artifacts_dir)
+            for path, data in post_split_tasks:
+                if data.get("parent_key") and \
+                        data.get("status") == "Submitted":
+                    rfe_id = data.get("rfe_id", "")
+                    if rfe_id.startswith("RHAIRFE-"):
+                        with open(path, encoding="utf-8") as f:
+                            raw = f.read()
+                        cleaned = strip_metadata(raw)
+                        desc_adf = markdown_to_adf(cleaned)
+                        split_child_hashes[rfe_id] = compute_content_hash(
+                            desc_adf)
+            if split_child_hashes:
+                snap_dir = os.path.join(args.artifacts_dir,
+                                        "auto-fix-runs")
+                updated = update_snapshot_hashes(
+                    split_child_hashes, snap_dir)
+                if updated:
+                    print(f"  Updated snapshot with "
+                          f"{len(split_child_hashes)} split-child "
+                          f"hashes: {updated}")
+                else:
+                    print("  Warning: no snapshot found for split-child "
+                          f"hashes", file=sys.stderr)
+        except Exception as exc:
+            print(f"  Warning: failed to record split-child hashes "
+                  f"in snapshot: {exc}", file=sys.stderr)
+
     # --- Phase 2: Submit regular (non-split) RFEs ---
     # Re-scan after splits may have renamed files
     tasks = scan_task_files(args.artifacts_dir)
@@ -572,7 +607,7 @@ def main():
     print()
 
     # Update snapshot with post-submit hashes so the next fetch
-    # doesn't re-flag our own changes
+    # doesn't re-flag our own changes.
     if (submitted_hashes or mark_processed_ids) and not args.dry_run:
         snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
         updated = update_snapshot_hashes(submitted_hashes, snap_dir,
