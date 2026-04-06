@@ -122,7 +122,7 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 
 ## Snapshot System
 
-Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all six invariants.
+Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all invariants.
 
 ## Architecture Context
 
