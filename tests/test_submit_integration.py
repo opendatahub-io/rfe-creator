@@ -839,3 +839,120 @@ class TestReplayIdempotency:
         assert r2.returncode == 0, r2.stderr
         assert "Labels" not in r2.stdout
         assert "Updated" not in r2.stdout
+
+
+class TestSplitChildSnapshot:
+    """Split children's content hashes must be recorded in the snapshot."""
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nParent content.\n"
+    )
+    CHILD_TASK_TPL = (
+        "---\nrfe_id: RFE-{num:03d}\ntitle: Child RFE {num}\n"
+        "priority: Major\nstatus: Ready\n"
+        "parent_key: RHAIRFE-1000\n---\n\nChild {num} content.\n"
+    )
+
+    def _seed_snapshot(self, art_dir, issues):
+        snap_dir = os.path.join(art_dir, "auto-fix-runs")
+        os.makedirs(snap_dir, exist_ok=True)
+        snap = {
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": issues,
+        }
+        path = os.path.join(snap_dir,
+                            "issue-snapshot-20260401-000000.yaml")
+        with open(path, "w") as f:
+            yaml.dump(snap, f, default_flow_style=False, sort_keys=False)
+        return path
+
+    def _setup_split(self, art_dir, jira, num_children=2):
+        """Set up a split parent with children and a seeded snapshot."""
+        jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
+               "Parent content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        for i in range(1, num_children + 1):
+            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md",
+                   self.CHILD_TASK_TPL.format(num=i))
+        return self._seed_snapshot(art_dir, {"RHAIRFE-1000": "parent-hash"})
+
+    def test_split_child_hashes_in_snapshot(self, art_dir, jira):
+        """Split children's hashes appear in the snapshot after submit."""
+        snap_path = self._setup_split(art_dir, jira)
+
+        # Add a regular RFE so Phase 2 also runs
+        _write(f"{art_dir}/rfe-tasks/RFE-099.md",
+               TASK_FM.format(rfe_id="RFE-099"))
+        _write(f"{art_dir}/rfe-reviews/RFE-099-review.md",
+               _review("RFE-099"))
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "split-child hashes" in r.stdout
+
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
+
+        # Find the child keys (RHAIRFE-NNNN created by split_submit.py)
+        all_issues = jira.search("project = RHAIRFE")
+        child_keys = sorted([i["key"] for i in all_issues
+                             if i["key"] != "RHAIRFE-1000"])
+        # At least the 2 split children + 1 regular RFE
+        assert len(child_keys) >= 3
+
+        # Each split child must have a valid hash in the snapshot
+        split_child_entries = {
+            k: v for k, v in data["issues"].items()
+            if k != "RHAIRFE-1000" and isinstance(v, dict)
+            and len(v.get("hash", "")) == 64
+        }
+        assert len(split_child_entries) >= 2
+        for key, entry in split_child_entries.items():
+            assert entry["processed"] is True
+
+    def test_splits_only_early_return(self, art_dir, jira):
+        """Splits-only run (no regular RFEs) completes and records hashes."""
+        snap_path = self._setup_split(art_dir, jira)
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "split-child hashes" in r.stdout
+        assert "Done. Index rebuilt" in r.stdout
+
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
+
+        # Split children must have valid hashes
+        child_entries = {
+            k: v for k, v in data["issues"].items()
+            if k != "RHAIRFE-1000" and isinstance(v, dict)
+        }
+        assert len(child_entries) >= 2
+        for key, entry in child_entries.items():
+            assert len(entry["hash"]) == 64, f"{key} hash should be SHA256"
+            assert entry["processed"] is True
+
+    def test_dry_run_skips_split_child_hashes(self, art_dir, jira):
+        """Dry-run must not update the snapshot with split-child hashes."""
+        snap_path = self._setup_split(art_dir, jira)
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
+             "--dry-run"],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Snapshot must be completely untouched
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"] == {"RHAIRFE-1000": "parent-hash"}
