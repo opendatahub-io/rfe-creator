@@ -111,8 +111,19 @@ All agent phases use max_concurrent waves (see below) to cap concurrency.
 BATCH_DONE:
   → decision: more batches?
        yes → BATCH_START
-       no → RETRY_SETUP → [main pipeline on error IDs] → REPORT → DONE
+       errors exist & retry_cycle < 1 → ERROR_COLLECT → BATCH_START (retry batch)
+       no errors or retry_cycle >= 1 → REPORT → DONE
 ```
+
+ERROR_COLLECT is a script phase that:
+1. Collects error IDs across all batches via `collect_recommendations.py --errors`
+2. Writes them to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
+3. Increments `total_batches` and sets `retry_cycle = 1` in state
+4. Advances to BATCH_START, which picks up the new batch normally
+
+The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW → REVISE → FIXUP → reassess → COLLECT → split pipeline as any other batch. No special retry states needed.
+
+**Tradeoff**: SETUP re-runs idempotent bootstrap scripts (~15s overhead). Acceptable vs. duplicating ~22 states. The `advance` barrier summary detects `retry_cycle > 0` and labels output as "Retry batch" for log clarity.
 
 ### Max Concurrent & Wave Dispatch
 
@@ -194,8 +205,7 @@ REASSESS_CHECK, REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW,
 COLLECT, SPLIT, SPLIT_COLLECT,
   SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP,
   SPLIT_CORRECTION_CHECK,
-BATCH_DONE,
-RETRY_SETUP, RETRY_FETCH, RETRY_ASSESS, RETRY_REVIEW, RETRY_REVISE, RETRY_FIXUP, RETRY_COLLECT,
+BATCH_DONE, ERROR_COLLECT,
 REPORT, DONE
 ```
 
@@ -263,8 +273,15 @@ def advance(current_phase, state):
     if current_phase == "BATCH_DONE":
         if state["batch"] < state["total_batches"]:
             return "BATCH_START"
-        return "RETRY_SETUP"
-    # ... etc
+        if state["retry_cycle"] < 1:
+            error_ids = run("collect_recommendations.py --errors <all_ids>")
+            if error_ids:
+                return "ERROR_COLLECT"
+        return "REPORT"
+
+    if current_phase == "ERROR_COLLECT":
+        # Script has already: written new batch file, incremented total_batches, set retry_cycle=1
+        return "BATCH_START"
 ```
 
 ### CLI
@@ -313,6 +330,15 @@ SPLIT_CORRECTION_CHECK → SPLIT: undersized=2 correction=0/1 reason="undersized
 
 Batch 2/3 complete: submit=38 revise=9 split=3 errors=0
 BATCH_DONE → BATCH_START: batch=3/3 reason="more batches remain"
+
+Batch 3/3 complete: submit=45 revise=2 split=0 errors=3
+BATCH_DONE → ERROR_COLLECT: errors=3 retry_cycle=0/1 reason="error IDs found, retry not yet attempted"
+
+ERROR_COLLECT: created retry batch 4 with 3 error IDs
+ERROR_COLLECT → BATCH_START: batch=4/4
+
+Retry batch 4/4 complete: submit=2 revise=0 split=0 errors=1
+BATCH_DONE → REPORT: retry_cycle=1 reason="retry already attempted, reporting final state"
 ```
 
 Stats come from existing scripts (`batch_summary.py`, `collect_recommendations.py`, `check_right_sized.py`) — `advance` just calls them and prints the counts before deciding the transition. The CI monitor (rfe-autofixer) can be adapted to parse this output for its TUI. The orchestrator doesn't interpret the stats — they're opaque script output that passes through the context for human and CI monitor consumption.
@@ -337,6 +363,7 @@ batch_size: 5
 start_time: 2026-04-06T12:00:00Z
 reassess_cycle: 0
 correction_cycle: 0
+retry_cycle: 0
 ```
 
 ## 2. `scripts/check_right_sized.py`
@@ -414,7 +441,6 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 | `tmp/pipeline-reassess-ids.txt` | IDs needing reassessment |
 | `tmp/pipeline-split-ids.txt` | Parent IDs being split |
 | `tmp/pipeline-split-children-ids.txt` | Child IDs after split |
-| `tmp/pipeline-retry-ids.txt` | Error IDs for retry |
 | `tmp/rfe-poll-*.txt` | Polling files (unchanged) |
 
 ## Existing prompt files (no changes needed)
@@ -444,6 +470,6 @@ Reassess phases reuse the same prompts with different variable values (e.g., `{F
 2. **Single ID**: Run with 1 explicit ID, verify full phase sequence
 3. **Small batch**: Run with `--batch-size 5` on 10 IDs, verify batch 2 agents get proper instructions
 4. **Split flow**: Include an oversized RFE, verify split → child review → correction check
-5. **Error retry**: Introduce a fetch failure, verify retry phases
+5. **Error retry**: Introduce a fetch failure, verify ERROR_COLLECT creates retry batch and it flows through main pipeline
 6. **Key metric**: No context compression degradation in batch 2+
 7. **CI run**: Full `--limit 100 --batch-size 50` run
