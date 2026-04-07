@@ -12,8 +12,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import find_review_file, read_frontmatter, scan_task_files
 
-DEFAULT_ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "..", "artifacts")
+DEFAULT_ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 SCORE_FIELDS = ["what", "why", "open_to_how", "not_a_task", "right_sized"]
 
 
