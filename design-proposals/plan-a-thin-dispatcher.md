@@ -118,33 +118,36 @@ BATCH_DONE:
        no errors or retry_cycle >= 1 → REPORT → DONE
 ```
 
-ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error IDs for a clean retry:
+ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error IDs for a clean retry. **This script must be idempotent** — a crash mid-ERROR_COLLECT must be recoverable by re-running the script. All steps use create-or-overwrite semantics; no step depends on the absence of a previous step's output.
 
-1. Collects error IDs across all batches via `collect_recommendations.py --errors`
-2. Saves original error details to `tmp/pipeline-retry-errors.yaml` (error type, phase where failure occurred, original error message per ID — preserved for post-mortem even if the retry succeeds or overwrites)
-3. Persists retry IDs to `tmp/pipeline-retry-ids.txt` (used by `generate_run_report.py` to identify which IDs were retried and whether they recovered)
+1. **Collect error IDs** across all batches via `collect_recommendations.py --errors`, recording which phase each error occurred in (fetch_failed, assess_failed, review_failed, revise_failed, split_failed, etc.)
+2. **Save error history** to `tmp/pipeline-retry-errors.yaml` — error type, failure phase, and original error message per ID. Preserved for post-mortem even if the retry succeeds or a second failure overwrites.
+3. **Persist retry IDs** to `tmp/pipeline-retry-ids.txt` (read by `generate_run_report.py` to identify which IDs were retried and whether they recovered — see REPORT phase data flow below)
 4. **Artifact cleanup** — deletes all intermediate results so the dispatch loop's resumability skip filter doesn't no-op the retry:
 
-   | Artifact | Deleted for |
-   |----------|-------------|
-   | `artifacts/rfe-reviews/<ID>-review.md` | All error IDs |
-   | `artifacts/rfe-reviews/<ID>-feasibility.md` | All error IDs |
-   | `/tmp/rfe-assess/single/<ID>.md` | All error IDs |
-   | `/tmp/rfe-assess/single/<ID>.result.md` | All error IDs |
-   | `artifacts/rfe-reviews/<ID>-split-status.yaml` | split_failed IDs |
-   | Child task/review/assess/feasibility files | split_failed IDs (via `cleanup_partial_split.py`) |
+   | Artifact | Deleted for | Why |
+   |----------|-------------|-----|
+   | `artifacts/rfe-tasks/<ID>.md` | REVISE-phase errors only | Revise can leave a half-written/corrupted task file; must re-fetch |
+   | `artifacts/rfe-reviews/<ID>-review.md` | All error IDs | Skip filter checks this for REVIEW |
+   | `artifacts/rfe-reviews/<ID>-feasibility.md` | All error IDs | Skip filter checks this for FEASIBILITY |
+   | `/tmp/rfe-assess/single/<ID>.md` | All error IDs | Assessment input |
+   | `/tmp/rfe-assess/single/<ID>.result.md` | All error IDs | Skip filter checks this for ASSESS |
+   | `artifacts/rfe-reviews/<ID>-split-status.yaml` | split_failed IDs | Skip filter checks this for SPLIT |
+   | Child task/review/assess/feasibility files | split_failed IDs | Via `cleanup_partial_split.py` (extended to also clean `/tmp/rfe-assess/single/<child>.md` and `<child>.result.md`) |
 
    **Why this is necessary**: The dispatch loop's skip filter ("filter out IDs that already have results on disk") is designed for crash recovery. Without cleanup, an ID that failed at REVIEW would still have its task file and assessment result on disk — FETCH and ASSESS would skip it, and REVIEW would see the same stale inputs that caused the original failure.
 
-   **What is NOT deleted**: `artifacts/rfe-tasks/<ID>.md` (preserved — FETCH will skip it via the resume filter, which is correct since the task file itself is fine), `artifacts/rfe-originals/<ID>.md` (baseline copy, always preserved).
+   **What is NOT deleted**: `artifacts/rfe-tasks/<ID>.md` for non-REVISE errors (preserved — FETCH will skip it via the resume filter, which is correct since the task file itself is fine), `artifacts/rfe-originals/<ID>.md` (baseline copy, always preserved).
 
-5. Clears error fields: `frontmatter.py set artifacts/rfe-reviews/<ID>-review.md error=null` (or deletes the review file entirely — same effect since review is in the cleanup list above)
-6. Writes error IDs to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
-7. Increments `total_batches` and sets `retry_cycle = 1` in state
+5. **Post-cleanup verification** — for each retry ID, confirm that no skip-triggering artifacts remain on disk. Specifically: no `<ID>.result.md` in `/tmp/rfe-assess/single/`, no `<ID>-review.md` in `artifacts/rfe-reviews/`, no `<ID>-feasibility.md` in `artifacts/rfe-reviews/`. For REVISE errors, also confirm no `<ID>.md` in `artifacts/rfe-tasks/`. If any remain (e.g., filesystem error during delete), log a warning and retry the delete. This is the safety net against silent no-op retries.
+6. **Write retry batch file** (`tmp/pipeline-batch-{N+1}-ids.txt`)
+7. **Update state**: increment `total_batches` and set `retry_cycle = 1` (`batch` is incremented by `advance(BATCH_START)`, not here)
 
 The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW → REVISE → FIXUP → reassess → COLLECT → split pipeline as any other batch. No special retry states needed.
 
 **Tradeoff**: The retry-as-batch approach trades state duplication (22 fewer states) for cleanup correctness — ERROR_COLLECT must delete the right artifacts or retries silently no-op. The artifact cleanup contract above is the critical specification. SETUP also re-runs idempotent bootstrap scripts (~15s overhead), which is acceptable.
+
+**REPORT phase data flow**: REPORT is a script phase that calls `generate_run_report.py`. The script reads `tmp/pipeline-retry-ids.txt` (if it exists) to identify which IDs were retried, and `tmp/pipeline-retry-errors.yaml` for original error details. This is file-based — the domain-ignorant orchestrator doesn't need to know which batch was a retry.
 
 ### Max Concurrent & Wave Dispatch
 
@@ -271,9 +274,10 @@ def advance(current_phase, state):
     # Preamble (one-time)
     PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
 
-    # BATCH_START resets per-batch counters so each batch (including retry)
-    # gets fresh reassess and correction cycles
+    # BATCH_START increments the batch counter and resets per-batch counters
+    # so each batch (including retry) gets fresh reassess and correction cycles
     if current_phase == "BATCH_START":
+        state["batch"] += 1
         state["reassess_cycle"] = 0
         state["correction_cycle"] = 0
         return "FETCH"
@@ -391,7 +395,11 @@ BATCH_DONE → BATCH_START: batch=3/3 reason="more batches remain"
 Batch 3/3 complete: submit=45 revise=2 split=0 errors=3
 BATCH_DONE → ERROR_COLLECT: errors=3 retry_cycle=0/1 reason="error IDs found, retry not yet attempted"
 
-ERROR_COLLECT: created retry batch 4 with 3 error IDs
+ERROR_COLLECT: retry batch 4 with 3 error IDs [RHAIRFE-1501, RHAIRFE-1522, RHAIRFE-1540]
+  RHAIRFE-1501: review_failed (original error preserved)
+  RHAIRFE-1522: revise_failed → task file deleted for re-fetch
+  RHAIRFE-1540: split_failed → partial children cleaned
+  cleanup verified: 0 stale artifacts remain
 ERROR_COLLECT → BATCH_START: batch=4/4
 
 Retry batch 4/4 complete: submit=2 revise=0 split=0 errors=1
@@ -408,13 +416,13 @@ Stats come from existing scripts (`batch_summary.py`, `collect_recommendations.p
 python3 scripts/pipeline_state.py diagnose
 ```
 
-Reads `tmp/pipeline-state.yaml` and all ID files, cross-references with artifact state on disk (which files exist, which have errors in frontmatter). Prints current phase, pending IDs, missing artifacts, error states. For debugging stuck or failed pipelines after the fact. ~40 lines in `pipeline_state.py`.
+Reads `tmp/pipeline-state.yaml` and all ID files, cross-references with artifact state on disk (which files exist, which have errors in frontmatter). If `tmp/pipeline-retry-errors.yaml` exists, includes original error details for retried IDs and whether they recovered. Also detects silent no-op retries: if retry IDs still have stale artifacts on disk, flags them as "retry would be skipped by skip filter." Prints current phase, pending IDs, missing artifacts, error states. For debugging stuck or failed pipelines after the fact. ~50 lines in `pipeline_state.py`.
 
 ### State file (`tmp/pipeline-state.yaml`)
 
 ```yaml
 phase: ASSESS
-batch: 1
+batch: 1            # incremented by advance(BATCH_START), starts at 0
 total_batches: 3
 headless: true
 announce_complete: true
