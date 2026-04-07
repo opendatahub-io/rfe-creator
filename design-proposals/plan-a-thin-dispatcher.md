@@ -129,7 +129,7 @@ ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error
 
    | Artifact | Action | Applies to | Why |
    |----------|--------|------------|-----|
-   | `artifacts/rfe-tasks/<ID>.md` | Restore from `rfe-originals/<ID>.md` | REVISE errors | Revise can leave a half-written/corrupted task file; restore to pristine fetched content rather than re-fetching (avoids wasted API call and divergence if Jira issue was edited since fetch) |
+   | `artifacts/rfe-tasks/<ID>.md` | Save frontmatter, restore body from `rfe-originals/<ID>.md`, re-apply saved frontmatter | REVISE errors | Revise can leave a half-written/corrupted task file. Originals contain only the raw description (no frontmatter), so the restore must: (1) read current frontmatter via `frontmatter.py read`, (2) overwrite file with originals content, (3) re-set frontmatter via `frontmatter.py set`. This avoids re-fetching from Jira (wasted API call, divergence risk if issue edited since fetch). |
    | `artifacts/rfe-reviews/<ID>-review.md` | Delete | All error IDs | Skip filter checks this for REVIEW |
    | `artifacts/rfe-reviews/<ID>-feasibility.md` | Delete | All error IDs | Skip filter checks this for FEASIBILITY |
    | `/tmp/rfe-assess/single/<ID>.md` | Delete | All error IDs | Assessment input |
