@@ -49,7 +49,7 @@ loop:
   phase = pipeline_state.py get-phase
   if phase == DONE: break
 
-  config = pipeline_state.py get-phase-config   # → prompt_file, ids_file, max_concurrent, ...
+  config = pipeline_state.py get-phase-config   # → type, prompt_file, ids_file, ...
   if config.type == "agent":
     ids = state.py read-ids <ids_file>
     ids = filter out IDs that already have results on disk  # resumability
@@ -59,9 +59,15 @@ loop:
       poll with check_review_progress.py until wave done
   elif config.type == "script":
     run config.command
+  # else: type == "noop" — pure decision point, no dispatch
 
   pipeline_state.py advance                      # → decision logic picks next phase
 ```
+
+Three phase types:
+- **`agent`** — fan-out background agents, poll until barrier clears
+- **`script`** — run a command synchronously (SETUP, FIXUP, ERROR_COLLECT, etc.)
+- **`noop`** — pure decision point, no dispatch. The loop just calls `advance()`, which runs decision scripts internally and sets the next phase. Used by REASSESS_CHECK, BATCH_DONE, COLLECT, SPLIT_CORRECTION_CHECK.
 
 The orchestrator **never reads prompt files** — the agents do. The orchestrator **never decides what's next** — `advance` does. And the loop is **resumable at every iteration** — disk state is the only source of truth.
 
@@ -122,14 +128,14 @@ BATCH_DONE:
 ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error IDs for a clean retry. **This script must be idempotent** — a crash mid-ERROR_COLLECT must be recoverable by re-running the script. Step ordering is designed so a crash at any point either allows a safe re-run or at worst skips the retry (fail-safe), never infinite-loops.
 
 1. **Set `retry_cycle = 1`** — done first to prevent infinite loops. If we crash after this but before writing the batch file, BATCH_DONE will see `retry_cycle >= 1` and go to REPORT (retry skipped, fail-safe). If we crash before this, re-running starts from scratch (safe).
-2. **Collect error IDs** across all batches via `collect_recommendations.py --errors`, recording which phase each error occurred in (fetch_failed, assess_failed, review_failed, revise_failed, split_failed, etc.)
+2. **Collect error IDs** across all batches via `collect_recommendations.py --errors`. The failure phase is explicit in the review frontmatter `error` field (e.g., `error="fetch_failed: ..."`, `error="revise_failed: ..."`), set by the agent or script that detected the failure — not inferred from which artifacts exist.
 3. **Save error history** to `tmp/pipeline-retry-errors.yaml` — error type, failure phase, and original error message per ID. Preserved for post-mortem even if the retry succeeds or a second failure overwrites.
 4. **Persist retry IDs** to `tmp/pipeline-retry-ids.txt` (read by `generate_run_report.py` to identify which IDs were retried and whether they recovered — see REPORT phase data flow below)
 5. **Artifact cleanup** — deletes or restores intermediate results so the dispatch loop's resumability skip filter doesn't no-op the retry:
 
    | Artifact | Action | Applies to | Why |
    |----------|--------|------------|-----|
-   | `artifacts/rfe-tasks/<ID>.md` | Save frontmatter, restore body from `rfe-originals/<ID>.md`, re-apply saved frontmatter | REVISE errors | Revise can leave a half-written/corrupted task file. Originals contain only the raw description (no frontmatter), so the restore must: (1) read current frontmatter via `frontmatter.py read`, (2) overwrite file with originals content, (3) re-set frontmatter via `frontmatter.py set`. This avoids re-fetching from Jira (wasted API call, divergence risk if issue edited since fetch). |
+   | `artifacts/rfe-tasks/<ID>.md` | Atomic restore from `rfe-originals/<ID>.md` with frontmatter | REVISE errors | Revise can leave a half-written/corrupted task file. Originals contain only the raw description (no frontmatter — see `fetch_issue.py`). Restore is atomic: (1) read current frontmatter via `frontmatter.py read`, (2) copy originals to a temp file, (3) set frontmatter on the temp file via `frontmatter.py set`, (4) `os.rename(tmp, task_path)`. Atomic rename avoids a crash window where the file has no frontmatter. Avoids re-fetching from Jira (wasted API call, divergence risk if issue edited since fetch). |
    | `artifacts/rfe-reviews/<ID>-review.md` | Delete | All error IDs | Skip filter checks this for REVIEW |
    | `artifacts/rfe-reviews/<ID>-feasibility.md` | Delete | All error IDs | Skip filter checks this for FEASIBILITY |
    | `/tmp/rfe-assess/single/<ID>.md` | Delete | All error IDs | Assessment input |
@@ -138,11 +144,11 @@ ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error
    | `<ID>-removed-context.yaml` | Delete | REVISE errors | Stale data from failed revision (not a skip-filter trigger, but avoids confusing the retry) |
    | Child task/review/assess/feasibility files | Delete | split_failed IDs | Via `cleanup_partial_split.py` |
 
-   **Never deleted**: `artifacts/rfe-originals/<ID>.md` (baseline copy, source of truth for restores and conflict detection), `artifacts/rfe-tasks/<ID>-comments.md` (inert Jira comment history, never modified locally).
+   **Never deleted**: `artifacts/rfe-tasks/<ID>.md` for non-REVISE errors (preserved — FETCH's skip filter sees the task file and skips, which is correct since the file is clean), `artifacts/rfe-originals/<ID>.md` (baseline copy, source of truth for restores and conflict detection), `artifacts/rfe-tasks/<ID>-comments.md` (inert Jira comment history, never modified locally). For REVISE errors, the task file is restored (not deleted) — FETCH also skips it, which is correct since the restored file has valid content.
 
    **Why this is necessary**: The dispatch loop's skip filter ("filter out IDs that already have results on disk") is designed for crash recovery. Without cleanup, an ID that failed at REVIEW would still have its assessment result on disk — ASSESS would skip it, and REVIEW would see the same stale inputs that caused the original failure.
 
-6. **Post-cleanup verification** — for each retry ID, confirm that no skip-triggering artifacts remain on disk. Specifically: no `<ID>.result.md` in `/tmp/rfe-assess/single/`, no `<ID>-review.md` in `artifacts/rfe-reviews/`, no `<ID>-feasibility.md` in `artifacts/rfe-reviews/`. For REVISE errors, verify that `artifacts/rfe-tasks/<ID>.md` matches `artifacts/rfe-originals/<ID>.md`. If any check fails, log a warning and retry the delete/restore. This is the safety net against silent no-op retries.
+6. **Post-cleanup verification** — for each retry ID, confirm that no skip-triggering artifacts remain on disk. Specifically: no `<ID>.result.md` in `/tmp/rfe-assess/single/`, no `<ID>-review.md` in `artifacts/rfe-reviews/`, no `<ID>-feasibility.md` in `artifacts/rfe-reviews/`. For REVISE errors, verify that the task file body matches the originals file (frontmatter may differ, body must match). If any check fails, log a warning and retry the delete/restore. This is the safety net against silent no-op retries.
 7. **Write retry batch file** — uses guard to ensure idempotent total_batches increment:
    ```python
    retry_batch_file = f"tmp/pipeline-batch-{state['total_batches'] + 1}-ids.txt"
@@ -278,6 +284,11 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "vars": { ... }
     },
+    # Decision-only phases — dispatch loop skips, advance() handles internally
+    "REASSESS_CHECK": {"type": "noop"},
+    "COLLECT":        {"type": "noop"},  # advance() runs collect_recommendations.py
+    "BATCH_DONE":     {"type": "noop"},
+    "SPLIT_CORRECTION_CHECK": {"type": "noop"},  # advance() runs check_right_sized.py
     # ... etc
 }
 ```
@@ -339,6 +350,7 @@ def advance(current_phase, state):
         undersized = run("check_right_sized.py <child_ids>")
         if undersized and state["correction_cycle"] < 1:
             state["correction_cycle"] += 1
+            write_ids("tmp/pipeline-split-ids.txt", undersized)  # narrow to undersized only
             return "SPLIT"
         return "BATCH_DONE"
 
