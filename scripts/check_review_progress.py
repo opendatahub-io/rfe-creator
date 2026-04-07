@@ -7,6 +7,8 @@ import argparse
 import os
 import sys
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
 
@@ -55,6 +57,9 @@ def main():
     parser.add_argument("--id-file",
                         help="File containing IDs (one per line or "
                              "space-separated)")
+    parser.add_argument("--fast-poll", action="store_true",
+                        help="Cap poll interval at 15s (interactive mode). "
+                             "Auto-enabled when config files show headless=false.")
     parser.add_argument("ids", nargs="*", metavar="ID",
                         help="RFE IDs to check")
     args = parser.parse_args()
@@ -88,9 +93,26 @@ def main():
     if errors:
         parts.append(f"ERRORS={errors}")
 
+    # Auto-detect interactive mode from config files
+    fast = args.fast_poll
+    if not fast:
+        for cfg in ("tmp/review-config.yaml", "tmp/split-config.yaml",
+                     "tmp/autofix-config.yaml", "tmp/speedrun-config.yaml"):
+            if os.path.exists(cfg):
+                try:
+                    with open(cfg) as f:
+                        data = yaml.safe_load(f)
+                    if data and data.get("headless") is False:
+                        fast = True
+                        break
+                except Exception:
+                    pass
+
     # Suggest next poll interval based on completion ratio
     if pending == 0:
         next_poll = 0
+    elif fast:
+        next_poll = 15
     elif completed / total >= 0.75:
         next_poll = 15
     elif completed / total >= 0.5:
