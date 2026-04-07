@@ -312,8 +312,10 @@ def cmd_fetch(args):
         print("Previous snapshot: none (first run)", file=sys.stderr)
 
     # Hard filters only
+    # NOTE: "labels not in (X)" excludes issues with NO labels at all in Jira,
+    # so we must also include "labels is EMPTY" to catch unlabeled issues.
     jql = (f"({args.jql}) AND statusCategory != Done "
-           f"AND labels not in (rfe-creator-ignore)")
+           f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)")
     print(f"JQL={jql}", file=sys.stderr)
 
     query_timestamp = datetime.now(timezone.utc).strftime(

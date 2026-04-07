@@ -286,7 +286,7 @@ def main():
 
     # Step 2: Fetch all current issues with hard filters
     jql = (f"({args.jql}) AND statusCategory != Done "
-           f"AND labels not in (rfe-creator-ignore)")
+           f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)")
     print(f"JQL: {jql}", file=sys.stderr)
 
     current = fetch_all_issues(server, user, token, jql)
