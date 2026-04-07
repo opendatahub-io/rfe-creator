@@ -188,6 +188,77 @@ class TestSkipLogic:
         assert "No submittable" in stderr or "No RFE task" in stderr
 
 
+    def test_children_of_local_parent_submitted(self, art_dir):
+        """Children of local RFE-NNN parent → included in Phase 2 as creates."""
+        # Archived local parent
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001").replace(
+                   "status: Ready", "status: Archived"))
+        # Children with local parent_key
+        for i, child_id in enumerate(["RFE-002", "RFE-003"], start=2):
+            _write(f"{art_dir}/rfe-tasks/{child_id}.md",
+                   TASK_FM.format(rfe_id=child_id).replace(
+                       "status: Ready", "status: Ready\nparent_key: RFE-001"))
+            _write(f"{art_dir}/rfe-reviews/{child_id}-review.md",
+                   REVIEW_FM.format(rfe_id=child_id, auto_revised="false"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Would create" in stdout
+        assert "RFE-002" in stdout
+        assert "RFE-003" in stdout
+
+    def test_children_of_jira_parent_excluded(self, art_dir):
+        """Children of RHAIRFE parent → excluded from Phase 2 (Phase 1 handles)."""
+        # Child with Jira parent_key
+        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
+               TASK_FM.format(rfe_id="RFE-002").replace(
+                   "status: Ready", "status: Ready\nparent_key: RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md",
+               REVIEW_FM.format(rfe_id="RFE-002", auto_revised="false"))
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert rc == 1
+        assert "No submittable" in stderr or "No RFE task" in stderr
+
+    def test_grandchildren_of_jira_parent_excluded(self, art_dir):
+        """Grandchildren via local intermediary → excluded from Phase 2.
+
+        Tests Phase 2 filtering only: the RHAIRFE parent task file is
+        omitted so Phase 1 has no split parents to run.  The ancestor
+        chain in frontmatter (RFE-011 → RFE-010 → RHAIRFE-1234) is
+        enough for _has_jira_ancestor to exclude the grandchildren.
+        A standalone RFE-020 is included so Phase 2 has work to do.
+        """
+        # Archived local intermediary whose parent_key traces to Jira
+        _write(f"{art_dir}/rfe-tasks/RFE-010.md",
+               TASK_FM.format(rfe_id="RFE-010").replace(
+                   "status: Ready",
+                   "status: Archived\nparent_key: RHAIRFE-1234"))
+        # Grandchildren — parent_key points to local intermediary
+        for child_id in ["RFE-011", "RFE-012"]:
+            _write(f"{art_dir}/rfe-tasks/{child_id}.md",
+                   TASK_FM.format(rfe_id=child_id).replace(
+                       "status: Ready",
+                       "status: Ready\nparent_key: RFE-010"))
+            _write(f"{art_dir}/rfe-reviews/{child_id}-review.md",
+                   REVIEW_FM.format(rfe_id=child_id, auto_revised="false"))
+        # Standalone RFE so Phase 2 runs (rc == 0)
+        _write(f"{art_dir}/rfe-tasks/RFE-020.md",
+               TASK_FM.format(rfe_id="RFE-020"))
+        _write(f"{art_dir}/rfe-reviews/RFE-020-review.md",
+               REVIEW_FM.format(rfe_id="RFE-020", auto_revised="false"))
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        # Standalone RFE submitted normally
+        assert "RFE-020" in stdout and "Would create" in stdout
+        # Grandchildren excluded from Phase 2 plan
+        plan_section = stdout.split("Submission plan:")[1]
+        assert "RFE-011" not in plan_section
+        assert "RFE-012" not in plan_section
+
+
 class TestAutoRevisedLabel:
     def test_auto_revised_label_applied(self, art_dir):
         """auto_revised=true → rfe-creator-auto-revised label."""

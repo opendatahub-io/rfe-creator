@@ -173,6 +173,26 @@ def main():
                          and data["rfe_id"] in child_parent_keys}
     split_parents = list(split_parent_data.keys())
 
+    # Build parent ancestry map to identify descendants of Jira split
+    # parents at any depth (handles re-splits where grandchildren point
+    # to local intermediary parents like RFE-017 → RHAIRFE-1234).
+    _parent_of = {}  # rfe_id -> parent_key
+    for _, data in tasks:
+        pk = data.get("parent_key")
+        if pk:
+            _parent_of[data["rfe_id"]] = pk
+
+    def _has_jira_ancestor(rfe_id):
+        """True if rfe_id descends from any RHAIRFE parent."""
+        seen = set()
+        pk = _parent_of.get(rfe_id)
+        while pk and pk not in seen:
+            if pk.startswith("RHAIRFE-"):
+                return True
+            seen.add(pk)
+            pk = _parent_of.get(pk)
+        return False
+
     if split_parents:
         print(f"Phase 1: Submitting {len(split_parents)} split parent(s)\n")
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -296,16 +316,20 @@ def main():
     # Re-scan after splits may have renamed files
     tasks = scan_task_files(args.artifacts_dir)
 
-    # Filter to non-archived, non-submitted RFEs without a parent (split
-    # children were already handled by split_submit.py in Phase 1).
+    # Filter to non-archived, non-submitted RFEs.  Any descendant of a
+    # Jira split parent (RHAIRFE-*) was already handled by split_submit.py
+    # in Phase 1 — this includes grandchildren from re-splits whose
+    # immediate parent is a local ID (e.g. RFE-017 → RHAIRFE-1234).
+    # Children of purely local parents (RFE-NNN with no RHAIRFE ancestor)
+    # go through Phase 2 as regular creates.
     # Filtering Submitted makes replay safe: already-submitted entries are
     # skipped, preventing duplicate Jira creates.
     submittable = [(path, data) for path, data in tasks
                    if data.get("status") not in ("Archived", "Submitted")
-                   and not data.get("parent_key")]
+                   and not _has_jira_ancestor(data["rfe_id"])]
     any_submitted = any(data.get("status") == "Submitted"
                         for _, data in tasks
-                        if not data.get("parent_key"))
+                        if not _has_jira_ancestor(data["rfe_id"]))
     if not submittable:
         if split_parents or any_submitted:
             # Splits-only run, or replay where Phase 2 already completed
