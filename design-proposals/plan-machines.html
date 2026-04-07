@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Two Machines</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0e14; color: #c9d1d9; }
+  .page { display: flex; min-height: 100vh; }
+  .waves { display: flex; justify-content: center; padding: 60px 20px 80px; background: #0a0e14; border-top: 1px solid #1c2028; }
+  .waves svg { width: 90%; max-width: 720px; }
+  .machine { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+  .machine:first-child { border-right: 1px solid #1c2028; }
+  .machine-title { position: absolute; top: 24px; left: 0; right: 0; text-align: center; }
+  .machine-title h2 { font-size: 1.05em; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+  .machine-title p { font-size: 0.72em; color: #6e7681; max-width: 320px; margin: 0 auto; }
+  .machine.a .machine-title h2 { color: #58a6ff; }
+  .machine.b .machine-title h2 { color: #f0883e; }
+  svg { width: 94%; max-width: 580px; height: auto; }
+  @media (max-width: 960px) { .page { flex-direction: column; height: auto; } .machine { min-height: 100vh; padding: 20px; } .machine:first-child { border-right: none; border-bottom: 1px solid #1c2028; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ======================== PLAN A ======================== -->
+<div class="machine a">
+  <div class="machine-title">
+    <h2>Plan A &mdash; Thin Dispatcher</h2>
+    <p>Same phases, but the loop is phase-blind. A routing table maps phases to agent identities. The domain logic lives in the agents.</p>
+  </div>
+  <svg viewBox="0 0 540 810">
+    <defs>
+      <marker id="a1" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#484f58"/></marker>
+      <marker id="a-blue" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#388bfd"/></marker>
+      <marker id="a-green" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#3fb950"/></marker>
+      <marker id="a-purple" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#a371f7"/></marker>
+      <marker id="a-yellow" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#d29922"/></marker>
+      <filter id="glow-a"><feGaussianBlur stdDeviation="3" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    </defs>
+
+    <!-- ======= THE LOOP (left column with bounding box) ======= -->
+    <rect x="36" y="86" width="100" height="302" rx="8" fill="#0a1020" stroke="#388bfd44" stroke-width="1.5"/>
+    <text x="86" y="104" text-anchor="middle" font-size="9" fill="#388bfd" font-weight="700">THE LOOP</text>
+    <text x="86" y="116" text-anchor="middle" font-size="7" fill="#6e7681">~20 lines</text>
+
+    <!-- Spine -->
+    <line x1="86" y1="126" x2="86" y2="374" stroke="#388bfd" stroke-width="2" opacity="0.3"/>
+
+    <!-- Loop-back arrow -->
+    <path d="M86,374 C22,374 22,126 86,126" fill="none" stroke="#388bfd" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#a-blue)"/>
+
+    <!-- DONE exit -->
+    <rect x="54" y="66" width="64" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+    <text x="86" y="78" text-anchor="middle" font-size="7" fill="#6e7681">DONE? exit</text>
+
+    <!-- Stop 1: phase -->
+    <circle cx="86" cy="148" r="20" fill="#0d1117" stroke="#388bfd" stroke-width="1.5" filter="url(#glow-a)"/>
+    <text x="86" y="145" text-anchor="middle" font-size="7" fill="#6e7681">1</text>
+    <text x="86" y="156" text-anchor="middle" font-size="8" fill="#58a6ff" font-weight="600">phase</text>
+
+    <!-- Stop 2: config -->
+    <circle cx="86" cy="218" r="20" fill="#0d1117" stroke="#388bfd" stroke-width="1.5" filter="url(#glow-a)"/>
+    <text x="86" y="215" text-anchor="middle" font-size="7" fill="#6e7681">2</text>
+    <text x="86" y="226" text-anchor="middle" font-size="8" fill="#58a6ff" font-weight="600">config</text>
+
+    <!-- Stop 3: dispatch (BLUE — purple reserved for agents) -->
+    <circle cx="86" cy="288" r="20" fill="#0d1117" stroke="#388bfd" stroke-width="1.5" filter="url(#glow-a)"/>
+    <text x="86" y="285" text-anchor="middle" font-size="7" fill="#6e7681">3</text>
+    <text x="86" y="296" text-anchor="middle" font-size="7.5" fill="#58a6ff" font-weight="600">dispatch</text>
+
+    <!-- Stop 4: advance -->
+    <circle cx="86" cy="355" r="20" fill="#0d1117" stroke="#3fb950" stroke-width="1.5" filter="url(#glow-a)"/>
+    <text x="86" y="352" text-anchor="middle" font-size="7" fill="#6e7681">4</text>
+    <text x="86" y="363" text-anchor="middle" font-size="7.5" fill="#3fb950" font-weight="600">advance</text>
+
+    <!-- ======= ROUTING TABLE (pipeline_state.py) ======= -->
+
+    <!-- Connection: config lookup → routing table -->
+    <path d="M106,214 L148,214" stroke="#388bfd" stroke-width="1.2" fill="none" marker-end="url(#a-blue)"/>
+    <text x="127" y="208" font-size="7" fill="#484f58" text-anchor="middle">lookup</text>
+
+    <!-- Connection: config returned ← routing table -->
+    <path d="M148,224 L110,224" stroke="#388bfd" stroke-width="1" fill="none" stroke-dasharray="3,3" marker-end="url(#a-blue)"/>
+    <text x="127" y="236" font-size="6.5" fill="#484f58" text-anchor="middle">config</text>
+
+    <!-- Connection: advance → routing table -->
+    <path d="M106,355 L148,355" stroke="#3fb950" stroke-width="1.2" fill="none" marker-end="url(#a-green)"/>
+    <text x="127" y="347" font-size="7" fill="#484f58" text-anchor="middle">next?</text>
+
+    <!-- Routing table box -->
+    <rect x="150" y="86" width="376" height="302" rx="10" fill="#0f1a0f" stroke="#3fb95066" stroke-width="1.5"/>
+    <text x="310" y="106" text-anchor="middle" font-size="10" fill="#3fb950" font-weight="700" letter-spacing="0.05em">pipeline_state.py</text>
+    <text x="310" y="120" text-anchor="middle" font-size="8" fill="#6e7681">~200 lines &bull; routing table + advance()</text>
+    <line x1="166" y1="130" x2="510" y2="130" stroke="#1c3a1c" stroke-width="1"/>
+
+    <!-- Counter badge -->
+    <rect x="464" y="92" width="54" height="18" rx="9" fill="#1a2608" stroke="#3fb95088" stroke-width="1"/>
+    <text x="491" y="105" text-anchor="middle" font-size="7" fill="#3fb950" font-weight="600">23 phases</text>
+
+    <!-- Phase row: FETCH -->
+    <rect x="166" y="138" width="340" height="24" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1"/>
+    <text x="178" y="154" font-size="8" fill="#3fb950" font-weight="600">FETCH</text>
+    <text x="226" y="154" font-size="7.5" fill="#484f58">&rarr;</text>
+    <text x="242" y="154" font-size="7.5" fill="#8b949e" font-family="monospace">fetch-agent.md</text>
+
+    <!-- Phase row: ASSESS -->
+    <rect x="166" y="166" width="340" height="24" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1"/>
+    <text x="178" y="182" font-size="8" fill="#3fb950" font-weight="600">ASSESS</text>
+    <text x="226" y="182" font-size="7.5" fill="#484f58">&rarr;</text>
+    <text x="242" y="182" font-size="7.5" fill="#8b949e" font-family="monospace">assess-agent.md</text>
+
+    <!-- Phase row: REVIEW -->
+    <rect x="166" y="194" width="340" height="24" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1"/>
+    <text x="178" y="210" font-size="8" fill="#3fb950" font-weight="600">REVIEW</text>
+    <text x="226" y="210" font-size="7.5" fill="#484f58">&rarr;</text>
+    <text x="242" y="210" font-size="7.5" fill="#8b949e" font-family="monospace">review-agent.md</text>
+
+    <!-- Phase row: REVISE -->
+    <rect x="166" y="222" width="340" height="24" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1"/>
+    <text x="178" y="238" font-size="8" fill="#3fb950" font-weight="600">REVISE</text>
+    <text x="226" y="238" font-size="7.5" fill="#484f58">&rarr;</text>
+    <text x="242" y="238" font-size="7.5" fill="#8b949e" font-family="monospace">revise-agent.md</text>
+
+    <!-- Phase row: SPLIT -->
+    <rect x="166" y="250" width="340" height="24" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1"/>
+    <text x="178" y="266" font-size="8" fill="#3fb950" font-weight="600">SPLIT</text>
+    <text x="226" y="266" font-size="7.5" fill="#484f58">&rarr;</text>
+    <text x="242" y="266" font-size="7.5" fill="#8b949e" font-family="monospace">split-agent.md</text>
+
+    <!-- Fading rows (scalability — visual depth) -->
+    <rect x="166" y="278" width="340" height="20" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1" opacity="0.3"/>
+    <rect x="166" y="300" width="340" height="18" rx="4" fill="#0d1117" stroke="#3fb95033" stroke-width="1" opacity="0.12"/>
+
+    <!-- Separator before advance -->
+    <line x1="166" y1="308" x2="510" y2="308" stroke="#1c3a1c" stroke-width="1"/>
+
+    <!-- advance() section -->
+    <text x="178" y="326" font-size="8.5" fill="#3fb950" font-weight="600" font-family="monospace">advance():</text>
+    <text x="260" y="326" font-size="7.5" fill="#8b949e">runs scripts &rarr; deterministic next phase</text>
+    <text x="178" y="342" font-size="7" fill="#6e7681">decisions (reassess? split? retry?) are Python, not LLM</text>
+
+    <!-- ======= AGENT FAN-OUT ======= -->
+
+    <!-- Label -->
+    <text x="340" y="416" text-anchor="middle" font-size="9" fill="#a371f7" font-weight="700">Agent Fan-out</text>
+    <text x="340" y="430" text-anchor="middle" font-size="7.5" fill="#6e7681">N agents run the same prompt template in parallel, one per RFE</text>
+
+    <!-- Green advance spine from routing table through fan-out rows -->
+    <line x1="164" y1="390" x2="164" y2="586" stroke="#3fb950" stroke-width="2" opacity="0.35"/>
+    <text x="152" y="508" font-size="7.5" fill="#3fb950" transform="rotate(-90,152,508)" text-anchor="middle" font-weight="600">advance()</text>
+
+    <!-- Advance arrows to each row -->
+    <path d="M164,454 L218,454" stroke="#3fb950" stroke-width="1.3" fill="none" marker-end="url(#a-green)"/>
+    <path d="M164,502 L218,502" stroke="#3fb950" stroke-width="1.3" fill="none" marker-end="url(#a-green)"/>
+    <path d="M164,550 L218,550" stroke="#3fb950" stroke-width="1.3" fill="none" marker-end="url(#a-green)"/>
+
+    <!-- ======= FETCH row ======= -->
+    <rect x="220" y="442" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="243" y="459" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">FETCH</text>
+    <rect x="272" y="442" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="295" y="459" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">FETCH</text>
+    <rect x="324" y="442" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="347" y="459" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">FETCH</text>
+    <rect x="376" y="442" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="399" y="459" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">FETCH</text>
+    <rect x="432" y="444" width="36" height="22" rx="3" fill="none" stroke="#484f5866" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="450" y="459" text-anchor="middle" font-size="7" fill="#484f58">...</text>
+
+    <!-- BARRIER (labeled — first one explains the concept) -->
+    <line x1="174" y1="476" x2="490" y2="476" stroke="#484f58" stroke-width="2.5" opacity="0.5"/>
+    <text x="492" y="479" font-size="6" fill="#484f58">barrier &mdash; all</text>
+    <text x="492" y="488" font-size="6" fill="#484f58">must complete</text>
+
+    <!-- ======= ASSESS row ======= -->
+    <rect x="220" y="490" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="243" y="507" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">ASSESS</text>
+    <rect x="272" y="490" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="295" y="507" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">ASSESS</text>
+    <rect x="324" y="490" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="347" y="507" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">ASSESS</text>
+    <rect x="376" y="490" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="399" y="507" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">ASSESS</text>
+    <rect x="432" y="492" width="36" height="22" rx="3" fill="none" stroke="#484f5866" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="450" y="507" text-anchor="middle" font-size="7" fill="#484f58">...</text>
+
+    <!-- BARRIER -->
+    <line x1="174" y1="524" x2="490" y2="524" stroke="#484f58" stroke-width="2.5" opacity="0.5"/>
+
+    <!-- ======= REVIEW row ======= -->
+    <rect x="220" y="538" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="243" y="555" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">REVIEW</text>
+    <rect x="272" y="538" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="295" y="555" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">REVIEW</text>
+    <rect x="324" y="538" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="347" y="555" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">REVIEW</text>
+    <rect x="376" y="538" width="46" height="26" rx="4" fill="#1f1a2e" stroke="#a371f7" stroke-width="1.2"/>
+    <text x="399" y="555" text-anchor="middle" font-size="6.5" fill="#a371f7" font-weight="600">REVIEW</text>
+    <rect x="432" y="540" width="36" height="22" rx="3" fill="none" stroke="#484f5866" stroke-width="1" stroke-dasharray="3,2"/>
+    <text x="450" y="555" text-anchor="middle" font-size="7" fill="#484f58">...</text>
+
+    <!-- BARRIER -->
+    <line x1="174" y1="572" x2="490" y2="572" stroke="#484f58" stroke-width="2.5" opacity="0.5"/>
+
+    <!-- More phases -->
+    <text x="350" y="592" text-anchor="middle" font-size="7.5" fill="#6e7681">...more phases (revise, split, reassess, retry, etc.)</text>
+
+    <!-- Disk arrow from fan-out to results -->
+    <path d="M478,454 L504,454 L504,618 L442,618" stroke="#d29922" stroke-width="1" fill="none" stroke-dasharray="3,3" marker-end="url(#a-yellow)"/>
+
+    <!-- Results on disk (wider, centered) -->
+    <rect x="180" y="606" width="260" height="36" rx="6" fill="#1a1508" stroke="#d29922" stroke-width="1"/>
+    <text x="310" y="622" text-anchor="middle" font-size="8" fill="#d29922" font-weight="600">All Results on Disk</text>
+    <text x="310" y="634" text-anchor="middle" font-size="7" fill="#6e7681">artifacts/ &bull; frontmatter &bull; tmp/</text>
+
+    <!-- ======= CONTEXT USAGE GRAPH ======= -->
+    <text x="310" y="662" text-anchor="middle" font-size="9" fill="#58a6ff" font-weight="700">Orchestrator Context Usage</text>
+
+    <!-- Chart box -->
+    <rect x="178" y="672" width="334" height="116" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+
+    <!-- Y axis labels -->
+    <text x="206" y="686" text-anchor="end" font-size="6" fill="#484f58">100%</text>
+    <text x="206" y="734" text-anchor="end" font-size="6" fill="#484f58">50%</text>
+    <text x="206" y="782" text-anchor="end" font-size="6" fill="#484f58">0%</text>
+
+    <!-- Grid lines -->
+    <line x1="210" y1="682" x2="504" y2="682" stroke="#1c2028" stroke-width="0.5"/>
+    <line x1="210" y1="730" x2="504" y2="730" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="4,3"/>
+    <line x1="210" y1="780" x2="504" y2="780" stroke="#1c2028" stroke-width="0.5"/>
+
+    <!-- Batch dividers -->
+    <line x1="308" y1="682" x2="308" y2="780" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="3,3"/>
+    <line x1="406" y1="682" x2="406" y2="780" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="3,3"/>
+
+    <!-- X axis labels -->
+    <text x="259" y="796" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 1</text>
+    <text x="357" y="796" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 2</text>
+    <text x="455" y="796" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 3</text>
+
+    <!-- Flat green band at ~12% -->
+    <path d="M210,768 L504,768 L504,780 L210,780 Z" fill="#3fb95030" stroke="#3fb950" stroke-width="1.5"/>
+
+    <!-- Label -->
+    <text x="357" y="762" text-anchor="middle" font-size="7.5" fill="#3fb950" font-weight="600">~12% &mdash; stays flat across all batches</text>
+  </svg>
+</div>
+
+<!-- ======================== PLAN B ======================== -->
+<div class="machine b">
+  <div class="machine-title">
+    <h2>Plan B &mdash; Flat State Machine</h2>
+    <p>A loop with a switch-case. At each phase, the LLM drops into a branch with phase-specific instructions.</p>
+  </div>
+  <svg viewBox="0 0 540 890">
+    <defs>
+      <marker id="b1" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#484f58"/></marker>
+      <marker id="b-orange" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#f0883e"/></marker>
+      <marker id="b-purple" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#a371f7"/></marker>
+      <marker id="b-yellow" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#d29922"/></marker>
+      <marker id="b-green" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#3fb950"/></marker>
+      <filter id="glow-b"><feGaussianBlur stdDeviation="3" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    </defs>
+
+    <!-- ======= MAIN LOOP (left spine) ======= -->
+    <!-- Vertical spine -->
+    <line x1="80" y1="120" x2="80" y2="560" stroke="#f0883e" stroke-width="2" opacity="0.3"/>
+
+    <!-- Loop-back arrow (left side, bottom back to top) -->
+    <path d="M80,560 C20,560 20,120 80,120" fill="none" stroke="#f0883e" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#b-orange)"/>
+    <text x="28" y="340" font-size="8" fill="#f0883e" transform="rotate(-90,28,340)" text-anchor="middle" opacity="0.7">loop back</text>
+
+    <!-- DONE exit -->
+    <rect x="48" y="90" width="64" height="20" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+    <text x="80" y="104" text-anchor="middle" font-size="7.5" fill="#6e7681">DONE? exit</text>
+
+    <!-- ======= get-phase (top of loop) ======= -->
+    <circle cx="80" cy="140" r="18" fill="#0d1117" stroke="#f0883e" stroke-width="1.5"/>
+    <text x="80" y="136" text-anchor="middle" font-size="7" fill="#f0883e" font-weight="600">get-</text>
+    <text x="80" y="148" text-anchor="middle" font-size="7" fill="#f0883e" font-weight="600">phase</text>
+
+    <!-- Switch label -->
+    <text x="140" y="142" font-size="9" fill="#f0883e" font-weight="700">switch(phase)</text>
+    <path d="M98,140 L126,140" stroke="#f0883e" stroke-width="1.2" fill="none" marker-end="url(#b-orange)"/>
+
+    <!-- ======= BRANCH: FETCH ======= -->
+    <circle cx="80" cy="200" r="6" fill="#f0883e" opacity="0.5"/>
+    <path d="M86,200 L150,200" stroke="#f0883e88" stroke-width="1.2" fill="none"/>
+    <rect x="152" y="180" width="340" height="44" rx="6" fill="#1a130808" stroke="#f0883e55" stroke-width="1"/>
+    <text x="166" y="196" font-size="9" fill="#f0883e" font-weight="700">FETCH</text>
+    <text x="166" y="212" font-size="7.5" fill="#8b949e">For each ID where task file missing: launch fetch agent</text>
+    <text x="166" y="222" font-size="7.5" fill="#8b949e">(template: fetch-agent.md). Poll. Verify. set-phase SETUP</text>
+    <!-- Agent icon -->
+    <rect x="454" y="188" width="30" height="28" rx="4" fill="#14112a" stroke="#a371f7" stroke-width="1"/>
+    <text x="469" y="206" text-anchor="middle" font-size="7" fill="#a371f7">A</text>
+
+    <!-- ======= BRANCH: ASSESS ======= -->
+    <circle cx="80" cy="260" r="6" fill="#f0883e" opacity="0.5"/>
+    <path d="M86,260 L150,260" stroke="#f0883e88" stroke-width="1.2" fill="none"/>
+    <rect x="152" y="238" width="340" height="50" rx="6" fill="#1a130808" stroke="#f0883e55" stroke-width="1"/>
+    <text x="166" y="254" font-size="9" fill="#f0883e" font-weight="700">ASSESS</text>
+    <text x="166" y="268" font-size="7.5" fill="#8b949e">For each ID: prep_assess.py, launch assess + feasibility</text>
+    <text x="166" y="280" font-size="7.5" fill="#8b949e">agents. Poll --phase assess &amp; feasibility. set-phase REVIEW</text>
+    <rect x="446" y="248" width="30" height="28" rx="4" fill="#14112a" stroke="#a371f7" stroke-width="1"/>
+    <text x="461" y="266" text-anchor="middle" font-size="7" fill="#a371f7">A</text>
+    <rect x="462" y="254" width="30" height="28" rx="4" fill="#14112a" stroke="#a371f7" stroke-width="1"/>
+    <text x="477" y="272" text-anchor="middle" font-size="7" fill="#a371f7">A</text>
+
+    <!-- ======= BRANCH: REVIEW ======= -->
+    <circle cx="80" cy="320" r="6" fill="#f0883e" opacity="0.5"/>
+    <path d="M86,320 L150,320" stroke="#f0883e88" stroke-width="1.2" fill="none"/>
+    <rect x="152" y="302" width="340" height="40" rx="6" fill="#1a130808" stroke="#f0883e55" stroke-width="1"/>
+    <text x="166" y="318" font-size="9" fill="#f0883e" font-weight="700">REVIEW</text>
+    <text x="166" y="332" font-size="7.5" fill="#8b949e">Launch review agents ({FIRST_PASS}=true). Poll. set-phase REVISE</text>
+    <rect x="454" y="310" width="30" height="28" rx="4" fill="#14112a" stroke="#a371f7" stroke-width="1"/>
+    <text x="469" y="328" text-anchor="middle" font-size="7" fill="#a371f7">A</text>
+
+    <!-- ======= BRANCH: REVISE ======= -->
+    <circle cx="80" cy="372" r="6" fill="#f0883e" opacity="0.5"/>
+    <path d="M86,372 L150,372" stroke="#f0883e88" stroke-width="1.2" fill="none"/>
+    <rect x="152" y="354" width="340" height="40" rx="6" fill="#1a130808" stroke="#f0883e55" stroke-width="1"/>
+    <text x="166" y="370" font-size="9" fill="#f0883e" font-weight="700">REVISE</text>
+    <text x="166" y="382" font-size="7.5" fill="#8b949e">Filter for revision. Launch revise agents. Poll. set-phase FIXUP</text>
+    <rect x="454" y="362" width="30" height="28" rx="4" fill="#14112a" stroke="#a371f7" stroke-width="1"/>
+    <text x="469" y="380" text-anchor="middle" font-size="7" fill="#a371f7">A</text>
+
+    <!-- ======= BRANCH: REASSESS_CHECK (decision) ======= -->
+    <circle cx="80" cy="430" r="6" fill="#f0883e"/>
+    <path d="M86,430 L150,430" stroke="#f0883e" stroke-width="1.5" fill="none"/>
+    <rect x="152" y="408" width="340" height="50" rx="6" fill="#1a1308" stroke="#f0883e" stroke-width="1.5"/>
+    <text x="166" y="424" font-size="9" fill="#f0883e" font-weight="700">REASSESS_CHECK</text>
+    <text x="300" y="424" font-size="7" fill="#d29922" font-weight="600">DECISION POINT</text>
+    <text x="166" y="438" font-size="7.5" fill="#8b949e">Run collect_recommendations.py --reassess. Read cycle.</text>
+    <text x="166" y="450" font-size="7.5" fill="#d29922">LLM interprets: if ids &amp; cycle&lt;2 &rarr; REASSESS_SAVE, else COLLECT</text>
+
+    <!-- ======= BRANCH: COLLECT (decision) ======= -->
+    <circle cx="80" cy="492" r="6" fill="#f0883e"/>
+    <path d="M86,492 L150,492" stroke="#f0883e" stroke-width="1.5" fill="none"/>
+    <rect x="152" y="470" width="340" height="50" rx="6" fill="#1a1308" stroke="#f0883e" stroke-width="1.5"/>
+    <text x="166" y="486" font-size="9" fill="#f0883e" font-weight="700">COLLECT</text>
+    <text x="226" y="486" font-size="7" fill="#d29922" font-weight="600">DECISION POINT</text>
+    <text x="166" y="500" font-size="7.5" fill="#8b949e">Run collect_recommendations.py. Parse SPLIT= output.</text>
+    <text x="166" y="512" font-size="7.5" fill="#d29922">LLM interprets: if splits &rarr; SPLIT, else BATCH_DONE</text>
+
+    <!-- More phases indicator -->
+    <circle cx="80" cy="546" r="4" fill="#f0883e" opacity="0.3"/>
+    <text x="152" y="548" font-size="8" fill="#6e7681">...SPLIT, SPLIT_COLLECT, SPLIT_REVIEW, BATCH_DONE, RETRY... (15+ more)</text>
+
+    <!-- ======= set-phase (bottom, feeds back) ======= -->
+    <circle cx="80" cy="570" r="14" fill="#0d1117" stroke="#3fb950" stroke-width="1.3"/>
+    <text x="80" y="572" text-anchor="middle" font-size="7" fill="#3fb950" font-weight="600">set</text>
+
+    <!-- pipeline_state.py notepad -->
+    <rect x="110" y="580" width="110" height="44" rx="6" fill="#0f1a0f" stroke="#3fb95066" stroke-width="1"/>
+    <text x="165" y="598" text-anchor="middle" font-size="8" fill="#3fb950" font-weight="600">pipeline_state.py</text>
+    <text x="165" y="612" text-anchor="middle" font-size="7" fill="#6e7681">~80 lines &bull; notepad</text>
+    <path d="M94,574 L126,590" stroke="#3fb950" stroke-width="1" fill="none" stroke-dasharray="3,3"/>
+
+    <!-- Results on disk -->
+    <rect x="280" y="580" width="150" height="36" rx="6" fill="#1a1508" stroke="#d29922" stroke-width="1"/>
+    <text x="355" y="596" text-anchor="middle" font-size="8" fill="#d29922" font-weight="600">Results on Disk</text>
+    <text x="355" y="608" text-anchor="middle" font-size="7" fill="#6e7681">artifacts/ &bull; frontmatter</text>
+
+    <!-- Agent -> Disk arrows -->
+    <path d="M484,216 L510,216 L510,590 L432,590" stroke="#d29922" stroke-width="1" fill="none" stroke-dasharray="3,3" marker-end="url(#b-yellow)"/>
+
+    <!-- KEY INSIGHT annotation -->
+    <rect x="152" y="640" width="310" height="70" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+    <text x="307" y="658" text-anchor="middle" font-size="8" fill="#f0883e" font-weight="600">Key insight</text>
+    <text x="307" y="674" text-anchor="middle" font-size="7.5" fill="#8b949e">Each phase is a branch the LLM enters, reads, and follows.</text>
+    <text x="307" y="688" text-anchor="middle" font-size="7.5" fill="#8b949e">At decision points, the LLM interprets script output and</text>
+    <text x="307" y="700" text-anchor="middle" font-size="7.5" fill="#8b949e">chooses the next phase. The SKILL.md IS the program.</text>
+
+    <!-- Bracket showing "all in SKILL.md" -->
+    <path d="M144,178 L140,178 L140,524 L144,524" fill="none" stroke="#f0883e" stroke-width="1" opacity="0.4"/>
+    <text x="134" y="352" font-size="7.5" fill="#f0883e" transform="rotate(-90,134,352)" text-anchor="middle" opacity="0.6">SKILL.md (~300 lines)</text>
+
+    <!-- ======= CONTEXT USAGE GRAPH ======= -->
+    <text x="307" y="736" text-anchor="middle" font-size="9" fill="#f0883e" font-weight="700">Orchestrator Context Usage</text>
+
+    <!-- Chart box -->
+    <rect x="178" y="746" width="334" height="116" rx="6" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+
+    <!-- Y axis labels -->
+    <text x="206" y="760" text-anchor="end" font-size="6" fill="#484f58">100%</text>
+    <text x="206" y="804" text-anchor="end" font-size="6" fill="#484f58">50%</text>
+    <text x="206" y="854" text-anchor="end" font-size="6" fill="#484f58">0%</text>
+
+    <!-- Grid lines -->
+    <line x1="210" y1="756" x2="504" y2="756" stroke="#1c2028" stroke-width="0.5"/>
+    <line x1="210" y1="800" x2="504" y2="800" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="4,3"/>
+    <line x1="210" y1="850" x2="504" y2="850" stroke="#1c2028" stroke-width="0.5"/>
+
+    <!-- Batch dividers -->
+    <line x1="308" y1="756" x2="308" y2="850" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="3,3"/>
+    <line x1="406" y1="756" x2="406" y2="850" stroke="#1c2028" stroke-width="0.5" stroke-dasharray="3,3"/>
+
+    <!-- X axis labels -->
+    <text x="259" y="868" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 1</text>
+    <text x="357" y="868" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 2</text>
+    <text x="455" y="868" text-anchor="middle" font-size="6.5" fill="#484f58">Batch 3</text>
+
+    <!-- Danger zone band (75-100%) -->
+    <rect x="210" y="756" width="294" height="20" rx="0" fill="#f8514918"/>
+    <text x="506" y="770" font-size="5.5" fill="#f85149" opacity="0.7">compression</text>
+    <text x="506" y="778" font-size="5.5" fill="#f85149" opacity="0.7">zone</text>
+
+    <!-- Rising sawtooth area -->
+    <!-- B1: 22%→74% (y=828→776), drop to 30% (y=820) -->
+    <!-- B2: 30%→80% (y=820→770), drop to 38% (y=812) -->
+    <!-- B3: 38%→84% (y=812→766) -->
+    <path d="M210,828 L302,776 L308,820 L400,770 L406,812 L504,766 L504,850 L210,850 Z" fill="#f0883e20" stroke="#f0883e" stroke-width="1.5"/>
+
+    <!-- Compression drop markers -->
+    <line x1="305" y1="776" x2="305" y2="820" stroke="#f85149" stroke-width="1.5" stroke-dasharray="3,2"/>
+    <text x="294" y="802" font-size="5.5" fill="#f85149" transform="rotate(-90,294,802)" text-anchor="middle">compress</text>
+    <line x1="403" y1="770" x2="403" y2="812" stroke="#f85149" stroke-width="1.5" stroke-dasharray="3,2"/>
+    <text x="414" y="795" font-size="5.5" fill="#f85149" transform="rotate(-90,414,795)" text-anchor="middle">compress</text>
+
+    <!-- Label -->
+    <text x="440" y="786" font-size="7" fill="#f85149" font-weight="600">grows &rarr; compresses</text>
+    <text x="440" y="798" font-size="6.5" fill="#f85149">&rarr; degraded instructions</text>
+  </svg>
+</div>
+
+</div>
+
+<!-- ======================== WAVE DISPATCH ======================== -->
+<div class="waves">
+<svg viewBox="0 0 640 590">
+  <defs>
+    <marker id="w-green" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#3fb950"/></marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="320" y="22" text-anchor="middle" font-size="12" fill="#58a6ff" font-weight="700" letter-spacing="0.05em">Wave Dispatch Example</text>
+  <text x="320" y="40" text-anchor="middle" font-size="8" fill="#6e7681">max_concurrent = 3 &mdash; 3 RFEs that each split into 3 children (9 total)</text>
+
+  <!-- Column headers -->
+  <text x="26" y="62" text-anchor="end" font-size="7" fill="#484f58" font-weight="600">#</text>
+  <text x="93" y="62" text-anchor="middle" font-size="7.5" fill="#8b949e" font-weight="600">Agent 1</text>
+  <text x="209" y="62" text-anchor="middle" font-size="7.5" fill="#8b949e" font-weight="600">Agent 2</text>
+  <text x="325" y="62" text-anchor="middle" font-size="7.5" fill="#8b949e" font-weight="600">Agent 3</text>
+  <text x="392" y="62" font-size="7.5" fill="#8b949e" font-weight="600">Phase</text>
+  <line x1="10" y1="68" x2="630" y2="68" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Split section background -->
+  <rect x="10" y="250" width="620" height="318" rx="6" fill="#1a130805" stroke="#f0883e15" stroke-width="1"/>
+
+  <!-- === ROW 1: FETCH === -->
+  <text x="26" y="90" text-anchor="end" font-size="7" fill="#484f58">1</text>
+  <rect x="38" y="78" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="90" text-anchor="middle" font-size="7" fill="#a371f7">fetch A</text>
+  <rect x="154" y="78" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="90" text-anchor="middle" font-size="7" fill="#a371f7">fetch B</text>
+  <rect x="270" y="78" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="90" text-anchor="middle" font-size="7" fill="#a371f7">fetch C</text>
+  <text x="392" y="90" font-size="8" fill="#3fb950" font-weight="600">FETCH</text>
+
+  <!-- === ROW 2: SETUP (script) === -->
+  <text x="26" y="112" text-anchor="end" font-size="7" fill="#484f58">2</text>
+  <text x="392" y="112" font-size="8" fill="#6e7681">SETUP (script)</text>
+
+  <!-- === ROW 3: ASSESS wave 1 === -->
+  <text x="26" y="134" text-anchor="end" font-size="7" fill="#484f58">3</text>
+  <rect x="38" y="122" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="134" text-anchor="middle" font-size="7" fill="#a371f7">assess A</text>
+  <rect x="154" y="122" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="134" text-anchor="middle" font-size="7" fill="#a371f7">assess B</text>
+  <rect x="270" y="122" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="134" text-anchor="middle" font-size="7" fill="#a371f7">assess C</text>
+  <text x="392" y="134" font-size="8" fill="#3fb950" font-weight="600">ASSESS <tspan fill="#6e7681" font-weight="400">(wave 1)</tspan></text>
+
+  <!-- === ROW 4: ASSESS wave 2 (feasibility) === -->
+  <text x="26" y="156" text-anchor="end" font-size="7" fill="#484f58">4</text>
+  <rect x="38" y="144" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="156" text-anchor="middle" font-size="7" fill="#a371f7">feas A</text>
+  <rect x="154" y="144" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="156" text-anchor="middle" font-size="7" fill="#a371f7">feas B</text>
+  <rect x="270" y="144" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="156" text-anchor="middle" font-size="7" fill="#a371f7">feas C</text>
+  <text x="392" y="156" font-size="8" fill="#3fb950" font-weight="600">ASSESS <tspan fill="#6e7681" font-weight="400">(wave 2)</tspan></text>
+
+  <!-- === ROW 5: REVIEW === -->
+  <text x="26" y="178" text-anchor="end" font-size="7" fill="#484f58">5</text>
+  <rect x="38" y="166" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="178" text-anchor="middle" font-size="7" fill="#a371f7">review A</text>
+  <rect x="154" y="166" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="178" text-anchor="middle" font-size="7" fill="#a371f7">review B</text>
+  <rect x="270" y="166" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="178" text-anchor="middle" font-size="7" fill="#a371f7">review C</text>
+  <text x="392" y="178" font-size="8" fill="#3fb950" font-weight="600">REVIEW</text>
+
+  <!-- === ROW 6: REVISE === -->
+  <text x="26" y="200" text-anchor="end" font-size="7" fill="#484f58">6</text>
+  <rect x="38" y="188" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="200" text-anchor="middle" font-size="7" fill="#a371f7">revise A</text>
+  <rect x="154" y="188" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="200" text-anchor="middle" font-size="7" fill="#a371f7">revise B</text>
+  <rect x="270" y="188" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="200" text-anchor="middle" font-size="7" fill="#a371f7">revise C</text>
+  <text x="392" y="200" font-size="8" fill="#3fb950" font-weight="600">REVISE</text>
+
+  <!-- === ROW 7: FIXUP (script) === -->
+  <text x="26" y="222" text-anchor="end" font-size="7" fill="#484f58">7</text>
+  <text x="392" y="222" font-size="8" fill="#6e7681">FIXUP (script)</text>
+
+  <!-- === ROW 8: COLLECT (script + decision) === -->
+  <text x="26" y="244" text-anchor="end" font-size="7" fill="#484f58">8</text>
+  <text x="392" y="244" font-size="8" fill="#d29922" font-weight="600">COLLECT &rarr; SPLIT=A,B,C</text>
+
+  <!-- ======= SEPARATOR: main → split ======= -->
+  <line x1="10" y1="254" x2="630" y2="254" stroke="#f0883e" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.5"/>
+
+  <!-- === ROW 9: SPLIT === -->
+  <text x="26" y="268" text-anchor="end" font-size="7" fill="#484f58">9</text>
+  <rect x="38" y="256" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="268" text-anchor="middle" font-size="7" fill="#a371f7">split A</text>
+  <rect x="154" y="256" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="268" text-anchor="middle" font-size="7" fill="#a371f7">split B</text>
+  <rect x="270" y="256" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="268" text-anchor="middle" font-size="7" fill="#a371f7">split C</text>
+  <text x="392" y="268" font-size="8" fill="#f0883e" font-weight="600">SPLIT</text>
+
+  <!-- === ROW 10: SPLIT_COLLECT (script) === -->
+  <text x="26" y="290" text-anchor="end" font-size="7" fill="#484f58">10</text>
+  <text x="392" y="290" font-size="8" fill="#d29922" font-weight="600">SPLIT_COLLECT &rarr; 9 children</text>
+
+  <!-- === ROW 11: SPLIT_ASSESS wave 1/3 === -->
+  <text x="26" y="312" text-anchor="end" font-size="7" fill="#484f58">11</text>
+  <rect x="38" y="300" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="312" text-anchor="middle" font-size="7" fill="#a371f7">assess A1</text>
+  <rect x="154" y="300" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="312" text-anchor="middle" font-size="7" fill="#a371f7">assess A2</text>
+  <rect x="270" y="300" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="312" text-anchor="middle" font-size="7" fill="#a371f7">assess A3</text>
+  <text x="392" y="312" font-size="8" fill="#f0883e" font-weight="600">SPLIT_ASSESS <tspan fill="#6e7681" font-weight="400">(1/3)</tspan></text>
+
+  <!-- === ROW 12: SPLIT_ASSESS wave 2/3 === -->
+  <text x="26" y="334" text-anchor="end" font-size="7" fill="#484f58">12</text>
+  <rect x="38" y="322" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="334" text-anchor="middle" font-size="7" fill="#a371f7">assess B1</text>
+  <rect x="154" y="322" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="334" text-anchor="middle" font-size="7" fill="#a371f7">assess B2</text>
+  <rect x="270" y="322" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="334" text-anchor="middle" font-size="7" fill="#a371f7">assess B3</text>
+  <text x="392" y="334" font-size="8" fill="#f0883e" font-weight="600">SPLIT_ASSESS <tspan fill="#6e7681" font-weight="400">(2/3)</tspan></text>
+
+  <!-- === ROW 13: SPLIT_ASSESS wave 3/3 === -->
+  <text x="26" y="356" text-anchor="end" font-size="7" fill="#484f58">13</text>
+  <rect x="38" y="344" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="356" text-anchor="middle" font-size="7" fill="#a371f7">assess C1</text>
+  <rect x="154" y="344" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="356" text-anchor="middle" font-size="7" fill="#a371f7">assess C2</text>
+  <rect x="270" y="344" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="356" text-anchor="middle" font-size="7" fill="#a371f7">assess C3</text>
+  <text x="392" y="356" font-size="8" fill="#f0883e" font-weight="600">SPLIT_ASSESS <tspan fill="#6e7681" font-weight="400">(3/3)</tspan></text>
+
+  <!-- === ROW 14: SPLIT_REVIEW wave 1/3 === -->
+  <text x="26" y="378" text-anchor="end" font-size="7" fill="#484f58">14</text>
+  <rect x="38" y="366" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="378" text-anchor="middle" font-size="7" fill="#a371f7">review A1</text>
+  <rect x="154" y="366" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="378" text-anchor="middle" font-size="7" fill="#a371f7">review A2</text>
+  <rect x="270" y="366" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="378" text-anchor="middle" font-size="7" fill="#a371f7">review A3</text>
+  <text x="392" y="378" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVIEW <tspan fill="#6e7681" font-weight="400">(1/3)</tspan></text>
+
+  <!-- === ROW 15: SPLIT_REVIEW wave 2/3 === -->
+  <text x="26" y="400" text-anchor="end" font-size="7" fill="#484f58">15</text>
+  <rect x="38" y="388" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="400" text-anchor="middle" font-size="7" fill="#a371f7">review B1</text>
+  <rect x="154" y="388" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="400" text-anchor="middle" font-size="7" fill="#a371f7">review B2</text>
+  <rect x="270" y="388" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="400" text-anchor="middle" font-size="7" fill="#a371f7">review B3</text>
+  <text x="392" y="400" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVIEW <tspan fill="#6e7681" font-weight="400">(2/3)</tspan></text>
+
+  <!-- === ROW 16: SPLIT_REVIEW wave 3/3 === -->
+  <text x="26" y="422" text-anchor="end" font-size="7" fill="#484f58">16</text>
+  <rect x="38" y="410" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="422" text-anchor="middle" font-size="7" fill="#a371f7">review C1</text>
+  <rect x="154" y="410" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="422" text-anchor="middle" font-size="7" fill="#a371f7">review C2</text>
+  <rect x="270" y="410" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="422" text-anchor="middle" font-size="7" fill="#a371f7">review C3</text>
+  <text x="392" y="422" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVIEW <tspan fill="#6e7681" font-weight="400">(3/3)</tspan></text>
+
+  <!-- === ROW 17: SPLIT_REVISE wave 1/3 === -->
+  <text x="26" y="444" text-anchor="end" font-size="7" fill="#484f58">17</text>
+  <rect x="38" y="432" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="444" text-anchor="middle" font-size="7" fill="#a371f7">revise A1</text>
+  <rect x="154" y="432" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="444" text-anchor="middle" font-size="7" fill="#a371f7">revise A2</text>
+  <rect x="270" y="432" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="444" text-anchor="middle" font-size="7" fill="#a371f7">revise A3</text>
+  <text x="392" y="444" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVISE <tspan fill="#6e7681" font-weight="400">(1/3)</tspan></text>
+
+  <!-- === ROW 18: SPLIT_REVISE wave 2/3 === -->
+  <text x="26" y="466" text-anchor="end" font-size="7" fill="#484f58">18</text>
+  <rect x="38" y="454" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="466" text-anchor="middle" font-size="7" fill="#a371f7">revise B1</text>
+  <rect x="154" y="454" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="466" text-anchor="middle" font-size="7" fill="#a371f7">revise B2</text>
+  <rect x="270" y="454" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="466" text-anchor="middle" font-size="7" fill="#a371f7">revise B3</text>
+  <text x="392" y="466" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVISE <tspan fill="#6e7681" font-weight="400">(2/3)</tspan></text>
+
+  <!-- === ROW 19: SPLIT_REVISE wave 3/3 === -->
+  <text x="26" y="488" text-anchor="end" font-size="7" fill="#484f58">19</text>
+  <rect x="38" y="476" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="93" y="488" text-anchor="middle" font-size="7" fill="#a371f7">revise C1</text>
+  <rect x="154" y="476" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="209" y="488" text-anchor="middle" font-size="7" fill="#a371f7">revise C2</text>
+  <rect x="270" y="476" width="110" height="18" rx="3" fill="#1f1a2e" stroke="#a371f7" stroke-width="1"/>
+  <text x="325" y="488" text-anchor="middle" font-size="7" fill="#a371f7">revise C3</text>
+  <text x="392" y="488" font-size="8" fill="#f0883e" font-weight="600">SPLIT_REVISE <tspan fill="#6e7681" font-weight="400">(3/3)</tspan></text>
+
+  <!-- === ROW 20: SPLIT_FIXUP (script) === -->
+  <text x="26" y="510" text-anchor="end" font-size="7" fill="#484f58">20</text>
+  <text x="392" y="510" font-size="8" fill="#6e7681">SPLIT_FIXUP (script)</text>
+
+  <!-- === ROW 21: SPLIT_CORR_CHK === -->
+  <text x="26" y="532" text-anchor="end" font-size="7" fill="#484f58">21</text>
+  <text x="392" y="532" font-size="8" fill="#6e7681">SPLIT_CORR_CHK &rarr; all pass</text>
+
+  <!-- === ROW 22: BATCH_DONE === -->
+  <text x="26" y="554" text-anchor="end" font-size="7" fill="#484f58">22</text>
+  <text x="392" y="554" font-size="8" fill="#3fb950" font-weight="600">BATCH_DONE</text>
+
+  <!-- Annotation: wave bracket for rows 11-13 -->
+  <path d="M382,308 L386,308 L386,354 L382,354" fill="none" stroke="#6e7681" stroke-width="0.8"/>
+  <text x="389" y="334" font-size="6" fill="#6e7681">9 children</text>
+
+  <!-- Annotation: wave bracket for rows 14-16 -->
+  <path d="M382,374 L386,374 L386,420 L382,420" fill="none" stroke="#6e7681" stroke-width="0.8"/>
+  <text x="389" y="400" font-size="6" fill="#6e7681">3 waves</text>
+
+  <!-- Annotation: wave bracket for rows 17-19 -->
+  <path d="M382,440 L386,440 L386,486 L382,486" fill="none" stroke="#6e7681" stroke-width="0.8"/>
+  <text x="389" y="466" font-size="6" fill="#6e7681">of 3</text>
+</svg>
+</div>
+
+</body>
+</html>
