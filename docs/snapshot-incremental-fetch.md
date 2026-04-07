@@ -323,7 +323,7 @@ desired processing outcome:
 
 ```
 (<user-jql>) AND statusCategory != Done
-             AND labels not in (rfe-creator-ignore)
+             AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)
 ```
 
 These filters are "hard" because an issue matching them should always be

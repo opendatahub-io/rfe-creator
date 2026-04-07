@@ -72,7 +72,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    jql = f"({args.jql}) AND statusCategory != Done AND labels not in (rfe-creator-ignore, rfe-creator-autofix-rubric-pass)"
+    jql = f"({args.jql}) AND statusCategory != Done AND (labels not in (rfe-creator-ignore, rfe-creator-autofix-rubric-pass) OR labels is EMPTY)"
     print(f"JQL={jql}", file=sys.stderr)
     search_issues(server, user, token, jql, args.limit)
 
