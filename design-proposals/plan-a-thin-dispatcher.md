@@ -91,15 +91,18 @@ ID files determine which items participate in each phase. Items that don't need 
 Linear sequences are arrays. Conditional branches are in `pipeline_state.py advance`.
 
 ```
+INIT → BOOTSTRAP → RESUME_CHECK → BATCH_START
+
 MAIN PIPELINE (per batch):
-  [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
+  BATCH_START → [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
+  FIXUP → REASSESS_CHECK
   → decision: reassess?
-       yes (cycle < 2, reassess IDs exist) → REASSESS_SAVE → [ASSESS, REVIEW, RESTORE, REVISE, FIXUP] → loop decision
+       yes (cycle < 2, reassess IDs exist) → [REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW, REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP] → back to REASSESS_CHECK
        no → COLLECT
 
 COLLECT:
   → decision: splits?
-       yes → SPLIT → SPLIT_COLLECT → SPLIT_ASSESS → SPLIT_REVIEW → SPLIT_REVISE → SPLIT_FIXUP
+       yes → SPLIT → [SPLIT_COLLECT, SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP, SPLIT_CORRECTION_CHECK]
        no → BATCH_DONE
 
 SPLIT_CORRECTION_CHECK:
@@ -115,16 +118,33 @@ BATCH_DONE:
        no errors or retry_cycle >= 1 → REPORT → DONE
 ```
 
-ERROR_COLLECT is a script phase that:
+ERROR_COLLECT is a script phase (`scripts/error_collect.py`) that prepares error IDs for a clean retry:
+
 1. Collects error IDs across all batches via `collect_recommendations.py --errors`
-2. Cleans up failed state: `cleanup_partial_split.py` for split_failed errors, `frontmatter.py set ... error=null` to clear error fields so agents get a clean slate
-3. Writes error IDs to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
-4. Increments `total_batches` and sets `retry_cycle = 1` in state
-5. Advances to BATCH_START, which picks up the new batch normally
+2. Saves original error details to `tmp/pipeline-retry-errors.yaml` (error type, phase where failure occurred, original error message per ID — preserved for post-mortem even if the retry succeeds or overwrites)
+3. Persists retry IDs to `tmp/pipeline-retry-ids.txt` (used by `generate_run_report.py` to identify which IDs were retried and whether they recovered)
+4. **Artifact cleanup** — deletes all intermediate results so the dispatch loop's resumability skip filter doesn't no-op the retry:
+
+   | Artifact | Deleted for |
+   |----------|-------------|
+   | `artifacts/rfe-reviews/<ID>-review.md` | All error IDs |
+   | `artifacts/rfe-reviews/<ID>-feasibility.md` | All error IDs |
+   | `/tmp/rfe-assess/single/<ID>.md` | All error IDs |
+   | `/tmp/rfe-assess/single/<ID>.result.md` | All error IDs |
+   | `artifacts/rfe-reviews/<ID>-split-status.yaml` | split_failed IDs |
+   | Child task/review/assess/feasibility files | split_failed IDs (via `cleanup_partial_split.py`) |
+
+   **Why this is necessary**: The dispatch loop's skip filter ("filter out IDs that already have results on disk") is designed for crash recovery. Without cleanup, an ID that failed at REVIEW would still have its task file and assessment result on disk — FETCH and ASSESS would skip it, and REVIEW would see the same stale inputs that caused the original failure.
+
+   **What is NOT deleted**: `artifacts/rfe-tasks/<ID>.md` (preserved — FETCH will skip it via the resume filter, which is correct since the task file itself is fine), `artifacts/rfe-originals/<ID>.md` (baseline copy, always preserved).
+
+5. Clears error fields: `frontmatter.py set artifacts/rfe-reviews/<ID>-review.md error=null` (or deletes the review file entirely — same effect since review is in the cleanup list above)
+6. Writes error IDs to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
+7. Increments `total_batches` and sets `retry_cycle = 1` in state
 
 The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW → REVISE → FIXUP → reassess → COLLECT → split pipeline as any other batch. No special retry states needed.
 
-**Tradeoff**: SETUP re-runs idempotent bootstrap scripts (~15s overhead). Acceptable vs. duplicating ~22 states. The `advance` barrier summary detects `retry_cycle > 0` and labels output as "Retry batch" for log clarity.
+**Tradeoff**: The retry-as-batch approach trades state duplication (22 fewer states) for cleanup correctness — ERROR_COLLECT must delete the right artifacts or retries silently no-op. The artifact cleanup contract above is the critical specification. SETUP also re-runs idempotent bootstrap scripts (~15s overhead), which is acceptable.
 
 ### Max Concurrent & Wave Dispatch
 
@@ -182,7 +202,9 @@ All changes are in the **rfe-creator** repo (`/Users/jason/devel/rfe-creator/`).
 | File | Action |
 |------|--------|
 | `scripts/pipeline_state.py` | **New** (~200 lines) — phase tracking, config, transition logic |
+| `scripts/error_collect.py` | **New** (~60 lines) — artifact cleanup + retry batch creation |
 | `scripts/check_right_sized.py` | **New** (~30 lines) — returns undersized child IDs |
+| `scripts/collect_recommendations.py` | **Modify** — add `--errors` flag |
 | `scripts/batch_summary.py` | **Modify** — add `--counts-only` flag |
 | `.claude/skills/rfe.auto-fix/SKILL.md` | **Rewrite** (~80 lines) — thin generic dispatcher |
 | `.claude/settings.json` | **Add** permissions |
@@ -246,6 +268,9 @@ PHASE_CONFIG = {
 
 ```python
 def advance(current_phase, state):
+    # Preamble (one-time)
+    PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
+
     # BATCH_START resets per-batch counters so each batch (including retry)
     # gets fresh reassess and correction cycles
     if current_phase == "BATCH_START":
@@ -253,31 +278,50 @@ def advance(current_phase, state):
         state["correction_cycle"] = 0
         return "FETCH"
 
-    # Linear transitions within main pipeline
+    # Linear sequences — advance to next element, last element falls through to decision points
     MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
-    if current_phase in MAIN_SEQUENCE[:-1]:
-        return MAIN_SEQUENCE[MAIN_SEQUENCE.index(current_phase) + 1]
+    REASSESS_SEQUENCE = ["REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
+                         "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP"]
+    SPLIT_SEQUENCE = ["SPLIT_COLLECT", "SPLIT_PIPELINE_START", "SPLIT_ASSESS",
+                      "SPLIT_REVIEW", "SPLIT_REVISE", "SPLIT_FIXUP", "SPLIT_CORRECTION_CHECK"]
 
-    # Decision points
+    for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
+        if current_phase in seq[:-1]:
+            return seq[seq.index(current_phase) + 1]
+
+    # Decision points — reassess loop
     if current_phase == "FIXUP":
+        return "REASSESS_CHECK"
+
+    if current_phase == "REASSESS_CHECK":
         reassess_ids = run("collect_recommendations.py --reassess")
         cycle = state["reassess_cycle"]
         if reassess_ids and cycle < 2:
-            return "REASSESS_CHECK"
+            state["reassess_cycle"] = cycle + 1
+            return "REASSESS_SAVE"
         return "COLLECT"
 
+    if current_phase == "REASSESS_FIXUP":
+        return "REASSESS_CHECK"  # loops back; CHECK re-evaluates cycle
+
+    # Decision points — collect and split
     if current_phase == "COLLECT":
         split_ids = run("collect_recommendations.py")  # parse SPLIT=
         if split_ids:
             return "SPLIT"
         return "BATCH_DONE"
 
+    if current_phase == "SPLIT":
+        return "SPLIT_COLLECT"
+
     if current_phase == "SPLIT_CORRECTION_CHECK":
         undersized = run("check_right_sized.py <child_ids>")
         if undersized and state["correction_cycle"] < 1:
+            state["correction_cycle"] += 1
             return "SPLIT"
         return "BATCH_DONE"
 
+    # Decision points — batch control and retry
     if current_phase == "BATCH_DONE":
         if state["batch"] < state["total_batches"]:
             return "BATCH_START"
@@ -288,8 +332,13 @@ def advance(current_phase, state):
         return "REPORT"
 
     if current_phase == "ERROR_COLLECT":
-        # Script has already: written new batch file, incremented total_batches, set retry_cycle=1
+        # Script has already: cleaned artifacts, written new batch file,
+        # incremented total_batches, set retry_cycle=1
         return "BATCH_START"
+
+    # Terminal
+    if current_phase == "REPORT":
+        return "DONE"
 ```
 
 ### CLI
@@ -436,6 +485,7 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 
 ```json
 "Bash(python3 scripts/pipeline_state.py *)",
+"Bash(python3 scripts/error_collect.py *)",
 "Bash(python3 scripts/check_right_sized.py *)"
 ```
 
@@ -451,6 +501,8 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 | `tmp/pipeline-reassess-ids.txt` | IDs needing reassessment |
 | `tmp/pipeline-split-ids.txt` | Parent IDs being split |
 | `tmp/pipeline-split-children-ids.txt` | Child IDs after split |
+| `tmp/pipeline-retry-ids.txt` | Error IDs sent to retry batch (written by ERROR_COLLECT) |
+| `tmp/pipeline-retry-errors.yaml` | Original error details per ID (preserved for reporting) |
 | `tmp/rfe-poll-*.txt` | Polling files (unchanged) |
 
 ## Existing prompt files (no changes needed)
@@ -469,10 +521,12 @@ Reassess phases reuse the same prompts with different variable values (e.g., `{F
 ## Implementation Order
 
 1. Write `scripts/pipeline_state.py` (~200 lines)
-2. Write `scripts/check_right_sized.py` (~30 lines)
-3. Add `--counts-only` flag to `scripts/batch_summary.py`
-4. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
-5. Update `.claude/settings.json`
+2. Write `scripts/error_collect.py` (~60 lines)
+3. Write `scripts/check_right_sized.py` (~30 lines)
+4. Add `--errors` flag to `scripts/collect_recommendations.py`
+5. Add `--counts-only` flag to `scripts/batch_summary.py`
+6. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
+7. Update `.claude/settings.json`
 
 ## Verification
 
