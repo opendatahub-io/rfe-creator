@@ -117,9 +117,10 @@ BATCH_DONE:
 
 ERROR_COLLECT is a script phase that:
 1. Collects error IDs across all batches via `collect_recommendations.py --errors`
-2. Writes them to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
-3. Increments `total_batches` and sets `retry_cycle = 1` in state
-4. Advances to BATCH_START, which picks up the new batch normally
+2. Cleans up failed state: `cleanup_partial_split.py` for split_failed errors, `frontmatter.py set ... error=null` to clear error fields so agents get a clean slate
+3. Writes error IDs to a new batch file (`tmp/pipeline-batch-{N+1}-ids.txt`)
+4. Increments `total_batches` and sets `retry_cycle = 1` in state
+5. Advances to BATCH_START, which picks up the new batch normally
 
 The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW → REVISE → FIXUP → reassess → COLLECT → split pipeline as any other batch. No special retry states needed.
 
@@ -245,6 +246,13 @@ PHASE_CONFIG = {
 
 ```python
 def advance(current_phase, state):
+    # BATCH_START resets per-batch counters so each batch (including retry)
+    # gets fresh reassess and correction cycles
+    if current_phase == "BATCH_START":
+        state["reassess_cycle"] = 0
+        state["correction_cycle"] = 0
+        return "FETCH"
+
     # Linear transitions within main pipeline
     MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
     if current_phase in MAIN_SEQUENCE[:-1]:
@@ -342,6 +350,8 @@ BATCH_DONE → REPORT: retry_cycle=1 reason="retry already attempted, reporting 
 ```
 
 Stats come from existing scripts (`batch_summary.py`, `collect_recommendations.py`, `check_right_sized.py`) — `advance` just calls them and prints the counts before deciding the transition. The CI monitor (rfe-autofixer) can be adapted to parse this output for its TUI. The orchestrator doesn't interpret the stats — they're opaque script output that passes through the context for human and CI monitor consumption.
+
+**Retry batch labeling**: `advance` checks `state["retry_cycle"] > 0` when formatting BATCH_DONE summaries. ERROR_COLLECT sets `retry_cycle = 1` before advancing to BATCH_START, so all barrier summaries within the retry batch use the "Retry batch N/N" prefix instead of "Batch N/N". This is a formatting convention in `advance` output — the dispatch loop itself is unaware.
 
 **3. Post-mortem `diagnose` command** (zero context cost — never called during execution)
 
