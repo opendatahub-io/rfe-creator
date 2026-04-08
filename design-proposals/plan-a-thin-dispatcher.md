@@ -167,7 +167,7 @@ The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW
 
 **Tradeoff**: The retry-as-batch approach trades state duplication (22 fewer states) for cleanup correctness — ERROR_COLLECT must delete the right artifacts or retries silently no-op. The artifact cleanup contract above is the critical specification. SETUP also re-runs idempotent bootstrap scripts (~15s overhead), which is acceptable.
 
-**REPORT phase data flow**: REPORT is a script phase that calls `generate_run_report.py`. The script reads `tmp/pipeline-retry-ids.txt` (if it exists) to identify which IDs were retried, and `tmp/pipeline-retry-errors.yaml` for original error details. This is file-based — the domain-ignorant orchestrator doesn't need to know which batch was a retry.
+**REPORT phase data flow**: REPORT is a script phase that calls `generate_run_report.py --retry-errors-file tmp/pipeline-retry-errors.yaml`. The script reads `tmp/pipeline-retry-ids.txt` (if it exists) to identify which IDs were retried. For each retried ID, it reads the original error details (type, phase, message) from the retry-errors file and embeds them as an `original_error` field in the per-RFE entry in the run report YAML. This preserves what went wrong on the first attempt even when the retry succeeds and overwrites the review frontmatter — enabling debugging of recurring failure patterns across runs. The `tmp/pipeline-retry-errors.yaml` file is ephemeral; once embedded in the run report (`artifacts/auto-fix-runs/`), it can be cleaned up normally.
 
 ### Max Concurrent & Wave Dispatch
 
@@ -229,6 +229,7 @@ All changes are in the **rfe-creator** repo (`/Users/jason/devel/rfe-creator/`).
 | `scripts/check_right_sized.py` | **New** (~30 lines) — returns undersized child IDs |
 | `scripts/collect_recommendations.py` | **Modify** — add `--errors` flag |
 | `scripts/cleanup_partial_split.py` | **Modify** — extend to also delete child feasibility files (`<child>-feasibility.md`) and child assessment files (`/tmp/rfe-assess/single/<child>.md`, `<child>.result.md`) |
+| `scripts/generate_run_report.py` | **Modify** — add `--retry-errors-file` flag, embed `original_error` in per-RFE report entries |
 | `scripts/batch_summary.py` | **Modify** — add `--counts-only` flag |
 | `.claude/skills/rfe.auto-fix/SKILL.md` | **Rewrite** (~80 lines) — thin generic dispatcher |
 | `.claude/settings.json` | **Add** permissions |
@@ -289,6 +290,11 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "vars": { ... }
     },
+    "RESUME_CHECK": {
+        "type": "script",
+        "command": "python3 scripts/check_resume.py"  # filters pipeline-all-ids.txt → pipeline-process-ids.txt
+    },
+    "SPLIT_PIPELINE_START": {"type": "noop"},  # sync marker between SPLIT_COLLECT and SPLIT_ASSESS
     # Decision-only phases — dispatch loop skips, advance() handles internally
     "REASSESS_CHECK": {"type": "noop"},
     "COLLECT":        {"type": "noop"},  # advance() runs collect_recommendations.py
@@ -505,11 +511,37 @@ Per-parent-aware correction check. For each ID, reads `artifacts/rfe-reviews/<ID
 
 This script is the fan-in join point for the split correction loop: all children's assessments complete (barrier), then this script aggregates results across parents and returns just the IDs needing re-split. ~40 lines.
 
-## 3. `batch_summary.py --counts-only`
+## 3. `collect_recommendations.py --errors`
+
+Add `--errors` flag. Takes IDs as positional args (scopes which IDs to check). Reads review frontmatter for each ID and returns those with a non-null `error` field. Output:
+
+```bash
+python3 scripts/collect_recommendations.py --errors RHAIRFE-1501 RHAIRFE-1522 RHAIRFE-1540
+# stdout: ERRORS=RHAIRFE-1501,RHAIRFE-1522
+# (empty ERRORS= if none have errors)
+```
+
+The default mode (no flag) already groups IDs by recommendation and includes an `ERRORS=` line. The `--errors` flag makes it explicit: only return error IDs, accept an ID list to scope the check, and skip the recommendation grouping. Used by `advance(BATCH_DONE)` to decide whether to enter ERROR_COLLECT, and by `error_collect.py` to collect the full set.
+
+## 4. `cleanup_partial_split.py` extension
+
+Currently deletes: child task files, companion files (`-comments.md`, `-removed-context.md`), child review files, and parent split-status.yaml. Also restores the parent from Archived to Ready.
+
+Extend to also delete:
+
+| Additional file | Path |
+|-----------------|------|
+| Child feasibility reviews | `artifacts/rfe-reviews/<child>-feasibility.md` |
+| Child assessment input | `/tmp/rfe-assess/single/<child>.md` |
+| Child assessment result | `/tmp/rfe-assess/single/<child>.result.md` |
+
+Without this, ERROR_COLLECT's artifact cleanup for `split_failed` IDs would leave stale child assessment/feasibility files on disk, and a retry would skip those children's assessment phase (the resumability skip filter sees existing results).
+
+## 5. `batch_summary.py --counts-only`
 
 Add `--counts-only` flag. When set, only prints the `TOTAL=X PASSED=Y ...` counts line. Default unchanged.
 
-## 4. Rewrite `rfe.auto-fix/SKILL.md` (~80 lines)
+## 6. Rewrite `rfe.auto-fix/SKILL.md` (~80 lines)
 
 ### Frontmatter
 ```yaml
@@ -549,7 +581,7 @@ Repeat until phase == DONE:
 
 That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVISE does, or how splits work. It just dispatches and advances.
 
-## 5. Settings change
+## 7. Settings change
 
 ```json
 "Bash(python3 scripts/pipeline_state.py *)",
@@ -592,9 +624,10 @@ Reassess phases reuse the same prompts with different variable values (e.g., `{F
 2. Write `scripts/error_collect.py` (~60 lines)
 3. Write `scripts/check_right_sized.py` (~30 lines)
 4. Add `--errors` flag to `scripts/collect_recommendations.py`
-5. Add `--counts-only` flag to `scripts/batch_summary.py`
-6. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
-7. Update `.claude/settings.json`
+5. Extend `scripts/cleanup_partial_split.py` (child feasibility + assessment files)
+6. Add `--counts-only` flag to `scripts/batch_summary.py`
+7. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
+8. Update `.claude/settings.json`
 
 ## Verification
 
