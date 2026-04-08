@@ -28,7 +28,7 @@ The pipeline is fully resumable at any phase boundary. If the orchestrator crash
 
 1. `get-phase` returns the current phase from disk — no context memory needed
 2. `get-phase-config` returns what to do — identical output regardless of conversation history
-3. The dispatch loop diffs IDs against existing results on disk to identify incomplete work — agents that already produced their output file are skipped, only remaining IDs are dispatched
+3. The dispatch loop writes a poll file with all phase IDs and calls `check_review_progress.py` once before dispatching — only PENDING IDs are dispatched, completed ones are skipped. No per-phase result mapping needed; `check_review_progress.py` already knows what "done" means for each phase.
 4. `advance` only fires after the barrier clears (all agents complete), so phase boundaries are always consistent — there is never a "half-advanced" state
 
 This makes the pipeline robust to both crashes and context compression. Even if compression completely destroys the orchestrator's memory of what it was doing, the SKILL.md's generic dispatch loop + disk state is sufficient to continue. The LLM doesn't need to "remember" anything — it just reads the loop instructions and the disk tells it where it is.
@@ -52,7 +52,8 @@ loop:
   config = pipeline_state.py get-phase-config   # → type, prompt_file, ids_file, ...
   if config.type == "agent":
     ids = state.py read-ids <ids_file>
-    ids = filter out IDs that already have results on disk  # resumability
+    write poll file with all ids
+    check_review_progress.py once → get PENDING ids only   # resumability
     while ids remain:
       wave = take next max_concurrent from ids
       for each id in wave: launch background Agent(...)
@@ -114,6 +115,8 @@ COLLECT:
 SPLIT_CORRECTION_CHECK:
   → undersized & cycle < 1 → cycle back to SPLIT (only undersized IDs)
   → otherwise → BATCH_DONE
+
+**Known gap**: Split children get one revise pass with no reassess loop (main pipeline items get up to 2 reassess cycles). Acceptable for now — children are simpler/more focused. Future parallel evaluation (two agents per child: revise + evaluate in one wave) would replace the sequential reassess loop entirely, making it moot to add SPLIT_REASSESS_* phases now.
 
 All agent phases use max_concurrent waves (see below) to cap concurrency.
 
@@ -359,7 +362,8 @@ def advance(current_phase, state):
         if state["batch"] < state["total_batches"]:
             return "BATCH_START"
         if state["retry_cycle"] < 1:
-            error_ids = run("collect_recommendations.py --errors <all_ids>")
+            all_ids = read_ids("tmp/pipeline-all-ids.txt")
+            error_ids = run(f"collect_recommendations.py --errors {' '.join(all_ids)}")
             if error_ids:
                 return "ERROR_COLLECT"
         return "REPORT"
