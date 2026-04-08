@@ -102,6 +102,8 @@ INIT → BOOTSTRAP → RESUME_CHECK → BATCH_START
 
 MAIN PIPELINE (per batch):
   BATCH_START → [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
+  REVIEW → REVISE transition runs filter_for_revision.py and writes pipeline-revise-ids.txt
+    (REVISE dispatches only filtered IDs; empty list = no agents launched, advance immediately)
   FIXUP → REASSESS_CHECK
   → decision: reassess?
        yes (cycle < 2, reassess IDs exist) → [REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW, REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP] → back to REASSESS_CHECK
@@ -311,9 +313,32 @@ def advance(current_phase, state):
         state["correction_cycle"] = 0
         return "FETCH"
 
+    # Filter before REVISE phases — run filter_for_revision.py to determine
+    # which IDs actually need revision, write the filtered list to the revise
+    # ID file. Handled before the linear sequence loop so they intercept the
+    # transition that the loop would otherwise make automatically.
+    if current_phase == "REVIEW":
+        active_ids = read_ids("tmp/pipeline-active-ids.txt")
+        revise_ids = run(f"filter_for_revision.py {' '.join(active_ids)}")
+        write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
+        return "REVISE"
+
+    if current_phase == "REASSESS_RESTORE":
+        reassess_ids = read_ids("tmp/pipeline-reassess-ids.txt")
+        revise_ids = run(f"filter_for_revision.py {' '.join(reassess_ids)}")
+        write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
+        return "REASSESS_REVISE"
+
+    if current_phase == "SPLIT_REVIEW":
+        child_ids = read_ids("tmp/pipeline-split-children-ids.txt")
+        revise_ids = run(f"filter_for_revision.py {' '.join(child_ids)}")
+        write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
+        return "SPLIT_REVISE"
+
     # Linear sequences — advance to next element. Last element of each sequence
     # (FIXUP, REASSESS_FIXUP, SPLIT_CORRECTION_CHECK) intentionally falls through
-    # seq[:-1] to reach explicit decision handlers below.
+    # seq[:-1] to reach explicit decision handlers below. REVIEW, REASSESS_RESTORE,
+    # and SPLIT_REVIEW are also in these sequences but are intercepted above.
     MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
     REASSESS_SEQUENCE = ["REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
                          "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP"]
@@ -333,6 +358,7 @@ def advance(current_phase, state):
         cycle = state["reassess_cycle"]
         if reassess_ids and cycle < 2:
             state["reassess_cycle"] = cycle + 1
+            write_ids("tmp/pipeline-reassess-ids.txt", reassess_ids)
             return "REASSESS_SAVE"
         return "COLLECT"
 
@@ -343,6 +369,7 @@ def advance(current_phase, state):
     if current_phase == "COLLECT":
         split_ids = run("collect_recommendations.py")  # parse SPLIT=
         if split_ids:
+            write_ids("tmp/pipeline-split-ids.txt", split_ids)
             return "SPLIT"
         return "BATCH_DONE"
 
