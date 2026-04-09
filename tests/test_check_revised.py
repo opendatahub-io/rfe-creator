@@ -83,3 +83,122 @@ class TestCheckRevised:
             capture_output=True, text=True,
         )
         assert result.returncode == 2
+
+
+REVIEW_TEMPLATE = """\
+---
+rfe_id: {rfe_id}
+score: 7
+pass: false
+recommendation: revise
+feasibility: feasible
+auto_revised: {auto_revised}
+needs_attention: false
+scores:
+  what: 2
+  why: 1
+  open_to_how: 2
+  not_a_task: 2
+  right_sized: 0
+---
+Review body here.
+"""
+
+
+def _setup_batch(tmp_path, rfe_id, original_body, task_body, auto_revised=False):
+    """Create originals, tasks, and review dirs with test content."""
+    originals = tmp_path / "artifacts" / "rfe-originals"
+    tasks = tmp_path / "artifacts" / "rfe-tasks"
+    reviews = tmp_path / "artifacts" / "rfe-reviews"
+    originals.mkdir(parents=True, exist_ok=True)
+    tasks.mkdir(parents=True, exist_ok=True)
+    reviews.mkdir(parents=True, exist_ok=True)
+
+    (originals / f"{rfe_id}.md").write_text(original_body)
+    (tasks / f"{rfe_id}.md").write_text(
+        f"---\nrfe_id: {rfe_id}\ntitle: Test\npriority: Normal\nstatus: Draft\n---\n{task_body}"
+    )
+    (reviews / f"{rfe_id}-review.md").write_text(
+        REVIEW_TEMPLATE.format(rfe_id=rfe_id, auto_revised=str(auto_revised).lower())
+    )
+
+
+class TestBatchMode:
+    def test_sets_auto_revised_true_when_content_differs(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-1001", "Original text.", "Revised text.",
+                     auto_revised=False)
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-1001"],
+            capture_output=True, text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert result.returncode == 0
+        assert "RHAIRFE-1001: auto_revised False -> True" in result.stdout
+        assert "UPDATED=1" in result.stdout
+        # Verify frontmatter was actually changed
+        review = (tmp_path / "artifacts" / "rfe-reviews" / "RHAIRFE-1001-review.md").read_text()
+        assert "auto_revised: true" in review
+
+    def test_sets_auto_revised_false_when_content_identical(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-1002", "Same content.", "Same content.",
+                     auto_revised=True)
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-1002"],
+            capture_output=True, text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert result.returncode == 0
+        assert "RHAIRFE-1002: auto_revised True -> False" in result.stdout
+        assert "UPDATED=1" in result.stdout
+        review = (tmp_path / "artifacts" / "rfe-reviews" / "RHAIRFE-1002-review.md").read_text()
+        assert "auto_revised: false" in review
+
+    def test_no_update_when_flag_already_correct(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-1003", "Original.", "Revised.",
+                     auto_revised=True)
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-1003"],
+            capture_output=True, text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert result.returncode == 0
+        assert "auto_revised=True (correct)" in result.stdout
+        assert "UPDATED=0" in result.stdout
+
+    def test_discovers_ids_when_none_given(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-1004", "Original.", "Changed.",
+                     auto_revised=False)
+        _setup_batch(tmp_path, "RHAIRFE-1005", "Same.", "Same.",
+                     auto_revised=False)
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch"],
+            capture_output=True, text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert result.returncode == 0
+        assert "RHAIRFE-1004: auto_revised False -> True" in result.stdout
+        assert "RHAIRFE-1005: auto_revised=False (correct)" in result.stdout
+        assert "UPDATED=1" in result.stdout
+
+    def test_skips_missing_review_file(self, tmp_path):
+        """If an original+task exist but no review file, skip without error."""
+        originals = tmp_path / "artifacts" / "rfe-originals"
+        tasks = tmp_path / "artifacts" / "rfe-tasks"
+        reviews = tmp_path / "artifacts" / "rfe-reviews"
+        originals.mkdir(parents=True)
+        tasks.mkdir(parents=True)
+        reviews.mkdir(parents=True)
+        (originals / "RHAIRFE-1006.md").write_text("Original.")
+        (tasks / "RHAIRFE-1006.md").write_text("---\nrfe_id: RHAIRFE-1006\ntitle: T\npriority: Normal\nstatus: Draft\n---\nChanged.")
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-1006"],
+            capture_output=True, text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert result.returncode == 0
+        assert "UPDATED=0" in result.stdout

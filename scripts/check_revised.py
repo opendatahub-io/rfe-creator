@@ -1,17 +1,24 @@
 """Check if an RFE task file was revised compared to its original.
 
-Compares file content (excluding YAML frontmatter) and reports whether
-the files differ. Used by the review orchestrator to fix the revised flag
-when the revise agent runs out of budget before setting it.
+Modes:
+  Single-pair:  check_revised.py <original> <task>
+    Prints REVISED=true/false.  Used by orchestrator for one-off checks.
+
+  Batch:  check_revised.py --batch [ID ...]
+    Scans originals vs tasks for every ID (or all if none given),
+    sets auto_revised in review frontmatter directly.  No LLM loop needed.
 
 Usage:
     python3 scripts/check_revised.py artifacts/rfe-originals/ID.md artifacts/rfe-tasks/ID.md
-    python3 scripts/check_revised.py --batch ID1 ID2 ...
+    python3 scripts/check_revised.py --batch
+    python3 scripts/check_revised.py --batch RHAIRFE-1504 RHAIRFE-1510
 """
 
 import os
-import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from artifact_utils import find_review_file, read_frontmatter, update_frontmatter
 
 
 def strip_frontmatter(text):
@@ -26,7 +33,7 @@ def strip_frontmatter(text):
 
 
 def check_pair(original_path, task_path):
-    """Compare original and task file. Returns True if revised."""
+    """Return True if body content differs, False if same, None if file missing."""
     try:
         with open(original_path) as f:
             original = strip_frontmatter(f.read())
@@ -37,61 +44,61 @@ def check_pair(original_path, task_path):
     return original.strip() != task.strip()
 
 
-def main_single():
-    if len(sys.argv) != 3:
-        print("Usage: check_revised.py <original_file> <task_file>",
-              file=sys.stderr)
-        sys.exit(2)
+def batch_mode(ids, artifacts_dir="artifacts"):
+    """Compare originals to tasks and set auto_revised in review frontmatter."""
+    originals_dir = os.path.join(artifacts_dir, "rfe-originals")
+    tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
 
-    result = check_pair(sys.argv[1], sys.argv[2])
-    if result is None:
-        print(f"FILE_MISSING")
-        sys.exit(1)
-    print(f"REVISED={'true' if result else 'false'}")
-
-
-def main_batch():
-    """Check multiple IDs and fix auto_revised flag where needed."""
-    ids = sys.argv[2:]
+    # If no IDs given, discover from originals dir
     if not ids:
-        print("FIXUP: 0 checked")
-        return
+        ids = [os.path.splitext(f)[0]
+               for f in os.listdir(originals_dir)
+               if f.endswith(".md")]
 
-    fixed = 0
-    for rfe_id in ids:
-        original = f"artifacts/rfe-originals/{rfe_id}.md"
-        task = f"artifacts/rfe-tasks/{rfe_id}.md"
-        review = f"artifacts/rfe-reviews/{rfe_id}-review.md"
-
-        if not os.path.exists(review):
+    changed = 0
+    for rfe_id in sorted(ids):
+        original = os.path.join(originals_dir, f"{rfe_id}.md")
+        task = os.path.join(tasks_dir, f"{rfe_id}.md")
+        review = find_review_file(artifacts_dir, rfe_id)
+        if not review:
             continue
 
         revised = check_pair(original, task)
         if revised is None:
             continue
 
-        if revised:
-            # Content differs — ensure auto_revised is set
-            subprocess.run(
-                ["python3", "scripts/frontmatter.py", "set", review,
-                 "auto_revised=true"],
-                capture_output=True)
-            fixed += 1
+        data, _ = read_frontmatter(review)
+        current = data.get("auto_revised", False)
+        if revised != current:
+            update_frontmatter(review, {"auto_revised": revised}, "rfe-review")
+            changed += 1
+            print(f"{rfe_id}: auto_revised {current} -> {revised}")
         else:
-            # Content identical — clear false positive
-            subprocess.run(
-                ["python3", "scripts/frontmatter.py", "set", review,
-                 "auto_revised=false"],
-                capture_output=True)
+            print(f"{rfe_id}: auto_revised={current} (correct)")
 
-    print(f"FIXUP: {len(ids)} checked, {fixed} revised")
+    print(f"UPDATED={changed}")
 
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "--batch":
-        main_batch()
+    if "--batch" in sys.argv:
+        args = [a for a in sys.argv[1:] if a != "--batch"]
+        batch_mode(args)
+        return
+
+    if len(sys.argv) != 3:
+        print("Usage: check_revised.py <original> <task>", file=sys.stderr)
+        print("       check_revised.py --batch [ID ...]", file=sys.stderr)
+        sys.exit(2)
+
+    revised = check_pair(sys.argv[1], sys.argv[2])
+    if revised is None:
+        missing = sys.argv[1] if not os.path.exists(sys.argv[1]) else sys.argv[2]
+        print(f"FILE_MISSING={missing}")
+        sys.exit(1)
+    if revised:
+        print("REVISED=true")
     else:
-        main_single()
+        print("REVISED=false")
 
 
 if __name__ == "__main__":
