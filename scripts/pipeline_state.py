@@ -579,6 +579,7 @@ def cmd_get_phase_config(args):
     state = _load_state()
     phase = state["phase"]
     config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
+    config["phase"] = phase
     if "command" in config:
         config["command"] = config["command"].format_map(state)
     print(yaml.dump(config, default_flow_style=False, sort_keys=False),
