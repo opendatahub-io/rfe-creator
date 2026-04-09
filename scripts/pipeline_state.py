@@ -747,6 +747,49 @@ def cmd_diagnose(args):
             print(f"  Error IDs: {', '.join(error_ids)}")
 
 
+DISPATCH_PROTOCOL = {
+    "noop": "No action needed. Run: python3 scripts/pipeline_state.py advance",
+    "script": (
+        "Run the command directly."
+        " If ids_file is set, read IDs from it and append as positional args."
+        " Then run: python3 scripts/pipeline_state.py advance"
+    ),
+    "agent": (
+        "1. Read IDs from ids_file."
+        " 2. Pre-filter: python3 scripts/check_review_progress.py"
+        " --phase <poll_phase> <IDs> — remove COMPLETED IDs."
+        " 3. For each ID: replace {ID} in vars to build KEY=VALUE lines,"
+        " run pre_script if set, launch background Agent with prompt:"
+        ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
+        " If parallel entries exist, launch one additional Agent per entry."
+        " 4. Poll with check_review_progress.py --phase <poll_phase> <IDs>"
+        " until PENDING=0. Sleep NEXT_POLL seconds between polls."
+        " 5. After all waves: run post_verify if set."
+        " 6. Run: python3 scripts/pipeline_state.py advance"
+    ),
+}
+
+
+def cmd_dispatch_context(args):
+    """Print current phase + dispatch instructions for post-compaction recovery."""
+    if not os.path.exists(STATE_FILE):
+        return  # Not in a pipeline run — nothing to inject
+    state = _load_state()
+    phase = state["phase"]
+    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    phase_type = config.get("type", "noop")
+    protocol = DISPATCH_PROTOCOL.get(phase_type, "")
+    print(f"[PIPELINE STATE RECOVERY] Current phase: {phase} (type: {phase_type})")
+    print(f"Batch: {state.get('batch', 0)}/{state.get('total_batches', 0)}")
+    if config.get("ids_file"):
+        print(f"IDs file: {config['ids_file']}")
+    if config.get("poll_phase"):
+        print(f"Poll phase: {config['poll_phase']}")
+    print(f"Dispatch: {protocol}")
+    print("Read SKILL.md (.claude/skills/rfe.auto-fix/SKILL.md) for full"
+          " dispatch loop details if needed.")
+
+
 COMMANDS = {
     "init": cmd_init,
     "get-phase": cmd_get_phase,
@@ -757,6 +800,7 @@ COMMANDS = {
     "get": cmd_get,
     "status": cmd_status,
     "diagnose": cmd_diagnose,
+    "dispatch-context": cmd_dispatch_context,
 }
 
 if __name__ == "__main__":
