@@ -32,6 +32,36 @@ If `artifacts/rfe-rubric.md` exists (either already present or just exported), r
 
 If the rubric is still not available after the bootstrap attempt, proceed with the built-in question flow below.
 
+## Step 1.5: Check for Potential Duplicates
+
+Before asking clarifying questions, check whether similar RFEs already exist in Jira. This prevents duplicate work and helps the PM connect to existing efforts.
+
+1. Extract 3-5 key phrases from the problem statement that capture the core need. Focus on domain-specific terms (product names, capabilities, user actions) rather than generic words like "support", "enable", "improve".
+
+2. Run the duplicate search:
+
+```bash
+python3 scripts/dedup_search.py search "<problem statement text>" --keywords "phrase1,phrase2,phrase3" --max-results 10
+```
+
+3. Parse the JSON output. If matches were found:
+
+   **Interactive mode**: Present the top 5 matches as a table:
+
+   | Key | Summary | Link |
+   |-----|---------|------|
+   | RFE-1234 | Example summary | [View](https://...) |
+
+   Then ask the user:
+   > "I found existing RFEs that may overlap with your idea. Do any of these already cover what you need? (yes/no/not sure)"
+
+   - If **yes**: Ask which one(s). Suggest they comment on the existing RFE instead of creating a new one. Offer to continue creating a new RFE anyway if they want.
+   - If **no** or **not sure**: Continue to Step 2.
+
+   **Headless mode (`--headless`)**: Log the matches to stderr but do not block. Proceed directly to Step 3.
+
+4. If the search fails (error in JSON output) or returns no matches, proceed silently to Step 2. Never block RFE creation due to a search failure.
+
 ## Step 2: Clarifying Questions
 
 Before generating RFEs, ask the PM clarifying questions to fill gaps. Ask 2-5 questions maximum — only ask what you cannot reasonably infer from the input. Focus on:
