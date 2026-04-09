@@ -1,0 +1,406 @@
+name: rfe-speedrun
+description: End-to-end RFE pipeline — create, review, auto-fix, split, and submit RFEs
+skill: rfe.speedrun
+arguments: --headless --dry-run --input batch.yaml
+runner: claude-code
+
+permissions:
+  allow: []
+  deny: []
+
+runner_options:
+  timeout: 10800     # 3 hours — opus with 20 cases + splits needs >90 min
+
+mlflow_experiment: rfe-speedrun-eval
+
+dataset:
+  path: eval/dataset/cases
+  schema: |
+    Each case directory contains 4 files:
+
+    - input.yaml: Test input with fields:
+      - prompt (string): Concise problem statement (1-2 sentences)
+      - priority (string): Blocker/Critical/Major/Normal/Minor
+      - clarifying_context (string): Extended business context with
+        customer segments, justification, scope, success criteria
+
+    - reference-rfe.md: Gold standard RFE output. Markdown with YAML
+      frontmatter (rfe_id, title, priority, size, status, parent_key).
+      Body sections: Summary, Problem Statement, Affected Customers,
+      Business Justification, Acceptance Criteria, Success Criteria.
+
+    - reference-review.md: Gold standard review. Markdown with YAML
+      frontmatter (rfe_id, score 0-10, pass boolean, recommendation,
+      feasibility, revised, needs_attention, scores.what/why/open_to_how/
+      not_a_task/right_sized each 0-2, before_score, before_scores).
+      Body: Assessor Feedback table, Verdict, Feedback, Technical
+      Feasibility, Strategy Considerations, Revision History.
+
+    - annotations.yaml: Test metadata with fields:
+      - expected_scores (dict with what/why/open_to_how/not_a_task/right_sized, nullable floats)
+      - expected_total (nullable float, 0-10)
+      - expected_pass (nullable bool)
+      - expected_recommendation (nullable string: submit/revise/split/reject)
+      - expected_feasibility (nullable string)
+      - known_issues (list)
+      - score_tolerance (int, default 1)
+      - tags (list)
+      - difficulty (nullable string)
+
+inputs:
+  tools:
+    - match: |
+        Questions asked to the user via AskUserQuestion — typically
+        clarifying questions during rfe.create (customer segment,
+        business impact, problem definition, distinctness, success metrics).
+      prompt: |
+        Answer based on the test case context in input.yaml.
+        Use the 'clarifying_context' field for customer segments,
+        business justification, and scope details.
+        Use the 'prompt' field for the core problem statement.
+        Default: pick the first option or answer "yes" for confirmations.
+
+    - match: |
+        Any interaction with Jira — whether via MCP tools
+        (mcp__atlassian__*), Bash scripts calling the Jira REST API
+        (scripts/submit.py, scripts/fetch_issue.py), or any HTTP
+        requests to a Jira server.
+      prompt: |
+        The skill runs with --dry-run so Jira writes are skipped.
+        For reads/fetches: the test case input.yaml contains the full
+        RFE content in rfe_content, so Jira fetches should not be needed.
+        If a Jira fetch is attempted, return the rfe_content from the
+        test case input.yaml as the issue description.
+
+
+outputs:
+  - path: artifacts/rfe-tasks
+    batch_pattern: "RFE-{n:03d}"
+    schema: |
+      RFE task files in Markdown with YAML frontmatter.
+      Naming: RFE-NNN.md (new, pre-submission) or RHAIRFE-NNNN.md (fetched).
+      Frontmatter fields (validated by scripts/frontmatter.py):
+        rfe_id, title, priority (Blocker/Critical/Major/Normal/Minor),
+        size (S/M/L/XL), status (Draft/Ready/Submitted/Archived),
+        parent_key (for split children), original_labels.
+      Body sections: Summary, Problem Statement, Affected Customers,
+      Business Justification, Acceptance Criteria, Success Criteria.
+
+  - path: artifacts/rfe-reviews
+    batch_pattern: "RFE-{n:03d}"
+    schema: |
+      Review and assessment files for each RFE.
+      Files per RFE:
+        {ID}-review.md: Main review with YAML frontmatter containing:
+          rfe_id, score (0-10), pass (bool), recommendation
+          (submit/revise/split/reject/autorevise_reject), feasibility
+          (feasible/infeasible/indeterminate), auto_revised (bool),
+          needs_attention (bool), needs_attention_reason,
+          scores.what/why/open_to_how/not_a_task/right_sized (each 0-2),
+          before_score, before_scores (pre-revision scores).
+        {ID}-feasibility.md: Technical feasibility assessment with
+          blockers, strategy considerations, scope assessment.
+        {ID}-split-status.yaml: Written only for splits; contains
+          action (split/no-split), children list, reason.
+      Body of review: Assessor Feedback table (Criterion, Score, Notes),
+      Verdict, Feedback, Technical Feasibility, Strategy Considerations,
+      Revision History.
+
+  - path: artifacts/rfe-originals
+    batch_pattern: "RFE-{n:03d}"
+    schema: |
+      Backup of original RFE content before revisions. One file per RFE:
+      {ID}.md containing the original body (no frontmatter). Used for
+      diffing and content preservation checks.
+
+  - path: artifacts/auto-fix-runs
+    batch_pattern: "*"
+    schema: |
+      Timestamped run reports from the auto-fix pipeline.
+      YYYYMMDD-HHMMSS.yaml: Structured YAML with run_id, started,
+        completed timestamps, batch_size, per_rfe list (each with id,
+        recommendation, revision_cycles), before_scores_avg,
+        after_scores_avg, counts (passed/failed/split/errors).
+
+  - path: artifacts/review-report.html
+    batch_pattern: "*"
+    schema: |
+      Human-readable HTML report with diffs, scores, and revision
+      analysis. Generated by scripts/generate_review_pdf.py.
+
+traces:
+  stdout: true
+  stderr: true
+  events: false
+  metrics: true
+
+judges:
+  # --- Inline checks ---
+
+  - name: files_exist
+    description: |
+      Verify the pipeline produced a task file and review file.
+    check: |
+      files = outputs.get("files", {})
+      tasks = [k for k in files if k.startswith("artifacts/rfe-tasks/") and k.endswith(".md")]
+      reviews = [k for k in files if k.startswith("artifacts/rfe-reviews/") and k.endswith("-review.md")]
+      errors = []
+      if not tasks:
+          errors.append("No task files in artifacts/rfe-tasks/")
+      if not reviews:
+          errors.append("No review files in artifacts/rfe-reviews/")
+      return (len(errors) == 0, "; ".join(errors) if errors else f"{len(tasks)} tasks, {len(reviews)} reviews")
+
+  - name: frontmatter_valid
+    description: |
+      Verify review files have valid YAML frontmatter with required fields,
+      correct value ranges (scores 0-2, total 0-10), valid recommendation enum,
+      and consistent pass logic (pass=true iff score>=7 AND no criterion is 0).
+    check: |
+      import yaml
+      files = outputs.get("files", {})
+      reviews = {k: v for k, v in files.items() if k.endswith("-review.md")}
+      if not reviews:
+          return (False, "No review files to check")
+      errors = []
+      checked = 0
+      for fname, content in sorted(reviews.items()):
+          parts = content.split('---', 2)
+          if len(parts) < 3:
+              errors.append(f"{fname}: missing frontmatter")
+              continue
+          try:
+              fm = yaml.safe_load(parts[1])
+          except yaml.YAMLError as e:
+              errors.append(f"{fname}: invalid YAML: {e}")
+              continue
+          checked += 1
+          for req in ['rfe_id', 'score', 'pass', 'recommendation', 'scores']:
+              if req not in fm:
+                  errors.append(f"{fname}: missing {req}")
+          score = fm.get('score')
+          if score is not None and not (0 <= score <= 10):
+              errors.append(f"{fname}: score {score} out of range")
+          scores = fm.get('scores', {})
+          criteria = ['what', 'why', 'open_to_how', 'not_a_task', 'right_sized']
+          for c in criteria:
+              s = scores.get(c)
+              if s is not None and s not in (0, 1, 2):
+                  errors.append(f"{fname}: scores.{c}={s} not in 0-2")
+          rec = fm.get('recommendation')
+          valid_recs = ['submit', 'revise', 'split', 'reject', 'autorevise_reject']
+          if rec and rec not in valid_recs:
+              errors.append(f"{fname}: invalid recommendation '{rec}'")
+          if all(scores.get(c) is not None for c in criteria) and score is not None:
+              total = sum(scores.get(c, 0) for c in criteria)
+              has_zero = any(scores.get(c) == 0 for c in criteria)
+              expected_pass = (total >= 7 and not has_zero)
+              if fm.get('pass') != expected_pass:
+                  errors.append(f"{fname}: pass={fm['pass']} inconsistent (total={total}, has_zero={has_zero})")
+      if checked == 0:
+          return (False, "No review files to check")
+      return (len(errors) == 0, "; ".join(errors[:5]) if errors else f"{checked} reviews valid")
+
+  - name: run_report_exists
+    description: |
+      Verify the auto-fix pipeline generated a structured run report
+      (YAML file in artifacts/auto-fix-runs/) with required fields.
+    check: |
+      import yaml
+      files = outputs.get("files", {})
+      yamls = {k: v for k, v in files.items()
+               if k.startswith("artifacts/auto-fix-runs/") and k.endswith(".yaml")
+               and "issue-snapshot" not in k}
+      if not yamls:
+          return (False, "No run report YAML found")
+      fname = sorted(yamls.keys())[-1]
+      try:
+          report = yaml.safe_load(yamls[fname])
+      except yaml.YAMLError as e:
+          return (False, f"{fname}: invalid YAML: {e}")
+      if not report:
+          return (False, f"{fname} is empty")
+      errors = []
+      for req in ['run_id', 'started', 'completed', 'per_rfe']:
+          if req not in report:
+              errors.append(f"Missing field: {req}")
+      per_rfe = report.get('per_rfe', [])
+      if not per_rfe:
+          errors.append("per_rfe list is empty")
+      return (len(errors) == 0, "; ".join(errors) if errors else f"Report {fname}: {len(per_rfe)} RFEs tracked")
+
+  - name: recommendation_consistency
+    description: |
+      Cross-field semantic checks: pass/fail aligns with recommendation,
+      infeasible RFEs are never recommended for submission.
+    check: |
+      import yaml
+      files = outputs.get("files", {})
+      reviews = {k: v for k, v in files.items() if k.endswith("-review.md")}
+      if not reviews:
+          return (False, "No review files to check")
+      errors = []
+      for fname, content in sorted(reviews.items()):
+          parts = content.split('---', 2)
+          if len(parts) < 3:
+              continue
+          try:
+              fm = yaml.safe_load(parts[1])
+          except yaml.YAMLError:
+              continue
+          passed = fm.get('pass')
+          rec = fm.get('recommendation', '')
+          feas = fm.get('feasibility', '')
+          if passed and rec in ('revise', 'reject', 'autorevise_reject'):
+              if feas == 'infeasible' and rec == 'reject':
+                  pass  # feasibility-based reject overrides rubric pass — valid
+              elif rec == 'revise' and fm.get('needs_attention'):
+                  pass  # marginal pass with needs_attention — revision is reasonable
+              else:
+                  errors.append(f"{fname}: pass=true but recommendation={rec}")
+          if not passed and rec == 'submit':
+              errors.append(f"{fname}: pass=false but recommendation=submit")
+          if feas == 'infeasible' and rec == 'submit':
+              errors.append(f"{fname}: feasibility=infeasible but recommendation=submit")
+      return (len(errors) == 0, "; ".join(errors[:5]) if errors else f"{len(reviews)} reviews consistent")
+
+  - name: pipeline_flow
+    description: |
+      Verify expected execution flow from stdout: all phases ran,
+      no errors or unexpected file deletions during Phase 1.
+    check: |
+      import re
+      stdout = outputs.get("stdout", "")
+      if not stdout:
+          return (False, "No stdout captured")
+      errors = []
+      # Only flag tracebacks that indicate real failures — skip non-fatal ones
+      # from tool interception (PermissionError, hook denials) or missing optionals
+      fatal_tb_pattern = re.compile(
+          r'Traceback \(most recent call last\):.*?(?:Error|Exception): .+',
+          re.DOTALL
+      )
+      non_fatal_patterns = [
+          'PermissionError', 'hook', 'tool_handlers',
+          'mcp__atlassian', 'JIRA_SERVER', 'FileNotFoundError:.*\.context/',
+          'ModuleNotFoundError',
+      ]
+      for tb in fatal_tb_pattern.finditer(stdout):
+          tb_text = tb.group()
+          if not any(p in tb_text for p in non_fatal_patterns):
+              # Extract last line (the actual error) for the rationale
+              last_line = tb_text.strip().split('\n')[-1]
+              errors.append(f"Fatal traceback: {last_line[:120]}")
+      if "rm artifacts/rfe-tasks/" in stdout:
+          errors.append("RFE task file deleted during execution")
+      phases_found = []
+      if "Phase 1" in stdout or "Phase 1:" in stdout or "create" in stdout.lower()[:500]:
+          phases_found.append("create")
+      if "auto-fix" in stdout.lower() or "AUTOFIX" in stdout or "Batch " in stdout:
+          phases_found.append("auto-fix")
+      if "submit" in stdout.lower() or "Phase 3" in stdout:
+          phases_found.append("submit")
+      if len(phases_found) < 2:
+          errors.append(f"Only found phases: {phases_found}; expected create + auto-fix + submit")
+      return (len(errors) == 0, "; ".join(errors) if errors else f"Phases: {', '.join(phases_found)}")
+
+  # --- LLM judges ---
+
+  - name: rfe_quality
+    description: |
+      Assess the quality of produced RFE task files against the 5 rubric
+      criteria and whether the pipeline's own scores are well-calibrated.
+    prompt: |
+      You are an independent evaluator assessing the quality of an automated
+      RFE (Request for Enhancement) creation pipeline.
+
+      Here are the produced artifacts:
+
+      {{ outputs }}
+
+      Assess the RFE quality across these criteria, then provide a single
+      overall score 1-5.
+
+      **Quality criteria** (the RFE should):
+      - Describe a clear business need (WHAT) — user-centric, not task-like
+      - Be justified with evidence (WHY) — named customers, revenue impact
+      - Not prescribe implementation (no HOW) — platform vocabulary is OK,
+        but "must use X" is not
+      - Describe a need, not an activity (Not a Task)
+      - Be right-sized for a single strategy feature
+
+      **Calibration** — check the pipeline's own rubric scores in the review
+      file (scores.what/why/open_to_how/not_a_task/right_sized, each 0-2).
+      Do they match what the RFE content warrants?
+
+      Score 1-5:
+      - **5**: Exemplary RFE — all criteria strong, pipeline scores accurate
+      - **4**: Good — meets most criteria, pipeline scores within ±1
+      - **3**: Adequate — noticeable quality issues or pipeline miscalibration
+      - **2**: Below standard — multiple quality issues or scores systematically off
+      - **1**: Poor — fails basic RFE standards or pipeline scores unreliable
+
+  - name: revision_quality
+    description: |
+      Assess whether auto-revisions improved the RFE without losing content.
+      Compares original (artifacts/rfe-originals/) vs revised (artifacts/rfe-tasks/).
+    prompt: |
+      You are an independent evaluator assessing the quality of automated
+      RFE revisions. The pipeline may have auto-revised some RFEs to improve
+      their rubric scores.
+
+      Here are the produced artifacts:
+
+      {{ outputs }}
+
+      Compare the original RFE (in artifacts/rfe-originals/) against the
+      revised version (in artifacts/rfe-tasks/) and the pipeline's review
+      (in artifacts/rfe-reviews/).
+
+      If no originals exist (the RFE was not revised), score based on the
+      final RFE quality alone.
+
+      Assess across these dimensions, then provide a single overall score 1-5:
+
+      **Revision quality**: Did revisions genuinely improve the RFE?
+      Clarified requirements, strengthened justification, reframed
+      prescriptive content? Or just cosmetic/lateral changes?
+
+      **Content fidelity**: Was important business content preserved?
+      Customer names, requirements, justification data intact?
+      Or was critical content lost during revision?
+
+      **Reframing quality**: When prescriptive/HOW content was reframed,
+      was the intent preserved while removing implementation bias?
+      Or was it simply deleted without reframing the underlying need?
+
+      Score 1-5:
+      - **5**: Substantial improvement — targeted fixes, content preserved,
+        prescriptive content expertly reframed as business needs
+      - **4**: Good improvement — most changes beneficial, minor content shifts
+      - **3**: Mixed — some improvements but also introduced issues or lost specificity
+      - **2**: Marginal — cosmetic changes, no real quality improvement, or minor content loss
+      - **1**: Harmful — revision made the RFE worse, lost critical information
+
+  # --- Pairwise (used with --baseline) ---
+
+  - name: pairwise
+    description: Blind A/B comparison of RFE pipeline output quality across runs
+    prompt_file: eval/config/pairwise-judge.md
+    model: claude-sonnet-4-6
+
+thresholds:
+  files_exist:
+    min_pass_rate: 1.0
+  frontmatter_valid:
+    min_pass_rate: 1.0
+  run_report_exists:
+    min_pass_rate: 1.0
+  recommendation_consistency:
+    min_pass_rate: 1.0
+  pipeline_flow:
+    min_pass_rate: 1.0
+  rfe_quality:
+    min_mean: 3.5
+  revision_quality:
+    min_mean: 3.5
