@@ -14,6 +14,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Aggregate RFE review results for batch summaries.")
     parser.add_argument("ids", nargs="+", help="RFE IDs (e.g. RHAIRFE-100)")
+    parser.add_argument("--counts-only", action="store_true",
+                        help="Print only the counts line, no per-ID details")
     args = parser.parse_args()
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
@@ -70,8 +72,9 @@ def main():
     total = len(args.ids)
     print(f"TOTAL={total} PASSED={passed} FAILED={failed} "
           f"SPLIT={split} ERRORS={errors}")
-    for line in lines:
-        print(line)
+    if not args.counts_only:
+        for line in lines:
+            print(line)
 
 
 if __name__ == "__main__":

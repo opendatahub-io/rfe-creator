@@ -50,6 +50,20 @@ def main():
         if review:
             os.remove(review)
 
+        # Delete feasibility review
+        feasibility = os.path.join(reviews_dir,
+                                   f"{child_id}-feasibility.md")
+        if os.path.exists(feasibility):
+            os.remove(feasibility)
+
+        # Delete assessment files
+        for assess_file in [
+            f"/tmp/rfe-assess/single/{child_id}.md",
+            f"/tmp/rfe-assess/single/{child_id}.result.md",
+        ]:
+            if os.path.exists(assess_file):
+                os.remove(assess_file)
+
         deleted.append(os.path.basename(path))
 
     # 2. Delete split-status.yaml
