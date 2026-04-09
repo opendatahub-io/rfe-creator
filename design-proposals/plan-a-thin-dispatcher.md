@@ -240,13 +240,15 @@ command: "python3 scripts/bootstrap-assess-rfe.sh && bash scripts/fetch-architec
 
 This config is **encoded in `pipeline_state.py`** (a Python dict/dataclass), not in the SKILL.md. The orchestrator never sees the contents of prompt files or the meaning of variables.
 
+`get-phase-config` performs server-side substitution on the `command` field using `str.format_map(state)`, so `{start_time}` and `{batch_size}` in the REPORT command are resolved to their state values before output. Agent `vars` are NOT substituted server-side — the orchestrator replaces `{ID}` per-agent at dispatch time.
+
 ## What Changes
 
 All changes are in the **rfe-creator** repo (`/Users/jason/devel/rfe-creator/`).
 
 | File | Action |
 |------|--------|
-| `scripts/pipeline_state.py` | **New** (~250 lines) — phase tracking, config, transition logic |
+| `scripts/pipeline_state.py` | **New** (~820 lines) — phase tracking, config, transition logic, dispatch-context, diagnostics |
 | `scripts/error_collect.py` | **New** (~60 lines) — artifact cleanup + retry batch creation |
 | `scripts/verify_phase.py` | **New** (~50 lines) — post-barrier error detection + frontmatter writes |
 | `scripts/reassess_save.py` | **New** (~30 lines) — save review state + delete stale files for reassess |
@@ -278,6 +280,7 @@ REASSESS_CHECK, REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW,
   REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP,
 COLLECT, SPLIT, SPLIT_COLLECT,
   SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP,
+  SPLIT_SAVE, SPLIT_REASSESS, SPLIT_RE_REVIEW, SPLIT_RESTORE,
   SPLIT_CORRECTION_CHECK,
 BATCH_DONE, ERROR_COLLECT,
 REPORT, DONE
@@ -449,6 +452,37 @@ PHASE_CONFIG = {
         "command": "python3 scripts/check_revised.py --batch",
         "ids_file": "tmp/pipeline-revise-ids.txt"
     },
+    "SPLIT_SAVE": {
+        "type": "script",
+        "command": "python3 scripts/preserve_review_state.py save",
+        "ids_file": "tmp/pipeline-revise-ids.txt"
+    },
+    "SPLIT_REASSESS": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/assess-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "subagent_type": "rfe-scorer",
+        "poll_phase": "assess",
+        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        # NO "parallel" — feasibility NOT re-checked for revised children
+        "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-revise-ids.txt",
+        "timeout": 600,
+        "vars": { ... }
+    },
+    "SPLIT_RE_REVIEW": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "poll_phase": "review",
+        "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-revise-ids.txt",
+        "timeout": 600,
+        "vars": {"FIRST_PASS": "false", ...}
+    },
+    "SPLIT_RESTORE": {
+        "type": "script",
+        "command": "python3 scripts/preserve_review_state.py restore",
+        "ids_file": "tmp/pipeline-revise-ids.txt"
+    },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},  # advance() runs check_right_sized.py
 
     # --- Batch control + retry ---
@@ -461,7 +495,7 @@ PHASE_CONFIG = {
     # --- Terminal ---
     "REPORT": {
         "type": "script",
-        "command": "python3 scripts/generate_run_report.py --retry-errors-file tmp/pipeline-retry-errors.yaml"
+        "command": "python3 scripts/generate_run_report.py --start-time {start_time} --batch-size {batch_size}"
     },
 }
 ```
@@ -597,14 +631,18 @@ def advance(current_phase, state):
 ### CLI
 
 ```bash
-python3 scripts/pipeline_state.py init --batch-size 5 --headless
+python3 scripts/pipeline_state.py init --batch-size 5 --headless --announce-complete
 python3 scripts/pipeline_state.py get-phase              # → "ASSESS"
 python3 scripts/pipeline_state.py set-phase REVIEW
 python3 scripts/pipeline_state.py get-phase-config        # → YAML with type, prompt, ids_file, vars
 python3 scripts/pipeline_state.py advance                 # → runs decision logic, sets next phase, prints it
+python3 scripts/pipeline_state.py advance --dry-run       # → show transition without applying
 python3 scripts/pipeline_state.py set key=value ...
 python3 scripts/pipeline_state.py get <key>
 python3 scripts/pipeline_state.py status                  # → full state YAML
+python3 scripts/pipeline_state.py diagnose                # → cross-reference state with disk artifacts
+python3 scripts/pipeline_state.py dispatch-context        # → print phase + dispatch instructions (for manual recovery)
+python3 scripts/pipeline_state.py post-compact-hook       # → dispatch-context gated behind env var (for SessionStart hook)
 ```
 
 ### Observability
@@ -831,6 +869,8 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 
 ## 10. Settings change
 
+### Permissions
+
 ```json
 "Bash(python3 scripts/pipeline_state.py *)",
 "Bash(python3 scripts/error_collect.py *)",
@@ -839,6 +879,30 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 "Bash(python3 scripts/split_collect.py *)",
 "Bash(python3 scripts/check_right_sized.py *)"
 ```
+
+### Post-compaction context recovery hook
+
+A SessionStart hook fires after context compaction to inject the current pipeline state back into the conversation. This is gated behind the `RFE_CREATOR_ENABLE_CONTEXT_HOOK` environment variable so it's a no-op outside pipeline runs.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/pipeline_state.py post-compact-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`post-compact-hook` checks `RFE_CREATOR_ENABLE_CONTEXT_HOOK` and, if set, calls `dispatch-context` which prints the current phase, batch progress, and a dispatch protocol summary — enough for the LLM to resume the dispatch loop without any conversation history. The `DISPATCH_PROTOCOL` dict in `pipeline_state.py` encodes the three dispatch patterns (noop, script, agent) as concise text instructions.
 
 ## Polling Bug Fixes
 
@@ -880,11 +944,15 @@ Plan A's `REASSESS_CHECK` re-evaluates the reassess set each cycle by calling `c
 
 With `max_concurrent=10` and 30 IDs, a hung ID in wave 1 blocks waves 2 and 3. The current system launches all 30 concurrently and gets 29 results. Both systems are equally stuck at the phase barrier (neither can advance until 30/30 complete), but recovery after fixing the hung ID requires reprocessing up to 21 IDs in Plan A (the unstarted waves) vs 1 in the current system. Mitigated by fixing the polling bugs above and adding the `timeout` mechanism.
 
-### 3. Split children get feasibility reviews and post-revise re-review
+### 3. `auto_revised` flag is set exclusively by `check_revised.py --batch`
+
+The review agent prompt (`review-agent.md`) no longer includes `auto_revised` in its `frontmatter.py set` call. Previously, the re-review agent in REASSESS_REVIEW would set `auto_revised=false`, clobbering the value set by the FIXUP phase. Now `check_revised.py --batch` (run during FIXUP and REASSESS_FIXUP) is the sole authority — it compares `rfe-originals/` against `rfe-tasks/` content and sets the flag based on whether the body actually differs. The batch script uses `artifact_utils` directly instead of subprocess calls to `frontmatter.py`.
+
+### 4. Split children get feasibility reviews and post-revise re-review
 
 Resolved: split children now get re-assessed and re-reviewed after revision via SPLIT_SAVE/REASSESS/RE_REVIEW/RESTORE phases (operating on revised IDs only). Children also get feasibility reviews: `SPLIT_ASSESS` includes `parallel: [feasibility]`.
 
-### 4. collect_recommendations.py crash risk at decision points
+### 5. collect_recommendations.py crash risk at decision points
 
 `collect_recommendations.py` uses `read_frontmatter` without try/except. A corrupt YAML review file (e.g., from a partially-written agent output) crashes the entire script, losing routing results for ALL IDs in the batch. This affects three critical decision points: `REASSESS_CHECK`, `COLLECT`, and `BATCH_DONE`. Known risk — consider adding a `--resilient` flag that logs and skips corrupt files rather than crashing.
 
