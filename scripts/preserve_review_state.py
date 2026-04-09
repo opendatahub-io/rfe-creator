@@ -66,7 +66,6 @@ def save(rfe_id):
     state = {
         "before_score": data.get("before_score"),
         "before_scores": data.get("before_scores"),
-        "auto_revised": data.get("auto_revised"),
         "revision_history": extract_revision_history(rpath),
     }
 
@@ -92,15 +91,12 @@ def restore(rfe_id):
         print(f"SKIP={rfe_id} (no review file to restore into)")
         return
 
-    # Restore before_scores and auto_revised via frontmatter
+    # Restore before_scores via frontmatter
     fm_updates = {}
     if state.get("before_score") is not None:
         fm_updates["before_score"] = state["before_score"]
     if state.get("before_scores"):
         fm_updates["before_scores"] = state["before_scores"]
-    if state.get("auto_revised") is not None:
-        fm_updates["auto_revised"] = state["auto_revised"]
-
     if fm_updates:
         update_frontmatter(rpath, fm_updates, "rfe-review")
 

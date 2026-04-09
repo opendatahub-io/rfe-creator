@@ -51,15 +51,35 @@ def collect_reassess(ids):
     print(f"DONE={','.join(done)}")
 
 
+def collect_errors(ids):
+    """Collect IDs with non-null error field."""
+    error_ids = []
+    for rfe_id in ids:
+        path = os.path.join(ARTIFACTS_DIR, "rfe-reviews", f"{rfe_id}-review.md")
+        if not os.path.exists(path):
+            continue
+        try:
+            data, _ = read_frontmatter(path)
+        except Exception:
+            continue
+        if data.get("error"):
+            error_ids.append(rfe_id)
+    print(f"ERRORS={','.join(error_ids)}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Group RFE IDs by review recommendation.")
     parser.add_argument("ids", nargs="+", help="RFE IDs to check")
     parser.add_argument("--reassess", action="store_true",
                         help="Collect re-assess candidates instead")
+    parser.add_argument("--errors", action="store_true",
+                        help="Collect IDs with error field set")
     args = parser.parse_args()
 
-    if args.reassess:
+    if args.errors:
+        collect_errors(args.ids)
+    elif args.reassess:
         collect_reassess(args.ids)
     else:
         collect_default(args.ids)

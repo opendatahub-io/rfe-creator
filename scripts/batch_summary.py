@@ -14,10 +14,26 @@ def main():
     parser = argparse.ArgumentParser(
         description="Aggregate RFE review results for batch summaries.")
     parser.add_argument("ids", nargs="+", help="RFE IDs (e.g. RHAIRFE-100)")
+    parser.add_argument("--counts-only", action="store_true",
+                        help="Print only the counts line, no per-ID details")
     args = parser.parse_args()
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
     reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")
+
+    # Expand to include split children
+    all_ids = list(args.ids)
+    id_set = set(all_ids)
+    for rfe_id in args.ids:
+        task_path = os.path.join(artifacts_dir, "rfe-tasks", f"{rfe_id}.md")
+        try:
+            data, _ = read_frontmatter(task_path)
+            for child_id in (data.get("children") or []):
+                if child_id not in id_set:
+                    all_ids.append(child_id)
+                    id_set.add(child_id)
+        except Exception:
+            pass
 
     passed = 0
     failed = 0
@@ -25,7 +41,7 @@ def main():
     errors = 0
     lines = []
 
-    for rfe_id in args.ids:
+    for rfe_id in all_ids:
         review_path = os.path.join(reviews_dir, f"{rfe_id}-review.md")
 
         if not os.path.exists(review_path):
@@ -67,11 +83,12 @@ def main():
         detail_str = f", {', '.join(details)}" if details else ""
         lines.append(f"{rfe_id}: {rec} ({score_str}{detail_str})")
 
-    total = len(args.ids)
+    total = len(all_ids)
     print(f"TOTAL={total} PASSED={passed} FAILED={failed} "
           f"SPLIT={split} ERRORS={errors}")
-    for line in lines:
-        print(line)
+    if not args.counts_only:
+        for line in lines:
+            print(line)
 
 
 if __name__ == "__main__":

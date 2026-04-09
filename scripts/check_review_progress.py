@@ -33,7 +33,7 @@ def check_id(phase, rfe_id):
             data, _ = read_frontmatter(path)
         except Exception:
             return "pending"
-        if not data.get("score"):
+        if data.get("score") is None:
             return "pending"
         if data.get("error"):
             return "error"
@@ -44,6 +44,8 @@ def check_id(phase, rfe_id):
             return "pending"
         if data.get("auto_revised"):
             return "completed"
+        if data.get("recommendation") == "split":
+            return "completed"  # revise agent can't fix right-sizing
         return "pending"
     return "completed"
 
