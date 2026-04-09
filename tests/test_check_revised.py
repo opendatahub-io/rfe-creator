@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_revised.py")
+FM_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "frontmatter.py")
 
 
 def _write(path, content):
@@ -123,6 +124,19 @@ def _setup_batch(tmp_path, rfe_id, original_body, task_body, auto_revised=False)
     )
 
 
+def _read_frontmatter(path):
+    """Read YAML frontmatter from a file."""
+    import yaml
+    with open(path) as f:
+        content = f.read()
+    if not content.startswith("---"):
+        return {}
+    end = content.find("---", 3)
+    if end == -1:
+        return {}
+    return yaml.safe_load(content[3:end]) or {}
+
+
 class TestBatchMode:
     def test_sets_auto_revised_true_when_content_differs(self, tmp_path):
         _setup_batch(tmp_path, "RHAIRFE-1001", "Original text.", "Revised text.",
@@ -202,3 +216,91 @@ class TestBatchMode:
         )
         assert result.returncode == 0
         assert "UPDATED=0" in result.stdout
+
+
+class TestReassessCyclePreservation:
+    """Test that auto_revised flag survives reassess cycles where the
+    re-review agent sets frontmatter WITHOUT including auto_revised."""
+
+    def test_flag_survives_frontmatter_set_without_auto_revised(self, tmp_path):
+        """Simulates re-review agent setting scores without auto_revised —
+        the existing auto_revised=true should be preserved."""
+        _setup_batch(tmp_path, "RHAIRFE-2001", "Original.", "Revised.",
+                     auto_revised=True)
+        subprocess.run([
+            "python3", FM_SCRIPT, "set",
+            str(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2001-review.md"),
+            "score=9", "pass=true", "recommendation=submit",
+        ], check=True, capture_output=True)
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2001-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_flag_clobbered_when_set_explicitly_false(self, tmp_path):
+        """If something explicitly sets auto_revised=false, it sticks."""
+        _setup_batch(tmp_path, "RHAIRFE-2002", "Original.", "Revised.",
+                     auto_revised=True)
+        subprocess.run([
+            "python3", FM_SCRIPT, "set",
+            str(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2002-review.md"),
+            "auto_revised=false",
+        ], check=True, capture_output=True)
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2002-review.md")
+        assert fm["auto_revised"] is False
+
+    def test_reassess_cycle_preserves_flag(self, tmp_path):
+        """End-to-end: FIXUP sets true, re-review without auto_revised
+        doesn't clobber it, and check_revised confirms it stays true."""
+        _setup_batch(tmp_path, "RHAIRFE-2003", "Original.", "Revised content.",
+                     auto_revised=False)
+
+        # Step 1: FIXUP sets auto_revised=true
+        subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-2003"],
+            capture_output=True, text=True, cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md")
+        assert fm["auto_revised"] is True
+
+        # Step 2: Re-review agent writes new scores WITHOUT auto_revised
+        subprocess.run([
+            "python3", FM_SCRIPT, "set",
+            str(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md"),
+            "score=9", "pass=true", "recommendation=submit",
+            "scores.what=2", "scores.why=1", "scores.open_to_how=2",
+            "scores.not_a_task=2", "scores.right_sized=2",
+        ], check=True, capture_output=True)
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md")
+        assert fm["auto_revised"] is True, \
+            "re-review agent must not clobber auto_revised"
+
+        # Step 3: FIXUP again confirms
+        subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-2003"],
+            capture_output=True, text=True, cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_review_agent_prompt_excludes_auto_revised(self):
+        """The review agent prompt must NOT include auto_revised in its
+        frontmatter.py set call — only the revise agent and FIXUP set it."""
+        prompt_path = os.path.join(
+            os.path.dirname(__file__), "..",
+            ".claude/skills/rfe.review/prompts/review-agent.md")
+        with open(prompt_path) as f:
+            content = f.read()
+        lines = content.split("\n")
+        in_set_block = False
+        set_block = []
+        for line in lines:
+            if "frontmatter.py set" in line and "rfe_id=" in line:
+                in_set_block = True
+            if in_set_block:
+                set_block.append(line)
+                if not line.rstrip().endswith("\\"):
+                    break
+        set_cmd = " ".join(set_block)
+        assert "auto_revised" not in set_cmd, \
+            "review-agent.md frontmatter.py set must not include auto_revised"
