@@ -726,6 +726,94 @@ class TestSplitFieldInheritance:
             assert "AI Safety" in components
 
 
+    def test_children_inherit_jira_parent(self, art_dir, jira):
+        """Split children inherit the Jira parent link (e.g. RHAISTRAT)."""
+        # Create RHAISTRAT parent, then RHAIRFE with epic_link to set parent
+        jira.request("POST", "/api/admin/import", {"issues": [
+            {"key": "RHAISTRAT-100", "summary": "Strategy Feature",
+             "project": "RHAISTRAT", "issue_type": "Feature",
+             "description": "Strategy content."},
+            {"key": "RHAIRFE-2000", "summary": "Parent RFE",
+             "project": "RHAIRFE", "issue_type": "Feature Request",
+             "description": "Parent content.",
+             "epic_link": "RHAISTRAT-100"},
+        ]})
+
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-2000.md",
+               "Parent content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-2000.md",
+               "---\nrfe_id: RHAIRFE-2000\ntitle: Parent RFE\n"
+               "priority: Major\nstatus: Archived\n---\n\nParent content.\n")
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
+               "priority: Major\nstatus: Ready\n"
+               "parent_key: RHAIRFE-2000\n---\n\nChild 1 content.\n")
+        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
+               "---\nrfe_id: RFE-002\ntitle: Child RFE 2\n"
+               "priority: Major\nstatus: Ready\n"
+               "parent_key: RHAIRFE-2000\n---\n\nChild 2 content.\n")
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-2000",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        # Find the created children
+        issues = jira.search("project = RHAIRFE",
+                             fields="key,parent")
+        children = [i for i in issues
+                    if i["key"] not in ("RHAIRFE-2000",)]
+        assert len(children) == 2
+
+        for child in children:
+            child_detail = jira.get(child["key"])
+            parent = child_detail["fields"].get("parent")
+            assert parent is not None, (
+                f"{child['key']} should inherit parent RHAISTRAT-100")
+            assert parent["key"] == "RHAISTRAT-100"
+
+    def test_no_parent_when_parent_has_none(self, art_dir, jira):
+        """Children don't get a parent field if the split parent has none."""
+        jira.create("RHAIRFE-3000", "Parent No Strat", "Content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-3000.md", "Content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-3000.md",
+               "---\nrfe_id: RHAIRFE-3000\ntitle: Parent No Strat\n"
+               "priority: Major\nstatus: Archived\n---\n\nContent.\n")
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
+               "priority: Major\nstatus: Ready\n"
+               "parent_key: RHAIRFE-3000\n---\n\nChild content.\n")
+
+        env = {
+            **os.environ,
+            "JIRA_SERVER": jira.url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+        }
+        r = subprocess.run(
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-3000",
+             "--artifacts-dir", art_dir],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stderr
+
+        issues = jira.search("project = RHAIRFE", fields="key,parent")
+        children = [i for i in issues if i["key"] != "RHAIRFE-3000"]
+        assert len(children) == 1
+
+        child_detail = jira.get(children[0]["key"])
+        parent = child_detail["fields"].get("parent")
+        assert parent is None, "Child should not have a parent field"
+
+
 class TestReplayIdempotency:
     """Submit replay must be safe: no duplicate creates, no re-updates."""
 
