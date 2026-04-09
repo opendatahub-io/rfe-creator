@@ -35,7 +35,9 @@ PHASES = [
     "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
     "COLLECT", "SPLIT", "SPLIT_COLLECT",
     "SPLIT_PIPELINE_START", "SPLIT_ASSESS", "SPLIT_REVIEW",
-    "SPLIT_REVISE", "SPLIT_FIXUP", "SPLIT_CORRECTION_CHECK",
+    "SPLIT_REVISE", "SPLIT_FIXUP",
+    "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE",
+    "SPLIT_CORRECTION_CHECK",
     "BATCH_DONE", "ERROR_COLLECT",
     "REPORT", "DONE",
 ]
@@ -247,6 +249,48 @@ PHASE_CONFIG = {
         "command": "python3 scripts/check_revised.py --batch",
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
+    "SPLIT_SAVE": {
+        "type": "script",
+        "command": "python3 scripts/preserve_review_state.py save",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+    },
+    "SPLIT_REASSESS": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/assess-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "subagent_type": "rfe-scorer",
+        "poll_phase": "assess",
+        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        "post_verify": "python3 scripts/verify_phase.py --phase assess"
+                       " --ids-file tmp/pipeline-revise-ids.txt",
+        "timeout": 600,
+        "vars": {
+            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "/tmp/rfe-assess/single",
+            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+        },
+    },
+    "SPLIT_RE_REVIEW": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "poll_phase": "review",
+        "post_verify": "python3 scripts/verify_phase.py --phase review"
+                       " --ids-file tmp/pipeline-revise-ids.txt",
+        "timeout": 600,
+        "vars": {
+            "FIRST_PASS": "false",
+            "ID": "{ID}",
+            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "FEASIBILITY_PATH":
+                "artifacts/rfe-reviews/{ID}-feasibility.md",
+        },
+    },
+    "SPLIT_RESTORE": {
+        "type": "script",
+        "command": "python3 scripts/preserve_review_state.py restore",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+    },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},
 
     # --- Batch control + retry ---
@@ -339,7 +383,9 @@ REASSESS_SEQUENCE = [
 ]
 SPLIT_SEQUENCE = [
     "SPLIT_PIPELINE_START", "SPLIT_ASSESS", "SPLIT_REVIEW",
-    "SPLIT_REVISE", "SPLIT_FIXUP", "SPLIT_CORRECTION_CHECK",
+    "SPLIT_REVISE", "SPLIT_FIXUP",
+    "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE",
+    "SPLIT_CORRECTION_CHECK",
 ]
 
 
@@ -374,12 +420,17 @@ def advance(state, dry_run=False):
 
     if phase == "REASSESS_RESTORE":
         if not dry_run:
-            reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
-            out = _run_script(
-                f"python3 scripts/filter_for_revision.py"
-                f" {' '.join(reassess_ids)}")
-            revise_ids = out.split() if out else []
-            _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
+            cycle = state.get("reassess_cycle", 0)
+            if cycle >= 2:
+                # Last cycle: skip revise to avoid unreviewed changes
+                _write_ids("tmp/pipeline-revise-ids.txt", [])
+            else:
+                reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
+                out = _run_script(
+                    f"python3 scripts/filter_for_revision.py"
+                    f" {' '.join(reassess_ids)}")
+                revise_ids = out.split() if out else []
+                _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REASSESS_REVISE", "REASSESS_RESTORE → REASSESS_REVISE"
 
     if phase == "SPLIT_REVIEW":

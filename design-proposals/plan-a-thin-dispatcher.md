@@ -124,20 +124,19 @@ MAIN PIPELINE (per batch):
   → decision: reassess?
        yes (cycle < 2, reassess IDs exist) → [REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW, REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP] → back to REASSESS_CHECK
        no → COLLECT
+  On the last cycle (cycle == max), REASSESS_RESTORE writes zero revise IDs so REASSESS_REVISE is a no-op.
+  This ensures every revision is followed by a review — the last cycle only re-scores, it does not revise.
 
 COLLECT:
   → decision: splits?
        yes → SPLIT → SPLIT_COLLECT
          → decision: children exist?
-              yes → [SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP, SPLIT_CORRECTION_CHECK]
+              yes → [SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP, SPLIT_SAVE, SPLIT_REASSESS, SPLIT_RE_REVIEW, SPLIT_RESTORE, SPLIT_CORRECTION_CHECK]
               no (all no-split or zero children from collector) → BATCH_DONE
        no → BATCH_DONE
-
-SPLIT_CORRECTION_CHECK:
-  → undersized & cycle < 1 → cycle back to SPLIT (only undersized IDs)
-  → otherwise → BATCH_DONE
-
-**Known gap**: Split children get one revise pass with no reassess loop (main pipeline items get up to 2 reassess cycles). Acceptable for now — children are simpler/more focused. Children DO get feasibility reviews (same as main pipeline). Future parallel evaluation (two agents per child: revise + evaluate in one wave) would replace the sequential reassess loop entirely, making it moot to add SPLIT_REASSESS_* phases now.
+  After SPLIT_REVISE + SPLIT_FIXUP, revised children (from pipeline-revise-ids.txt) are re-assessed and
+  re-reviewed via SPLIT_SAVE/REASSESS/RE_REVIEW/RESTORE. Children that didn't need revision skip these
+  phases (empty ID file = no agents launched). This ensures every revision is followed by a review.
 
 All agent phases use max_concurrent waves (see below) to cap concurrency.
 
@@ -495,9 +494,13 @@ def advance(current_phase, state):
         return "REVISE"
 
     if current_phase == "REASSESS_RESTORE":
-        reassess_ids = read_ids("tmp/pipeline-reassess-ids.txt")
-        revise_ids = run(f"filter_for_revision.py {' '.join(reassess_ids)}")
-        write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
+        if state["reassess_cycle"] >= 2:
+            # Last cycle: skip revise to avoid unreviewed changes
+            write_ids("tmp/pipeline-revise-ids.txt", [])
+        else:
+            reassess_ids = read_ids("tmp/pipeline-reassess-ids.txt")
+            revise_ids = run(f"filter_for_revision.py {' '.join(reassess_ids)}")
+            write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REASSESS_REVISE"
 
     if current_phase == "SPLIT_REVIEW":
@@ -515,7 +518,8 @@ def advance(current_phase, state):
                          "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP"]
     SPLIT_SEQUENCE = ["SPLIT_PIPELINE_START", "SPLIT_ASSESS",
                       "SPLIT_REVIEW", "SPLIT_REVISE", "SPLIT_FIXUP",
-                      "SPLIT_CORRECTION_CHECK"]
+                      "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW",
+                      "SPLIT_RESTORE", "SPLIT_CORRECTION_CHECK"]
 
     for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if current_phase in seq[:-1]:
@@ -876,9 +880,9 @@ Plan A's `REASSESS_CHECK` re-evaluates the reassess set each cycle by calling `c
 
 With `max_concurrent=10` and 30 IDs, a hung ID in wave 1 blocks waves 2 and 3. The current system launches all 30 concurrently and gets 29 results. Both systems are equally stuck at the phase barrier (neither can advance until 30/30 complete), but recovery after fixing the hung ID requires reprocessing up to 21 IDs in Plan A (the unstarted waves) vs 1 in the current system. Mitigated by fixing the polling bugs above and adding the `timeout` mechanism.
 
-### 3. Split children get feasibility reviews but no reassess loop
+### 3. Split children get feasibility reviews and post-revise re-review
 
-Already documented as "known gap" — children get one revise pass with no reassess loop (main pipeline items get up to 2 cycles). However, children DO get feasibility reviews: `SPLIT_ASSESS` includes `parallel: [feasibility]`, matching the current behavior where `/rfe.review --headless --caller split` runs the full pipeline including feasibility.
+Resolved: split children now get re-assessed and re-reviewed after revision via SPLIT_SAVE/REASSESS/RE_REVIEW/RESTORE phases (operating on revised IDs only). Children also get feasibility reviews: `SPLIT_ASSESS` includes `parallel: [feasibility]`.
 
 ### 4. collect_recommendations.py crash risk at decision points
 
