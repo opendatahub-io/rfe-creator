@@ -11,10 +11,11 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import read_frontmatter, update_frontmatter
+from artifact_utils import read_frontmatter
 
 PHASE_OUTPUT = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
@@ -56,20 +57,20 @@ def verify(phase, ids_file):
 
         if not exists:
             failed.append(rfe_id)
-            # Write error frontmatter
+            # Write error frontmatter via frontmatter.py (creates file if needed)
             review_path = f"artifacts/rfe-reviews/{rfe_id}-review.md"
             error_msg = f"{phase}_failed"
-            if os.path.exists(review_path):
-                try:
-                    update_frontmatter(review_path,
-                                       {"error": error_msg}, "rfe-review")
-                except Exception:
-                    pass
-            else:
-                # Create minimal review file with error
-                os.makedirs("artifacts/rfe-reviews", exist_ok=True)
-                with open(review_path, "w") as f:
-                    f.write(f"---\nerror: {error_msg}\n---\n")
+            try:
+                subprocess.run([
+                    "python3", "scripts/frontmatter.py", "set", review_path,
+                    f"error={error_msg}",
+                    "score=0", "pass=false", "recommendation=revise",
+                    "feasibility=feasible", "auto_revised=false",
+                    "needs_attention=true",
+                    f"needs_attention_reason=Agent failed: {error_msg}",
+                ], check=True, capture_output=True)
+            except Exception:
+                pass
 
     # Remove failed IDs from active set
     if failed:

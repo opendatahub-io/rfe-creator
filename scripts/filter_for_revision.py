@@ -60,7 +60,7 @@ def main():
         if feasibility == "infeasible":
             continue
 
-        if recommendation in ("reject", "autorevise_reject"):
+        if recommendation in ("reject", "autorevise_reject", "split"):
             continue
 
         revise_ids.append(rfe_id)

@@ -107,6 +107,7 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
+
         "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
@@ -166,6 +167,7 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
+
         "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
@@ -236,6 +238,7 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
+
         "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
@@ -427,12 +430,18 @@ def advance(state, dry_run=False):
             f"python3 scripts/collect_recommendations.py"
             f" {' '.join(active_ids)}")
         split_ids = _parse_line_ids(out, "SPLIT")
+        # Build summary counts from collect output
+        counts = {}
+        for key in ("SUBMIT", "SPLIT", "REVISE", "REJECT", "ERRORS"):
+            ids = _parse_line_ids(out, key)
+            counts[key.lower()] = len(ids)
+        stats = " ".join(f"{k}={v}" for k, v in counts.items())
         if split_ids:
             if not dry_run:
                 _write_ids("tmp/pipeline-split-ids.txt", split_ids)
             return ("SPLIT",
-                    f"COLLECT → SPLIT: splits={len(split_ids)}")
-        return "BATCH_DONE", "COLLECT → BATCH_DONE: no splits"
+                    f"COLLECT complete: {stats}\nCOLLECT → SPLIT")
+        return "BATCH_DONE", f"COLLECT complete: {stats}\nCOLLECT → BATCH_DONE"
 
     # --- SPLIT → SPLIT_COLLECT ---
     if phase == "SPLIT":
@@ -473,11 +482,23 @@ def advance(state, dry_run=False):
     if phase == "BATCH_DONE":
         batch = state.get("batch", 0)
         total = state.get("total_batches", 1)
+        retry = state.get("retry_cycle", 0)
+        # Batch completion summary
+        active_ids = _read_ids("tmp/pipeline-active-ids.txt")
+        batch_stats = ""
+        if active_ids:
+            try:
+                out = _run_script(
+                    f"python3 scripts/batch_summary.py --counts-only"
+                    f" {' '.join(active_ids)}")
+                batch_stats = out.strip()
+            except Exception:
+                pass
+        prefix = "Retry batch" if retry > 0 else "Batch"
+        summary = f"{prefix} {batch}/{total} complete: {batch_stats}"
         if batch < total:
             return ("BATCH_START",
-                    f"BATCH_DONE → BATCH_START:"
-                    f" batch={batch}/{total}")
-        retry = state.get("retry_cycle", 0)
+                    f"{summary}\nBATCH_DONE → BATCH_START")
         if retry < 1:
             all_ids = _read_ids("tmp/pipeline-all-ids.txt")
             if all_ids:
@@ -487,13 +508,18 @@ def advance(state, dry_run=False):
                 error_ids = _parse_line_ids(out, "ERRORS")
                 if error_ids:
                     return ("ERROR_COLLECT",
-                            f"BATCH_DONE → ERROR_COLLECT:"
+                            f"{summary}\nBATCH_DONE → ERROR_COLLECT:"
                             f" errors={len(error_ids)}")
-        return "REPORT", "BATCH_DONE → REPORT"
+        return "REPORT", f"{summary}\nBATCH_DONE → REPORT"
 
     # --- ERROR_COLLECT → BATCH_START ---
     if phase == "ERROR_COLLECT":
-        return "BATCH_START", "ERROR_COLLECT → BATCH_START"
+        retry_ids = _read_ids("tmp/pipeline-retry-ids.txt")
+        n = len(retry_ids)
+        batch = state.get("total_batches", 0)
+        return ("BATCH_START",
+                f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\n"
+                f"ERROR_COLLECT → BATCH_START")
 
     # --- REPORT → DONE (with optional announce) ---
     if phase == "REPORT":
