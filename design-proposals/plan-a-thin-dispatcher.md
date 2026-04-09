@@ -57,7 +57,9 @@ loop:
     while ids remain:
       wave = take next max_concurrent from ids
       for each id in wave: launch background Agent(...)
-      poll with check_review_progress.py until wave done
+      poll with check_review_progress.py until wave done (or config.timeout)
+    if config.post_verify:
+      run config.post_verify   # writes error frontmatter, removes failed IDs from active set
   elif config.type == "script":
     run config.command
   # else: type == "noop" — pure decision point, no dispatch
@@ -66,11 +68,24 @@ loop:
 ```
 
 Three phase types:
-- **`agent`** — fan-out background agents, poll until barrier clears
+- **`agent`** — fan-out background agents, poll until barrier clears (or timeout). If `post_verify` is set, run post-barrier verification to detect agent failures.
 - **`script`** — run a command synchronously (SETUP, FIXUP, ERROR_COLLECT, etc.)
 - **`noop`** — pure decision point, no dispatch. The loop just calls `advance()`, which runs decision scripts internally and sets the next phase. Used by REASSESS_CHECK, BATCH_DONE, COLLECT, SPLIT_CORRECTION_CHECK.
 
 The orchestrator **never reads prompt files** — the agents do. The orchestrator **never decides what's next** — `advance` does. And the loop is **resumable at every iteration** — disk state is the only source of truth.
+
+### Post-Barrier Verification
+
+Agent phases support two additional config fields for failure detection:
+
+- **`timeout`** (seconds): Maximum time to poll before treating remaining PENDING IDs as failures. After timeout, remaining IDs are routed through `post_verify`. This is a new behavior — the current SKILL.md system has no timeout, relying on the operator to manually intervene on stuck agents.
+
+- **`post_verify`** (command): Runs after the barrier clears (or timeout). Checks for expected output files per phase. For each ID where output is missing:
+  1. Writes error frontmatter to the review file (`error=<phase>_failed`)
+  2. Removes the ID from the active IDs file
+  3. Prints `FAILED=ID1,ID2` for barrier summary logging
+
+This replaces the LLM-driven Glob checks in the current SKILL.md orchestrator. The current system detects agent failures via Glob + manual frontmatter writes after each phase barrier (E1-E5 error templates). Plan A's `verify_phase.py` makes this deterministic — a script, not an LLM judgment call.
 
 ### Phased Barrier Model
 
@@ -102,6 +117,7 @@ INIT → BOOTSTRAP → RESUME_CHECK → BATCH_START
 
 MAIN PIPELINE (per batch):
   BATCH_START → [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
+  BATCH_START populates pipeline-active-ids.txt from the batch file
   REVIEW → REVISE transition runs filter_for_revision.py and writes pipeline-revise-ids.txt
     (REVISE dispatches only filtered IDs; empty list = no agents launched, advance immediately)
   FIXUP → REASSESS_CHECK
@@ -111,14 +127,17 @@ MAIN PIPELINE (per batch):
 
 COLLECT:
   → decision: splits?
-       yes → SPLIT → [SPLIT_COLLECT, SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP, SPLIT_CORRECTION_CHECK]
+       yes → SPLIT → SPLIT_COLLECT
+         → decision: children exist?
+              yes → [SPLIT_PIPELINE_START, SPLIT_ASSESS, SPLIT_REVIEW, SPLIT_REVISE, SPLIT_FIXUP, SPLIT_CORRECTION_CHECK]
+              no (all no-split or zero children from collector) → BATCH_DONE
        no → BATCH_DONE
 
 SPLIT_CORRECTION_CHECK:
   → undersized & cycle < 1 → cycle back to SPLIT (only undersized IDs)
   → otherwise → BATCH_DONE
 
-**Known gap**: Split children get one revise pass with no reassess loop (main pipeline items get up to 2 reassess cycles). Acceptable for now — children are simpler/more focused. Future parallel evaluation (two agents per child: revise + evaluate in one wave) would replace the sequential reassess loop entirely, making it moot to add SPLIT_REASSESS_* phases now.
+**Known gap**: Split children get one revise pass with no reassess loop (main pipeline items get up to 2 reassess cycles). Acceptable for now — children are simpler/more focused. Children DO get feasibility reviews (same as main pipeline). Future parallel evaluation (two agents per child: revise + evaluate in one wave) would replace the sequential reassess loop entirely, making it moot to add SPLIT_REASSESS_* phases now.
 
 All agent phases use max_concurrent waves (see below) to cap concurrency.
 
@@ -169,6 +188,8 @@ The retry batch flows through the **same** FETCH → SETUP → ASSESS → REVIEW
 
 **REPORT phase data flow**: REPORT is a script phase that calls `generate_run_report.py --retry-errors-file tmp/pipeline-retry-errors.yaml`. The script reads `tmp/pipeline-retry-ids.txt` (if it exists) to identify which IDs were retried. For each retried ID, it reads the original error details (type, phase, message) from the retry-errors file and embeds them as an `original_error` field in the per-RFE entry in the run report YAML. This preserves what went wrong on the first attempt even when the retry succeeds and overwrites the review frontmatter — enabling debugging of recurring failure patterns across runs. The `tmp/pipeline-retry-errors.yaml` file is ephemeral; once embedded in the run report (`artifacts/auto-fix-runs/`), it can be cleaned up normally.
 
+After generating the report, `advance(REPORT)` checks `state["announce_complete"]` and runs `finish.py` if set. This was previously only documented in the SKILL.md teardown section — now it's part of the `advance()` transition logic so it fires regardless of context state.
+
 ### Max Concurrent & Wave Dispatch
 
 Each background agent is a separate Claude API call consuming rate limits and compute. A batch of 50 parents that all split into 3 children = 150 children. Launching 150 concurrent agents would overwhelm infrastructure.
@@ -206,6 +227,8 @@ prompt: .claude/skills/rfe.review/prompts/assess-agent.md
 ids_file: tmp/pipeline-active-ids.txt
 subagent_type: rfe-scorer
 poll_phase: assess
+post_verify: "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt"
+timeout: 600
 vars:
   DATA_FILE: "/tmp/rfe-assess/single/{ID}.md"
   RUN_DIR: "/tmp/rfe-assess/single"
@@ -224,10 +247,14 @@ All changes are in the **rfe-creator** repo (`/Users/jason/devel/rfe-creator/`).
 
 | File | Action |
 |------|--------|
-| `scripts/pipeline_state.py` | **New** (~200 lines) — phase tracking, config, transition logic |
+| `scripts/pipeline_state.py` | **New** (~250 lines) — phase tracking, config, transition logic |
 | `scripts/error_collect.py` | **New** (~60 lines) — artifact cleanup + retry batch creation |
+| `scripts/verify_phase.py` | **New** (~50 lines) — post-barrier error detection + frontmatter writes |
+| `scripts/reassess_save.py` | **New** (~30 lines) — save review state + delete stale files for reassess |
+| `scripts/split_collect.py` | **New** (~40 lines) — R8/R8a routing + collect_children.py |
 | `scripts/check_right_sized.py` | **New** (~30 lines) — returns undersized child IDs |
 | `scripts/collect_recommendations.py` | **Modify** — add `--errors` flag |
+| `scripts/check_review_progress.py` | **Modify** — fix score=0 falsiness bug, add split-recommended revise completion |
 | `scripts/cleanup_partial_split.py` | **Modify** — extend to also delete child feasibility files (`<child>-feasibility.md`) and child assessment files (`/tmp/rfe-assess/single/<child>.md`, `<child>.result.md`) |
 | `scripts/generate_run_report.py` | **Modify** — add `--retry-errors-file` flag, embed `original_error` in per-RFE report entries |
 | `scripts/batch_summary.py` | **Modify** — add `--counts-only` flag |
@@ -259,24 +286,30 @@ REPORT, DONE
 
 ### Phase config map (Python dict in `pipeline_state.py`)
 
-Each phase maps to:
+Complete config for all phases. Phases not listed below use `{"type": "noop"}` (decision points handled by `advance()`).
+
 ```python
 PHASE_CONFIG = {
+    # --- Preamble ---
+    "RESUME_CHECK": {
+        "type": "script",
+        "command": "python3 scripts/check_resume.py"
+    },
+
+    # --- Main pipeline ---
+    "BATCH_START": {"type": "noop"},  # advance() resets counters + populates active IDs
     "FETCH": {
         "type": "agent",
         "prompt": ".claude/skills/rfe.review/prompts/fetch-agent.md",
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "fetch",
+        "post_verify": "python3 scripts/verify_phase.py --phase fetch --ids-file tmp/pipeline-active-ids.txt",
+        "timeout": 300,
         "vars": {"KEY": "{ID}"}
     },
     "SETUP": {
         "type": "script",
         "command": "bash scripts/bootstrap-assess-rfe.sh & bash scripts/fetch-architecture-context.sh & wait"
-    },
-    "FIXUP": {
-        "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",  # verifies/corrects auto_revised flag per ID
-        "ids_file": "tmp/pipeline-revise-ids.txt"
     },
     "ASSESS": {
         "type": "agent",
@@ -284,23 +317,153 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "subagent_type": "rfe-scorer",
         "poll_phase": "assess",
-        "parallel": [  # also launch feasibility agents
+        "parallel": [
             {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md", "poll_phase": "feasibility"}
         ],
         "pre_script": "python3 scripts/prep_assess.py {ID}",
+        "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt",
+        "timeout": 600,
         "vars": { ... }
     },
-    "RESUME_CHECK": {
-        "type": "script",
-        "command": "python3 scripts/check_resume.py"  # filters pipeline-all-ids.txt → pipeline-process-ids.txt
+    "REVIEW": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
+        "ids_file": "tmp/pipeline-active-ids.txt",
+        "poll_phase": "review",
+        "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-active-ids.txt",
+        "timeout": 600,
+        "vars": {"FIRST_PASS": "true", ...}
     },
-    "SPLIT_PIPELINE_START": {"type": "noop"},  # sync marker between SPLIT_COLLECT and SPLIT_ASSESS
-    # Decision-only phases — dispatch loop skips, advance() handles internally
-    "REASSESS_CHECK": {"type": "noop"},
-    "COLLECT":        {"type": "noop"},  # advance() runs collect_recommendations.py
-    "BATCH_DONE":     {"type": "noop"},
+    "REVISE": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "poll_phase": "revise",
+        "timeout": 600,
+        "vars": {"ID": "{ID}"}
+    },
+    "FIXUP": {
+        "type": "script",
+        "command": "python3 scripts/check_revised.py --batch",
+        "ids_file": "tmp/pipeline-revise-ids.txt"
+    },
+
+    # --- Reassess loop ---
+    "REASSESS_CHECK": {"type": "noop"},  # advance() runs collect_recommendations.py --reassess
+    "REASSESS_SAVE": {
+        "type": "script",
+        "command": "python3 scripts/reassess_save.py",
+        "ids_file": "tmp/pipeline-reassess-ids.txt"
+    },
+    "REASSESS_ASSESS": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/assess-agent.md",
+        "ids_file": "tmp/pipeline-reassess-ids.txt",
+        "subagent_type": "rfe-scorer",
+        "poll_phase": "assess",
+        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        # NO "parallel" — feasibility intentionally NOT re-checked (invariant 4.2/5.4)
+        "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-reassess-ids.txt",
+        "timeout": 600,
+        "vars": { ... }
+    },
+    "REASSESS_REVIEW": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
+        "ids_file": "tmp/pipeline-reassess-ids.txt",
+        "poll_phase": "review",
+        "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-reassess-ids.txt",
+        "timeout": 600,
+        "vars": {
+            "FIRST_PASS": "false",  # Critical: prevents before_score/before_scores overwrite
+            ...
+        }
+    },
+    "REASSESS_RESTORE": {
+        "type": "script",
+        "command": "python3 scripts/preserve_review_state.py restore",
+        "ids_file": "tmp/pipeline-reassess-ids.txt"
+    },
+    "REASSESS_REVISE": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",  # filtered by advance(REASSESS_RESTORE)
+        "poll_phase": "revise",
+        "timeout": 600,
+        "vars": {"ID": "{ID}"}
+    },
+    "REASSESS_FIXUP": {
+        "type": "script",
+        "command": "python3 scripts/check_revised.py --batch",
+        "ids_file": "tmp/pipeline-revise-ids.txt"
+    },
+
+    # --- Collect + Split ---
+    "COLLECT": {"type": "noop"},  # advance() runs collect_recommendations.py
+    "SPLIT": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.split/prompts/split-agent.md",
+        "ids_file": "tmp/pipeline-split-ids.txt",
+        "poll_phase": "split",
+        "timeout": 600,
+        "vars": {"ID": "{ID}", ...}
+    },
+    "SPLIT_COLLECT": {
+        "type": "script",
+        "command": "python3 scripts/split_collect.py",
+        "ids_file": "tmp/pipeline-split-ids.txt"
+    },
+    "SPLIT_PIPELINE_START": {"type": "noop"},  # sync marker between SPLIT_COLLECT decision and SPLIT_ASSESS
+    "SPLIT_ASSESS": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/assess-agent.md",
+        "ids_file": "tmp/pipeline-split-children-ids.txt",
+        "subagent_type": "rfe-scorer",
+        "poll_phase": "assess",
+        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        "parallel": [
+            {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md", "poll_phase": "feasibility"}
+        ],
+        "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-split-children-ids.txt",
+        "timeout": 600,
+        "vars": { ... }
+    },
+    "SPLIT_REVIEW": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
+        "ids_file": "tmp/pipeline-split-children-ids.txt",
+        "poll_phase": "review",
+        "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-split-children-ids.txt",
+        "timeout": 600,
+        "vars": {"FIRST_PASS": "true", ...}
+    },
+    "SPLIT_REVISE": {
+        "type": "agent",
+        "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
+        "ids_file": "tmp/pipeline-revise-ids.txt",  # filtered by advance(SPLIT_REVIEW)
+        "poll_phase": "revise",
+        "timeout": 600,
+        "vars": {"ID": "{ID}"}
+    },
+    "SPLIT_FIXUP": {
+        "type": "script",
+        "command": "python3 scripts/check_revised.py --batch",
+        "ids_file": "tmp/pipeline-revise-ids.txt"
+    },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},  # advance() runs check_right_sized.py
-    # ... etc
+
+    # --- Batch control + retry ---
+    "BATCH_DONE": {"type": "noop"},
+    "ERROR_COLLECT": {
+        "type": "script",
+        "command": "python3 scripts/error_collect.py"
+    },
+
+    # --- Terminal ---
+    "REPORT": {
+        "type": "script",
+        "command": "python3 scripts/generate_run_report.py --retry-errors-file tmp/pipeline-retry-errors.yaml"
+    },
 }
 ```
 
@@ -311,12 +474,14 @@ def advance(current_phase, state):
     # Preamble (one-time)
     PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
 
-    # BATCH_START increments the batch counter and resets per-batch counters
-    # so each batch (including retry) gets fresh reassess and correction cycles
+    # BATCH_START increments the batch counter, resets per-batch counters,
+    # and populates pipeline-active-ids.txt from the batch file
     if current_phase == "BATCH_START":
         state["batch"] += 1
         state["reassess_cycle"] = 0
         state["correction_cycle"] = 0
+        batch_file = f"tmp/pipeline-batch-{state['batch']}-ids.txt"
+        copy_ids(batch_file, "tmp/pipeline-active-ids.txt")
         return "FETCH"
 
     # Filter before REVISE phases — run filter_for_revision.py to determine
@@ -348,8 +513,9 @@ def advance(current_phase, state):
     MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
     REASSESS_SEQUENCE = ["REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
                          "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP"]
-    SPLIT_SEQUENCE = ["SPLIT_COLLECT", "SPLIT_PIPELINE_START", "SPLIT_ASSESS",
-                      "SPLIT_REVIEW", "SPLIT_REVISE", "SPLIT_FIXUP", "SPLIT_CORRECTION_CHECK"]
+    SPLIT_SEQUENCE = ["SPLIT_PIPELINE_START", "SPLIT_ASSESS",
+                      "SPLIT_REVIEW", "SPLIT_REVISE", "SPLIT_FIXUP",
+                      "SPLIT_CORRECTION_CHECK"]
 
     for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if current_phase in seq[:-1]:
@@ -360,7 +526,8 @@ def advance(current_phase, state):
         return "REASSESS_CHECK"
 
     if current_phase == "REASSESS_CHECK":
-        reassess_ids = run("collect_recommendations.py --reassess")
+        active_ids = read_ids("tmp/pipeline-active-ids.txt")
+        reassess_ids = run(f"collect_recommendations.py --reassess {' '.join(active_ids)}")
         cycle = state["reassess_cycle"]
         if reassess_ids and cycle < 2:
             state["reassess_cycle"] = cycle + 1
@@ -373,7 +540,9 @@ def advance(current_phase, state):
 
     # Decision points — collect and split
     if current_phase == "COLLECT":
-        split_ids = run("collect_recommendations.py")  # parse SPLIT=
+        active_ids = read_ids("tmp/pipeline-active-ids.txt")
+        result = run(f"collect_recommendations.py {' '.join(active_ids)}")
+        split_ids = parse_split_ids(result)
         if split_ids:
             write_ids("tmp/pipeline-split-ids.txt", split_ids)
             return "SPLIT"
@@ -382,8 +551,15 @@ def advance(current_phase, state):
     if current_phase == "SPLIT":
         return "SPLIT_COLLECT"
 
+    if current_phase == "SPLIT_COLLECT":
+        child_ids = read_ids("tmp/pipeline-split-children-ids.txt")
+        if not child_ids:
+            return "BATCH_DONE"  # all no-split or zero children from collector
+        return "SPLIT_PIPELINE_START"
+
     if current_phase == "SPLIT_CORRECTION_CHECK":
-        undersized = run("check_right_sized.py <child_ids>")
+        child_ids = read_ids("tmp/pipeline-split-children-ids.txt")
+        undersized = run(f"check_right_sized.py {' '.join(child_ids)}")
         if undersized and state["correction_cycle"] < 1:
             state["correction_cycle"] += 1
             write_ids("tmp/pipeline-split-ids.txt", undersized)  # narrow to undersized only
@@ -406,8 +582,11 @@ def advance(current_phase, state):
         # incremented total_batches, set retry_cycle=1
         return "BATCH_START"
 
-    # Terminal
+    # Terminal — REPORT runs generate_run_report.py (dispatched by loop),
+    # then advance handles announce_complete
     if current_phase == "REPORT":
+        if state.get("announce_complete"):
+            run("python3 scripts/finish.py")
         return "DONE"
 ```
 
@@ -499,7 +678,72 @@ correction_cycle: 0
 retry_cycle: 0
 ```
 
-## 2. `scripts/check_right_sized.py`
+## 2. `scripts/verify_phase.py`
+
+```bash
+python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt
+# stdout: FAILED=RHAIRFE-1501,RHAIRFE-1522
+# (empty FAILED= if all passed)
+```
+
+Per-phase verification that checks for expected output files after the polling barrier clears (or times out). Uses the same path mapping as `check_review_progress.py`:
+
+| Phase | Expected output |
+|-------|-----------------|
+| `fetch` | `artifacts/rfe-tasks/{ID}.md` |
+| `assess` | `/tmp/rfe-assess/single/{ID}.result.md` |
+| `feasibility` | `artifacts/rfe-reviews/{ID}-feasibility.md` |
+| `review` | `artifacts/rfe-reviews/{ID}-review.md` (with `score` set) |
+| `split` | `artifacts/rfe-reviews/{ID}-split-status.yaml` |
+
+For each ID where the expected output is missing:
+1. Writes error frontmatter via `frontmatter.py set` — for fetch failures, writes the full E1 error template; for other phases, sets `error=<phase>_failed`
+2. Removes the ID from the active IDs file (so downstream phases skip it)
+3. Collects the ID for the `FAILED=` summary line
+
+~50 lines. This replaces the LLM-driven Glob checks in the current SKILL.md.
+
+## 3. `scripts/reassess_save.py`
+
+```bash
+python3 scripts/reassess_save.py
+# Reads IDs from tmp/pipeline-reassess-ids.txt
+```
+
+Wraps two operations that must happen together before reassessment:
+1. `preserve_review_state.py save <ids>` — saves `before_score`/`before_scores` for delta tracking
+2. Deletes stale files for each reassess ID:
+   - `artifacts/rfe-reviews/{ID}-review.md`
+   - `/tmp/rfe-assess/single/{ID}.result.md`
+
+**File deletion is load-bearing**: Without it, the dispatch loop's pre-dispatch check sees existing results, reports all IDs as COMPLETED, launches zero agents, and `advance` fires immediately — a silent no-op reassess cycle.
+
+**Not deleted**: `artifacts/rfe-reviews/{ID}-feasibility.md` — feasibility is intentionally NOT re-checked during reassess (invariant 4.2/5.4). The existing feasibility result is reused across reassess cycles.
+
+~30 lines.
+
+## 4. `scripts/split_collect.py`
+
+```bash
+python3 scripts/split_collect.py
+# Reads IDs from tmp/pipeline-split-ids.txt
+# stdout: CHILDREN=6
+```
+
+Post-SPLIT-agent collection that routes parent IDs and gathers child IDs:
+
+1. Reads `artifacts/rfe-reviews/{ID}-split-status.yaml` for each parent ID
+2. For `action=no-split`: sets `recommendation=revise` via `frontmatter.py` (transition R8 in state machine)
+3. For `action=split` with children: runs `collect_children.py`, collects child IDs
+4. For `action=split` but zero children from collector: sets `recommendation=revise` (transition R8a — collector found no valid children)
+5. Writes all child IDs to `tmp/pipeline-split-children-ids.txt` (empty file if zero children)
+6. Prints `CHILDREN=<count>` for barrier summary
+
+The `advance(SPLIT_COLLECT)` handler then reads the child IDs file to decide: children exist → SPLIT_PIPELINE_START, no children → BATCH_DONE.
+
+~40 lines.
+
+## 5. `scripts/check_right_sized.py`
 
 ```bash
 python3 scripts/check_right_sized.py ID1 ID2 ID3
@@ -511,7 +755,7 @@ Per-parent-aware correction check. For each ID, reads `artifacts/rfe-reviews/<ID
 
 This script is the fan-in join point for the split correction loop: all children's assessments complete (barrier), then this script aggregates results across parents and returns just the IDs needing re-split. ~40 lines.
 
-## 3. `collect_recommendations.py --errors`
+## 6. `collect_recommendations.py --errors`
 
 Add `--errors` flag. Takes IDs as positional args (scopes which IDs to check). Reads review frontmatter for each ID and returns those with a non-null `error` field. Output:
 
@@ -523,7 +767,7 @@ python3 scripts/collect_recommendations.py --errors RHAIRFE-1501 RHAIRFE-1522 RH
 
 The default mode (no flag) already groups IDs by recommendation and includes an `ERRORS=` line. The `--errors` flag makes it explicit: only return error IDs, accept an ID list to scope the check, and skip the recommendation grouping. Used by `advance(BATCH_DONE)` to decide whether to enter ERROR_COLLECT, and by `error_collect.py` to collect the full set.
 
-## 4. `cleanup_partial_split.py` extension
+## 7. `cleanup_partial_split.py` extension
 
 Currently deletes: child task files, companion files (`-comments.md`, `-removed-context.md`), child review files, and parent split-status.yaml. Also restores the parent from Archived to Ready.
 
@@ -537,11 +781,11 @@ Extend to also delete:
 
 Without this, ERROR_COLLECT's artifact cleanup for `split_failed` IDs would leave stale child assessment/feasibility files on disk, and a retry would skip those children's assessment phase (the resumability skip filter sees existing results).
 
-## 5. `batch_summary.py --counts-only`
+## 8. `batch_summary.py --counts-only`
 
 Add `--counts-only` flag. When set, only prints the `TOTAL=X PASSED=Y ...` counts line. Default unchanged.
 
-## 6. Rewrite `rfe.auto-fix/SKILL.md` (~80 lines)
+## 9. Rewrite `rfe.auto-fix/SKILL.md` (~80 lines)
 
 ### Frontmatter
 ```yaml
@@ -570,24 +814,75 @@ Repeat until phase == DONE:
      - For each ID in wave: launch background Agent with:
        "Read <prompt_file> and follow all instructions.
         Substitute: {ID}=<id>, {VAR1}=<val1>, ..."
-     - Write poll file, poll with check_review_progress.py until wave done
+     - Write poll file, poll with check_review_progress.py until wave done (or timeout)
+   - If post_verify: run post_verify script
 4. Run: pipeline_state.py advance
 5. Loop
 
 ## Teardown (after DONE)
 1. batch_summary.py --counts-only on all IDs
-2. If announce_complete: finish.py
 ```
 
-That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVISE does, or how splits work. It just dispatches and advances.
+That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVISE does, or how splits work. It just dispatches and advances. Teardown is minimal — `advance(REPORT)` handles `generate_run_report.py` (dispatched as a script phase) and `finish.py` (called conditionally from `advance`).
 
-## 7. Settings change
+## 10. Settings change
 
 ```json
 "Bash(python3 scripts/pipeline_state.py *)",
 "Bash(python3 scripts/error_collect.py *)",
+"Bash(python3 scripts/verify_phase.py *)",
+"Bash(python3 scripts/reassess_save.py *)",
+"Bash(python3 scripts/split_collect.py *)",
 "Bash(python3 scripts/check_right_sized.py *)"
 ```
+
+## Polling Bug Fixes
+
+Two bugs in `check_review_progress.py` that cause polling hangs:
+
+### score=0 falsiness (line 36)
+
+Current: `if not data.get("score")` returns `"pending"` when `score=0` (Python falsiness). The error check on line 38 (`if data.get("error")`) is unreachable for score=0.
+
+Fix: Change to `if data.get("score") is None`. Practical risk is near-zero (score=0 means the RFE is completely non-viable and would never pass review thresholds), but correctness matters for the error-routing path.
+
+### Revise hang on split-recommended IDs
+
+When `recommendation=split` and right-sizing is the only failing criterion, the revise agent makes no changes (it can't fix scope problems), never sets `auto_revised=true`, and polling returns `"pending"` forever.
+
+**Root cause**: `filter_for_revision.py` lines 63-64 only skip `reject` and `autorevise_reject` — `recommendation=split` falls through to inclusion in the revise set. The revise agent launches, finds nothing to revise, and exits without setting the completion signal.
+
+**Fix (Option B, recommended)**: Modify the revise-phase check in `check_review_progress.py` to also return `"completed"` when `recommendation=split`:
+
+```python
+if phase == "revise":
+    ...
+    if data.get("auto_revised"):
+        return "completed"
+    if data.get("recommendation") == "split":
+        return "completed"  # revise agent can't fix right-sizing; completion expected without changes
+    return "pending"
+```
+
+The timeout mechanism (Section 2) serves as a safety net for any other unforeseen polling hangs, but this fix handles the known case directly.
+
+## Behavioral Changes vs Current System
+
+### 1. Reassess set re-evaluated each cycle
+
+Plan A's `REASSESS_CHECK` re-evaluates the reassess set each cycle by calling `collect_recommendations.py --reassess` again. The current system fixes the reassess set once after the first FIXUP. Effect: IDs that pass after cycle 1 are excluded from cycle 2 (avoids wasted assess+review calls). Benign — `filter_for_revision.py` (F2 filter) would skip them anyway.
+
+### 2. Wave dispatch reduces recoverable work on polling hang
+
+With `max_concurrent=10` and 30 IDs, a hung ID in wave 1 blocks waves 2 and 3. The current system launches all 30 concurrently and gets 29 results. Both systems are equally stuck at the phase barrier (neither can advance until 30/30 complete), but recovery after fixing the hung ID requires reprocessing up to 21 IDs in Plan A (the unstarted waves) vs 1 in the current system. Mitigated by fixing the polling bugs above and adding the `timeout` mechanism.
+
+### 3. Split children get feasibility reviews but no reassess loop
+
+Already documented as "known gap" — children get one revise pass with no reassess loop (main pipeline items get up to 2 cycles). However, children DO get feasibility reviews: `SPLIT_ASSESS` includes `parallel: [feasibility]`, matching the current behavior where `/rfe.review --headless --caller split` runs the full pipeline including feasibility.
+
+### 4. collect_recommendations.py crash risk at decision points
+
+`collect_recommendations.py` uses `read_frontmatter` without try/except. A corrupt YAML review file (e.g., from a partially-written agent output) crashes the entire script, losing routing results for ALL IDs in the batch. This affects three critical decision points: `REASSESS_CHECK`, `COLLECT`, and `BATCH_DONE`. Known risk — consider adding a `--resilient` flag that logs and skips corrupt files rather than crashing.
 
 ## ID file naming
 
@@ -596,11 +891,11 @@ That's it. ~80 lines. The orchestrator doesn't know what ASSESS means, what REVI
 | `tmp/pipeline-all-ids.txt` | All IDs to process |
 | `tmp/pipeline-process-ids.txt` | After resume check |
 | `tmp/pipeline-batch-N-ids.txt` | Per-batch IDs |
-| `tmp/pipeline-active-ids.txt` | Current batch working set |
-| `tmp/pipeline-revise-ids.txt` | IDs needing revision |
-| `tmp/pipeline-reassess-ids.txt` | IDs needing reassessment |
-| `tmp/pipeline-split-ids.txt` | Parent IDs being split |
-| `tmp/pipeline-split-children-ids.txt` | Child IDs after split |
+| `tmp/pipeline-active-ids.txt` | Current batch working set (populated by `advance(BATCH_START)`) |
+| `tmp/pipeline-revise-ids.txt` | IDs needing revision (populated by `advance(REVIEW)`, `advance(REASSESS_RESTORE)`, `advance(SPLIT_REVIEW)`) |
+| `tmp/pipeline-reassess-ids.txt` | IDs needing reassessment (populated by `advance(REASSESS_CHECK)`) |
+| `tmp/pipeline-split-ids.txt` | Parent IDs being split (populated by `advance(COLLECT)`) |
+| `tmp/pipeline-split-children-ids.txt` | Child IDs after split (populated by `split_collect.py`) |
 | `tmp/pipeline-retry-ids.txt` | Error IDs sent to retry batch (written by ERROR_COLLECT) |
 | `tmp/pipeline-retry-errors.yaml` | Original error details per ID (preserved for reporting) |
 | `tmp/rfe-poll-*.txt` | Polling files (unchanged) |
@@ -620,21 +915,30 @@ Reassess phases reuse the same prompts with different variable values (e.g., `{F
 
 ## Implementation Order
 
-1. Write `scripts/pipeline_state.py` (~200 lines)
+1. Write `scripts/pipeline_state.py` (~250 lines)
 2. Write `scripts/error_collect.py` (~60 lines)
-3. Write `scripts/check_right_sized.py` (~30 lines)
-4. Add `--errors` flag to `scripts/collect_recommendations.py`
-5. Extend `scripts/cleanup_partial_split.py` (child feasibility + assessment files)
-6. Add `--counts-only` flag to `scripts/batch_summary.py`
-7. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
-8. Update `.claude/settings.json`
+3. Write `scripts/verify_phase.py` (~50 lines)
+4. Write `scripts/reassess_save.py` (~30 lines)
+5. Write `scripts/split_collect.py` (~40 lines)
+6. Write `scripts/check_right_sized.py` (~30 lines)
+7. Add `--errors` flag to `scripts/collect_recommendations.py`
+8. Fix `scripts/check_review_progress.py` (score=0 bug, split-recommended revise completion)
+9. Extend `scripts/cleanup_partial_split.py` (child feasibility + assessment files)
+10. Add `--counts-only` flag to `scripts/batch_summary.py`
+11. Rewrite `.claude/skills/rfe.auto-fix/SKILL.md` (~80 lines)
+12. Update `.claude/settings.json`
 
 ## Verification
 
 1. **Unit test pipeline_state.py**: Test `advance` transitions for all decision points
-2. **Single ID**: Run with 1 explicit ID, verify full phase sequence
-3. **Small batch**: Run with `--batch-size 5` on 10 IDs, verify batch 2 agents get proper instructions
-4. **Split flow**: Include an oversized RFE, verify split → child review → correction check
-5. **Error retry**: Introduce a fetch failure, verify ERROR_COLLECT creates retry batch and it flows through main pipeline
-6. **Key metric**: No context compression degradation in batch 2+
-7. **CI run**: Full `--limit 100 --batch-size 50` run
+2. **Trace advance() end-to-end** for: (a) normal batch, (b) 2 reassess cycles, (c) split with all-no-split, (d) split with correction, (e) retry batch, (f) fetch agent crash
+3. **Verify script calls**: Every `run(...)` in `advance()` passes required positional args (especially `collect_recommendations.py` and `check_right_sized.py`)
+4. **Verify agent phase configs**: Every agent phase has `ids_file`, `poll_phase`, `post_verify`, and `pre_script` (where needed)
+5. **Check PHASE_CONFIG coverage**: Every phase in the enum has a config entry
+6. **Trace pipeline-active-ids.txt lifecycle**: Populated at BATCH_START, read by FETCH/SETUP/ASSESS/REVIEW, filtered subsets written to revise/reassess/split ID files
+7. **Single ID**: Run with 1 explicit ID, verify full phase sequence
+8. **Small batch**: Run with `--batch-size 5` on 10 IDs, verify batch 2 agents get proper instructions
+9. **Split flow**: Include an oversized RFE, verify split → SPLIT_COLLECT decision → child review → correction check
+10. **Error retry**: Introduce a fetch failure, verify ERROR_COLLECT creates retry batch and it flows through main pipeline
+11. **Key metric**: No context compression degradation in batch 2+
+12. **CI run**: Full `--limit 100 --batch-size 50` run
