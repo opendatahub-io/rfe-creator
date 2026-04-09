@@ -790,6 +790,13 @@ def cmd_dispatch_context(args):
           " dispatch loop details if needed.")
 
 
+def cmd_post_compact_hook(args):
+    """Entry point for SessionStart compact hook — guarded by env var."""
+    if not os.environ.get("RFE_CREATOR_ENABLE_CONTEXT_HOOK"):
+        return
+    cmd_dispatch_context(args)
+
+
 COMMANDS = {
     "init": cmd_init,
     "get-phase": cmd_get_phase,
@@ -801,6 +808,7 @@ COMMANDS = {
     "status": cmd_status,
     "diagnose": cmd_diagnose,
     "dispatch-context": cmd_dispatch_context,
+    "post-compact-hook": cmd_post_compact_hook,
 }
 
 if __name__ == "__main__":
