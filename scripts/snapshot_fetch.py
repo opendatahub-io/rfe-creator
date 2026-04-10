@@ -236,6 +236,12 @@ def diff_snapshots(current_issues, previous_data):
     return changed, new
 
 
+def read_id_file(path):
+    """Read IDs from a file, one per line."""
+    with open(path, encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
 def write_id_file(path, ids):
     """Write IDs to a file, one per line."""
     os.makedirs(os.path.dirname(path) or "tmp", exist_ok=True)
@@ -287,6 +293,26 @@ def update_snapshot_hashes(hashes, snapshot_dir=None, mark_processed=None):
 
 def cmd_fetch(args):
     """Fetch all issues, diff against previous snapshot, write ID files."""
+    # --reprocess: skip Jira, reuse prior IDs, mark all as changed
+    if getattr(args, "reprocess", False):
+        if not os.path.exists(args.ids_file):
+            print("Error: No prior IDs found. Run with --jql or "
+                  "explicit IDs first.", file=sys.stderr)
+            sys.exit(1)
+        all_ids = read_id_file(args.ids_file)
+        write_id_file(args.changed_file, all_ids)
+        print(f"TOTAL={len(all_ids)}")
+        print(f"CHANGED={len(all_ids)}")
+        print(f"NEW=0")
+        print(f"UNCHANGED=0")
+        print(f"REPROCESS=true", file=sys.stderr)
+        return
+
+    if not args.jql:
+        print("Error: JQL query required (or use --reprocess)",
+              file=sys.stderr)
+        sys.exit(1)
+
     server, user, token = require_env()
     if not all([server, user, token]):
         print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required",
@@ -406,7 +432,8 @@ def main():
 
     fetch_p = sub.add_parser(
         "fetch", help="Fetch issues and diff against previous snapshot")
-    fetch_p.add_argument("jql", help="JQL query string")
+    fetch_p.add_argument("jql", nargs="?", default=None,
+                         help="JQL query string")
     fetch_p.add_argument("--limit", type=int, default=None,
                          help="Max number of changed keys to output")
     fetch_p.add_argument("--ids-file", required=True,
@@ -415,6 +442,9 @@ def main():
                          help="Output file for changed-only IDs")
     fetch_p.add_argument("--data-dir",
                          help="Local directory with previous run results")
+    fetch_p.add_argument("--reprocess", action="store_true",
+                         help="Skip Jira fetch, reuse prior IDs, "
+                         "mark all as changed")
 
     args = parser.parse_args()
     if args.command == "fetch":

@@ -8,6 +8,7 @@ Usage:
     python3 scripts/pipeline_state.py get-phase
     python3 scripts/pipeline_state.py set-phase <PHASE>
     python3 scripts/pipeline_state.py get-phase-config
+    python3 scripts/pipeline_state.py run-phase
     python3 scripts/pipeline_state.py advance [--dry-run]
     python3 scripts/pipeline_state.py set key=value ...
     python3 scripts/pipeline_state.py get <key>
@@ -16,6 +17,7 @@ Usage:
 """
 
 import argparse
+import glob
 import os
 import shutil
 import subprocess
@@ -25,11 +27,11 @@ from datetime import datetime, timezone
 import yaml
 
 STATE_FILE = "tmp/pipeline-state.yaml"
+DISPATCH_MARKER = "tmp/.dispatch-marker"
 
 # ---------- Phase enum ----------
 
 PHASES = [
-    "INIT", "BOOTSTRAP", "RESUME_CHECK",
     "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP",
     "REASSESS_CHECK", "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
     "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
@@ -45,13 +47,6 @@ PHASES = [
 # ---------- Phase config ----------
 
 PHASE_CONFIG = {
-    # --- Preamble ---
-    "RESUME_CHECK": {
-        "type": "script",
-        "command": "python3 scripts/check_resume.py",
-    },
-
-    # --- Main pipeline ---
     "BATCH_START": {"type": "noop"},
     "FETCH": {
         "type": "agent",
@@ -355,7 +350,8 @@ def _run_script(cmd):
     result = subprocess.run(
         cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Script failed: {cmd}", file=sys.stderr)
+        print("Script failed (exit code "
+              f"{result.returncode})", file=sys.stderr)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         sys.exit(1)
@@ -375,7 +371,6 @@ def _parse_line_ids(output, prefix):
 
 # ---------- Transition logic ----------
 
-PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
 MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
 REASSESS_SEQUENCE = [
     "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
@@ -444,7 +439,7 @@ def advance(state, dry_run=False):
         return "SPLIT_REVISE", "SPLIT_REVIEW → SPLIT_REVISE"
 
     # --- Linear sequences ---
-    for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
+    for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if phase in seq[:-1]:
             nxt = seq[seq.index(phase) + 1]
             return nxt, f"{phase} → {nxt}"
@@ -593,6 +588,11 @@ def cmd_init(args):
     opts = parser.parse_args(args)
 
     os.makedirs("tmp", exist_ok=True)
+    # Clean stale artifacts from prior runs.
+    for f in glob.glob("tmp/pipeline-batch-*-ids.txt"):
+        os.remove(f)
+    if os.path.exists(DISPATCH_MARKER):
+        os.remove(DISPATCH_MARKER)
     state = {
         "phase": "INIT",
         "batch": 0,
@@ -631,15 +631,62 @@ def cmd_get_phase_config(args):
     phase = state["phase"]
     config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
     config["phase"] = phase
-    if "command" in config:
-        config["command"] = config["command"].format_map(state)
+    config.pop("command", None)
+    if config.get("type") == "script":
+        config.pop("ids_file", None)
     print(yaml.dump(config, default_flow_style=False, sort_keys=False),
           end="")
+
+
+def cmd_run_phase(args):
+    """Execute the current script phase's command internally.
+
+    Loads state, resolves the command from PHASE_CONFIG, appends IDs
+    from ids_file if configured, and runs the command. The orchestrator
+    never sees the underlying script name.
+    """
+    state = _load_state()
+    phase = state["phase"]
+    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    phase_type = config.get("type", "noop")
+    if phase_type != "script":
+        print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'",
+              file=sys.stderr)
+        sys.exit(1)
+    cmd = config["command"].format_map(state)
+    if config.get("ids_file"):
+        ids = _read_ids(config["ids_file"])
+        if ids:
+            cmd += " " + " ".join(ids)
+    print(f"[run-phase] {phase}")
+    result = subprocess.run(cmd, shell=True)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+    # Write dispatch marker — advance checks this for script phases
+    with open(DISPATCH_MARKER, "w") as f:
+        f.write(phase)
 
 
 def cmd_advance(args):
     dry_run = "--dry-run" in args
     state = _load_state()
+    phase = state["phase"]
+    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+    phase_type = config.get("type", "noop")
+    # Guard: script phases must be dispatched via run-phase first
+    if phase_type == "script" and not dry_run:
+        if not os.path.exists(DISPATCH_MARKER):
+            print(f"advance: script phase {phase} was not dispatched."
+                  " Run: python3 scripts/pipeline_state.py run-phase",
+                  file=sys.stderr)
+            sys.exit(1)
+        with open(DISPATCH_MARKER) as f:
+            marker_phase = f.read().strip()
+        os.remove(DISPATCH_MARKER)
+        if marker_phase != phase:
+            print(f"advance: dispatch marker is for {marker_phase},"
+                  f" not current phase {phase}", file=sys.stderr)
+            sys.exit(1)
     next_phase, summary = advance(state, dry_run=dry_run)
     if not dry_run:
         state["phase"] = next_phase
@@ -750,8 +797,7 @@ def cmd_diagnose(args):
 DISPATCH_PROTOCOL = {
     "noop": "No action needed. Run: python3 scripts/pipeline_state.py advance",
     "script": (
-        "Run the command directly."
-        " If ids_file is set, read IDs from it and append as positional args."
+        "Run: python3 scripts/pipeline_state.py run-phase"
         " Then run: python3 scripts/pipeline_state.py advance"
     ),
     "agent": (
@@ -776,18 +822,29 @@ def cmd_dispatch_context(args):
         return  # Not in a pipeline run — nothing to inject
     state = _load_state()
     phase = state["phase"]
+    # INIT is a setup marker, not a dispatchable phase
+    if phase not in PHASES:
+        print(f"[PIPELINE STATE RECOVERY] Setup in progress (phase: {phase})")
+        print("Setup is not yet complete. Re-read SKILL.md"
+              " (.claude/skills/rfe.auto-fix/SKILL.md) and resume"
+              " the setup steps from where you left off.")
+        return
+    # DONE is terminal — nothing to dispatch
+    if phase == "DONE":
+        print("[PIPELINE STATE RECOVERY] Pipeline complete (phase: DONE)")
+        return
     config = PHASE_CONFIG.get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
     protocol = DISPATCH_PROTOCOL.get(phase_type, "")
     print(f"[PIPELINE STATE RECOVERY] Current phase: {phase} (type: {phase_type})")
     print(f"Batch: {state.get('batch', 0)}/{state.get('total_batches', 0)}")
-    if config.get("ids_file"):
+    if config.get("ids_file") and phase_type != "script":
         print(f"IDs file: {config['ids_file']}")
     if config.get("poll_phase"):
         print(f"Poll phase: {config['poll_phase']}")
     print(f"Dispatch: {protocol}")
-    print("Read SKILL.md (.claude/skills/rfe.auto-fix/SKILL.md) for full"
-          " dispatch loop details if needed.")
+    print("IMPORTANT: Re-read SKILL.md (.claude/skills/rfe.auto-fix/SKILL.md)"
+          " now before taking any action.")
 
 
 def cmd_post_compact_hook(args):
@@ -802,6 +859,7 @@ COMMANDS = {
     "get-phase": cmd_get_phase,
     "set-phase": cmd_set_phase,
     "get-phase-config": cmd_get_phase_config,
+    "run-phase": cmd_run_phase,
     "advance": cmd_advance,
     "set": cmd_set,
     "get": cmd_get,

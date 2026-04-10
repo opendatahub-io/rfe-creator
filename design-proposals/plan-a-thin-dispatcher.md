@@ -33,6 +33,16 @@ The pipeline is fully resumable at any phase boundary. If the orchestrator crash
 
 This makes the pipeline robust to both crashes and context compression. Even if compression completely destroys the orchestrator's memory of what it was doing, the SKILL.md's generic dispatch loop + disk state is sufficient to continue. The LLM doesn't need to "remember" anything — it just reads the loop instructions and the disk tells it where it is.
 
+### Invariant 4: Single entry point
+
+Script phase execution is routed through `pipeline_state.py run-phase`, which resolves the command internally. `get-phase-config` does not emit the `command` or `ids_file` fields for script phases. This prevents the LLM from learning and independently invoking scripts outside the dispatch loop, particularly after context compaction degrades loop instructions.
+
+Agent phases intentionally expose `pre_script` and `post_verify` commands because the orchestrator must execute them per-ID and post-barrier respectively. These are narrow, phase-specific hooks — not general script invocation.
+
+### Invariant 5: Dispatch-before-advance
+
+`advance` refuses to proceed for script phases unless `run-phase` was called first. `run-phase` writes a dispatch marker file (`tmp/.dispatch-marker`) on success; `advance` checks the marker exists and matches the current phase, then deletes it. This prevents the LLM from skipping dispatch and hammering `advance` repeatedly after context compaction — the phase sequence would look correct on disk but no scripts would execute. Noop and agent phases are exempt (noop has no dispatch step; agent dispatch is orchestrator-managed). `advance --dry-run` bypasses the check.
+
 **Manual recovery operations** enabled by the state machine:
 - `pipeline_state.py set-phase <PHASE>` — skip a stuck phase or re-run a failed one
 - `pipeline_state.py advance --dry-run` — show what transition would happen given current disk state without making it (deterministic replay)
@@ -61,7 +71,7 @@ loop:
     if config.post_verify:
       run config.post_verify   # writes error frontmatter, removes failed IDs from active set
   elif config.type == "script":
-    run config.command
+    pipeline_state.py run-phase              # resolves command internally
   # else: type == "noop" — pure decision point, no dispatch
 
   pipeline_state.py advance                      # → decision logic picks next phase
@@ -113,7 +123,8 @@ ID files determine which items participate in each phase. Items that don't need 
 Linear sequences are arrays. Conditional branches are in `pipeline_state.py advance`.
 
 ```
-INIT → BOOTSTRAP → RESUME_CHECK → BATCH_START
+Setup (orchestrated by SKILL.md, not the state machine):
+  init → snapshot fetch → bootstrap → resume check → set-phase BATCH_START
 
 MAIN PIPELINE (per batch):
   BATCH_START → [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
@@ -233,14 +244,15 @@ vars:
   RUN_DIR: "/tmp/rfe-assess/single"
   PROMPT_PATH: ".context/assess-rfe/scripts/agent_prompt.md"
 
-# Script phase example:
+# Script phase example (command and ids_file are internal-only, not emitted):
 type: script
-command: "python3 scripts/bootstrap-assess-rfe.sh && bash scripts/fetch-architecture-context.sh"
 ```
 
-This config is **encoded in `pipeline_state.py`** (a Python dict/dataclass), not in the SKILL.md. The orchestrator never sees the contents of prompt files or the meaning of variables.
+The `command` field is **internal-only** — it is stored in `PHASE_CONFIG` but not emitted by `get-phase-config`. The orchestrator calls `pipeline_state.py run-phase`, which resolves the command, applies `format_map(state)` for variable substitution (e.g., `{start_time}` in REPORT), appends IDs from `ids_file`, and executes the script. This prevents the LLM from learning script names and invoking them directly after context compaction (see Invariant 4).
 
-`get-phase-config` performs server-side substitution on the `command` field using `str.format_map(state)`, so `{start_time}` and `{batch_size}` in the REPORT command are resolved to their state values before output. Agent `vars` are NOT substituted server-side — the orchestrator replaces `{ID}` per-agent at dispatch time.
+This config is **encoded in `pipeline_state.py`** (a Python dict/dataclass), not in the SKILL.md. The orchestrator never sees the contents of prompt files, the meaning of variables, or the underlying script commands.
+
+Agent `vars` are NOT substituted server-side — the orchestrator replaces `{ID}` per-agent at dispatch time.
 
 ## What Changes
 
@@ -274,7 +286,6 @@ Combines three responsibilities:
 ### Phase enum
 
 ```
-INIT, BOOTSTRAP, RESUME_CHECK,
 BATCH_START, FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP,
 REASSESS_CHECK, REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW,
   REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP,
@@ -292,13 +303,6 @@ Complete config for all phases. Phases not listed below use `{"type": "noop"}` (
 
 ```python
 PHASE_CONFIG = {
-    # --- Preamble ---
-    "RESUME_CHECK": {
-        "type": "script",
-        "command": "python3 scripts/check_resume.py"
-    },
-
-    # --- Main pipeline ---
     "BATCH_START": {"type": "noop"},  # advance() resets counters + populates active IDs
     "FETCH": {
         "type": "agent",
@@ -504,9 +508,6 @@ PHASE_CONFIG = {
 
 ```python
 def advance(current_phase, state):
-    # Preamble (one-time)
-    PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
-
     # BATCH_START increments the batch counter, resets per-batch counters,
     # and populates pipeline-active-ids.txt from the batch file
     if current_phase == "BATCH_START":
@@ -555,7 +556,7 @@ def advance(current_phase, state):
                       "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW",
                       "SPLIT_RESTORE", "SPLIT_CORRECTION_CHECK"]
 
-    for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
+    for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if current_phase in seq[:-1]:
             return seq[seq.index(current_phase) + 1]
 
