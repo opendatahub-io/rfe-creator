@@ -480,33 +480,35 @@ class TestWriteIdFile:
 
 
 class TestReprocess:
-    def test_reprocess_copies_all_ids_to_changed(self, tmp_path):
-        """--reprocess reads prior IDs and writes all as changed."""
+    def test_reprocess_without_jql_copies_all_to_changed(self, tmp_path):
+        """--reprocess without --jql reuses prior IDs, all marked changed."""
         ids_file = str(tmp_path / "all-ids.txt")
         changed_file = str(tmp_path / "changed-ids.txt")
         write_id_file(ids_file, ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"])
 
         import argparse
         args = argparse.Namespace(
-            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None,
+            ids_file=ids_file, changed_file=changed_file)
         cmd_fetch(args)
 
         assert read_id_file(changed_file) == [
             "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
 
-    def test_reprocess_fails_without_prior_ids(self, tmp_path):
+    def test_reprocess_without_jql_fails_without_prior_ids(self, tmp_path):
         """--reprocess with no prior IDs file exits with error."""
         ids_file = str(tmp_path / "missing.txt")
         changed_file = str(tmp_path / "changed-ids.txt")
 
         import argparse
         args = argparse.Namespace(
-            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None,
+            ids_file=ids_file, changed_file=changed_file)
         with pytest.raises(SystemExit) as exc_info:
             cmd_fetch(args)
         assert exc_info.value.code == 1
 
-    def test_reprocess_preserves_ids_file(self, tmp_path):
+    def test_reprocess_without_jql_preserves_ids_file(self, tmp_path):
         """--reprocess does not modify the original IDs file."""
         ids_file = str(tmp_path / "all-ids.txt")
         changed_file = str(tmp_path / "changed-ids.txt")
@@ -514,7 +516,8 @@ class TestReprocess:
 
         import argparse
         args = argparse.Namespace(
-            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None,
+            ids_file=ids_file, changed_file=changed_file)
         cmd_fetch(args)
 
         assert read_id_file(ids_file) == ["RHAIRFE-1", "RHAIRFE-2"]
