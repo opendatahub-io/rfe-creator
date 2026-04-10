@@ -57,6 +57,100 @@ def make_state(**overrides):
     return base
 
 
+# ---------- Init ----------
+
+class TestInit:
+    def test_preserves_existing_id_files(self, tmp_dir):
+        """init must not wipe existing files in tmp/ (required for --reprocess)."""
+        write_ids("tmp/pipeline-all-ids.txt",
+                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        write_ids("tmp/pipeline-changed-ids.txt", ["RHAIRFE-1001"])
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_init([])
+        assert read_ids("tmp/pipeline-all-ids.txt") == [
+            "RHAIRFE-1001", "RHAIRFE-1002"]
+        assert read_ids("tmp/pipeline-changed-ids.txt") == ["RHAIRFE-1001"]
+
+    def test_cleans_stale_batch_files(self, tmp_dir):
+        """init removes pipeline-batch-*-ids.txt to prevent stale retry batches."""
+        write_ids("tmp/pipeline-batch-1-ids.txt", ["RHAIRFE-1001"])
+        write_ids("tmp/pipeline-batch-2-ids.txt", ["RHAIRFE-1002"])
+        write_ids("tmp/pipeline-batch-retry-ids.txt", ["RHAIRFE-1003"])
+        # Non-batch files should survive
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_init([])
+        assert not os.path.exists("tmp/pipeline-batch-1-ids.txt")
+        assert not os.path.exists("tmp/pipeline-batch-2-ids.txt")
+        assert not os.path.exists("tmp/pipeline-batch-retry-ids.txt")
+        # pipeline-all-ids.txt must survive (needed for --reprocess)
+        assert os.path.exists("tmp/pipeline-all-ids.txt")
+
+    def test_cleans_stale_dispatch_marker(self, tmp_dir):
+        """init removes dispatch marker from prior run."""
+        os.makedirs("tmp", exist_ok=True)
+        with open(ps.DISPATCH_MARKER, "w") as f:
+            f.write("FIXUP")
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_init([])
+        assert not os.path.exists(ps.DISPATCH_MARKER)
+
+    def test_resets_state_on_reinit(self, tmp_dir):
+        """init resets pipeline state even if prior state exists."""
+        ps._save_state(make_state(phase="COLLECT", batch=3,
+                                  reassess_cycle=2))
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_init(["--batch-size", "25"])
+        state = ps._load_state()
+        assert state["phase"] == "INIT"
+        assert state["batch"] == 0
+        assert state["reassess_cycle"] == 0
+        assert state["batch_size"] == 25
+
+    def test_advance_rejects_init_phase(self, tmp_dir):
+        """advance() on INIT exits with error — INIT is not a dispatchable phase."""
+        state = make_state(phase="INIT")
+        with pytest.raises(SystemExit) as exc_info:
+            ps.advance(state)
+        assert exc_info.value.code == 1
+
+    def test_dispatch_context_handles_init(self, tmp_dir):
+        """dispatch-context during INIT says setup is in progress, not 'run advance'."""
+        ps._save_state(make_state(phase="INIT"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "Setup in progress" in output
+        assert "SKILL.md" in output
+        # Must NOT tell the LLM to run advance
+        assert "advance" not in output
+
+    def test_dispatch_context_handles_done(self, tmp_dir):
+        """dispatch-context during DONE says pipeline complete, not 'run advance'."""
+        ps._save_state(make_state(phase="DONE"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "Pipeline complete" in output
+        assert "DONE" in output
+        # Must NOT tell the LLM to run advance
+        assert "advance" not in output
+
+
 # ---------- BATCH_START ----------
 
 class TestBatchStart:
@@ -516,8 +610,10 @@ class TestGetPhaseConfig:
 
 class TestRunPhase:
     def test_executes_script(self, tmp_dir, monkeypatch):
-        """RESUME_CHECK (no ids_file) runs the correct command."""
-        ps._save_state(make_state(phase="RESUME_CHECK"))
+        """REPORT (no ids_file) runs the correct command."""
+        ps._save_state(make_state(phase="REPORT",
+                                  start_time="2026-04-09T00:00:00Z",
+                                  batch_size=50))
         calls = []
         monkeypatch.setattr(
             subprocess, "run",
@@ -529,8 +625,8 @@ class TestRunPhase:
         with redirect_stdout(buf):
             ps.cmd_run_phase([])
         assert len(calls) == 1
-        assert "check_resume.py" in calls[0]
-        assert "[run-phase] RESUME_CHECK" in buf.getvalue()
+        assert "generate_run_report.py" in calls[0]
+        assert "[run-phase] REPORT" in buf.getvalue()
 
     def test_appends_ids(self, tmp_dir, monkeypatch):
         """FIXUP reads IDs from ids_file and appends them."""
@@ -1247,3 +1343,58 @@ class TestDispatchLoopE2E:
         assert "type: script" not in output or "ids_file" not in output
         assert "IDs file:" not in output
         assert "run-phase" in output
+
+    def test_reprocess_flow(self, tmp_dir, monkeypatch):
+        """--reprocess: init preserves prior IDs, pipeline processes all.
+
+        Simulates the reprocess flow where snapshot fetch and resume
+        check are skipped — all IDs from a prior run are reprocessed.
+        """
+        ids = ["RHAIRFE-1001", "RHAIRFE-1002", "RHAIRFE-1003"]
+
+        # Simulate prior run: ID files already exist
+        write_ids("tmp/pipeline-all-ids.txt", ids)
+
+        # Init does NOT wipe existing files
+        import io
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_init(["--batch-size", "50"])
+
+        # Prior ID files survive init
+        assert read_ids("tmp/pipeline-all-ids.txt") == ids
+
+        # Reprocess: copy all IDs directly to process IDs (skip resume check)
+        write_ids("tmp/pipeline-process-ids.txt", ids)
+
+        # Batch and start the pipeline
+        write_ids("tmp/pipeline-batch-1-ids.txt", ids)
+        state = ps._load_state()
+        state["phase"] = "BATCH_START"
+        state["total_batches"] = 1
+        ps._save_state(state)
+
+        def mock_run_script(cmd):
+            if "filter_for_revision.py" in cmd:
+                return ""
+            if "collect_recommendations.py --reassess" in cmd:
+                return "REASSESS=\nDONE=" + " ".join(ids)
+            if "collect_recommendations.py --errors" in cmd:
+                return "ERRORS="
+            if "collect_recommendations.py" in cmd:
+                return ("SUBMIT=" + " ".join(ids) + "\n"
+                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+            if "batch_summary.py" in cmd:
+                return "submit=3"
+            return ""
+        monkeypatch.setattr(ps, "_run_script", mock_run_script)
+
+        subprocess_mock = lambda cmd, **kw: type("R", (), {"returncode": 0})()
+        phases = self._run_loop(monkeypatch, subprocess_mock)
+
+        # All 3 IDs processed — same flow as normal
+        expected = [
+            "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE",
+            "FIXUP", "REASSESS_CHECK", "COLLECT", "BATCH_DONE", "REPORT",
+        ]
+        assert phases == expected

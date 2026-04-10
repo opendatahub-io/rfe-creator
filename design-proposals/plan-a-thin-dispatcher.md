@@ -123,7 +123,8 @@ ID files determine which items participate in each phase. Items that don't need 
 Linear sequences are arrays. Conditional branches are in `pipeline_state.py advance`.
 
 ```
-INIT → BOOTSTRAP → RESUME_CHECK → BATCH_START
+Setup (orchestrated by SKILL.md, not the state machine):
+  init → snapshot fetch → bootstrap → resume check → set-phase BATCH_START
 
 MAIN PIPELINE (per batch):
   BATCH_START → [FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP]
@@ -285,7 +286,6 @@ Combines three responsibilities:
 ### Phase enum
 
 ```
-INIT, BOOTSTRAP, RESUME_CHECK,
 BATCH_START, FETCH, SETUP, ASSESS, REVIEW, REVISE, FIXUP,
 REASSESS_CHECK, REASSESS_SAVE, REASSESS_ASSESS, REASSESS_REVIEW,
   REASSESS_RESTORE, REASSESS_REVISE, REASSESS_FIXUP,
@@ -303,13 +303,6 @@ Complete config for all phases. Phases not listed below use `{"type": "noop"}` (
 
 ```python
 PHASE_CONFIG = {
-    # --- Preamble ---
-    "RESUME_CHECK": {
-        "type": "script",
-        "command": "python3 scripts/check_resume.py"
-    },
-
-    # --- Main pipeline ---
     "BATCH_START": {"type": "noop"},  # advance() resets counters + populates active IDs
     "FETCH": {
         "type": "agent",
@@ -515,9 +508,6 @@ PHASE_CONFIG = {
 
 ```python
 def advance(current_phase, state):
-    # Preamble (one-time)
-    PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
-
     # BATCH_START increments the batch counter, resets per-batch counters,
     # and populates pipeline-active-ids.txt from the batch file
     if current_phase == "BATCH_START":
@@ -566,7 +556,7 @@ def advance(current_phase, state):
                       "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW",
                       "SPLIT_RESTORE", "SPLIT_CORRECTION_CHECK"]
 
-    for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
+    for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if current_phase in seq[:-1]:
             return seq[seq.index(current_phase) + 1]
 

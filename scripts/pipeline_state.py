@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import glob
 import os
 import shutil
 import subprocess
@@ -31,7 +32,6 @@ DISPATCH_MARKER = "tmp/.dispatch-marker"
 # ---------- Phase enum ----------
 
 PHASES = [
-    "INIT", "BOOTSTRAP", "RESUME_CHECK",
     "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP",
     "REASSESS_CHECK", "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
     "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
@@ -47,13 +47,6 @@ PHASES = [
 # ---------- Phase config ----------
 
 PHASE_CONFIG = {
-    # --- Preamble ---
-    "RESUME_CHECK": {
-        "type": "script",
-        "command": "python3 scripts/check_resume.py",
-    },
-
-    # --- Main pipeline ---
     "BATCH_START": {"type": "noop"},
     "FETCH": {
         "type": "agent",
@@ -378,7 +371,6 @@ def _parse_line_ids(output, prefix):
 
 # ---------- Transition logic ----------
 
-PREAMBLE = ["INIT", "BOOTSTRAP", "RESUME_CHECK", "BATCH_START"]
 MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
 REASSESS_SEQUENCE = [
     "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
@@ -447,7 +439,7 @@ def advance(state, dry_run=False):
         return "SPLIT_REVISE", "SPLIT_REVIEW → SPLIT_REVISE"
 
     # --- Linear sequences ---
-    for seq in [PREAMBLE, MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
+    for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if phase in seq[:-1]:
             nxt = seq[seq.index(phase) + 1]
             return nxt, f"{phase} → {nxt}"
@@ -596,6 +588,11 @@ def cmd_init(args):
     opts = parser.parse_args(args)
 
     os.makedirs("tmp", exist_ok=True)
+    # Clean stale artifacts from prior runs.
+    for f in glob.glob("tmp/pipeline-batch-*-ids.txt"):
+        os.remove(f)
+    if os.path.exists(DISPATCH_MARKER):
+        os.remove(DISPATCH_MARKER)
     state = {
         "phase": "INIT",
         "batch": 0,
@@ -825,6 +822,17 @@ def cmd_dispatch_context(args):
         return  # Not in a pipeline run — nothing to inject
     state = _load_state()
     phase = state["phase"]
+    # INIT is a setup marker, not a dispatchable phase
+    if phase not in PHASES:
+        print(f"[PIPELINE STATE RECOVERY] Setup in progress (phase: {phase})")
+        print("Setup is not yet complete. Re-read SKILL.md"
+              " (.claude/skills/rfe.auto-fix/SKILL.md) and resume"
+              " the setup steps from where you left off.")
+        return
+    # DONE is terminal — nothing to dispatch
+    if phase == "DONE":
+        print("[PIPELINE STATE RECOVERY] Pipeline complete (phase: DONE)")
+        return
     config = PHASE_CONFIG.get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
     protocol = DISPATCH_PROTOCOL.get(phase_type, "")
