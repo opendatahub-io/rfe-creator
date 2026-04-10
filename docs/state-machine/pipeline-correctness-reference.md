@@ -1,8 +1,11 @@
-# Unified State Machine
+# Pipeline Correctness Reference
 
-Correctness reference for the RFE Creator pipeline. Every state, transition, and
-invariant documented here must be preserved through refactoring. Code location
-references point to current source; verify against live code before acting.
+Pre-refactoring snapshot of the RFE Creator pipeline's state, transitions, and
+invariants. Produced before the thin-dispatcher state machine refactoring as a
+verification baseline. For the current dispatch architecture, see
+[plan-a-thin-dispatcher.md](../../design-proposals/plan-a-thin-dispatcher.md).
+
+Code location references point to source at time of writing and may have shifted.
 
 ---
 
