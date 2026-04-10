@@ -11,9 +11,11 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from snapshot_fetch import (
+    cmd_fetch,
     compute_content_hash,
     diff_snapshots,
     load_snapshot_from_dir,
+    read_id_file,
     update_snapshot_hashes,
     write_id_file,
 )
@@ -475,3 +477,44 @@ class TestWriteIdFile:
         write_id_file(path, [])
         with open(path) as f:
             assert f.read() == ""
+
+
+class TestReprocess:
+    def test_reprocess_copies_all_ids_to_changed(self, tmp_path):
+        """--reprocess reads prior IDs and writes all as changed."""
+        ids_file = str(tmp_path / "all-ids.txt")
+        changed_file = str(tmp_path / "changed-ids.txt")
+        write_id_file(ids_file, ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"])
+
+        import argparse
+        args = argparse.Namespace(
+            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+        cmd_fetch(args)
+
+        assert read_id_file(changed_file) == [
+            "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
+
+    def test_reprocess_fails_without_prior_ids(self, tmp_path):
+        """--reprocess with no prior IDs file exits with error."""
+        ids_file = str(tmp_path / "missing.txt")
+        changed_file = str(tmp_path / "changed-ids.txt")
+
+        import argparse
+        args = argparse.Namespace(
+            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+        with pytest.raises(SystemExit) as exc_info:
+            cmd_fetch(args)
+        assert exc_info.value.code == 1
+
+    def test_reprocess_preserves_ids_file(self, tmp_path):
+        """--reprocess does not modify the original IDs file."""
+        ids_file = str(tmp_path / "all-ids.txt")
+        changed_file = str(tmp_path / "changed-ids.txt")
+        write_id_file(ids_file, ["RHAIRFE-1", "RHAIRFE-2"])
+
+        import argparse
+        args = argparse.Namespace(
+            reprocess=True, ids_file=ids_file, changed_file=changed_file)
+        cmd_fetch(args)
+
+        assert read_id_file(ids_file) == ["RHAIRFE-1", "RHAIRFE-2"]

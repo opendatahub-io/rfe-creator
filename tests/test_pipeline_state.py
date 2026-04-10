@@ -1345,10 +1345,11 @@ class TestDispatchLoopE2E:
         assert "run-phase" in output
 
     def test_reprocess_flow(self, tmp_dir, monkeypatch):
-        """--reprocess: init preserves prior IDs, pipeline processes all.
+        """Reprocess: init preserves prior IDs, pipeline processes all.
 
-        Simulates the reprocess flow where snapshot fetch and resume
-        check are skipped — all IDs from a prior run are reprocessed.
+        Simulates a reprocess where all prior IDs are fed back through
+        the pipeline (snapshot_fetch --reprocess marks all as changed,
+        so check_resume passes them all through).
         """
         ids = ["RHAIRFE-1001", "RHAIRFE-1002", "RHAIRFE-1003"]
 
