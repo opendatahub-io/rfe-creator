@@ -293,8 +293,10 @@ def update_snapshot_hashes(hashes, snapshot_dir=None, mark_processed=None):
 
 def cmd_fetch(args):
     """Fetch all issues, diff against previous snapshot, write ID files."""
-    # --reprocess: skip Jira, reuse prior IDs, mark all as changed
-    if getattr(args, "reprocess", False):
+    reprocess = getattr(args, "reprocess", False)
+
+    # --reprocess without --jql: skip Jira, reuse prior IDs, all changed
+    if reprocess and not args.jql:
         if not os.path.exists(args.ids_file):
             print("Error: No prior IDs found. Run with --jql or "
                   "explicit IDs first.", file=sys.stderr)
@@ -305,7 +307,6 @@ def cmd_fetch(args):
         print(f"CHANGED={len(all_ids)}")
         print(f"NEW=0")
         print(f"UNCHANGED=0")
-        print(f"REPROCESS=true", file=sys.stderr)
         return
 
     if not args.jql:
@@ -414,13 +415,14 @@ def cmd_fetch(args):
 
     # Write ID files for downstream scripts
     write_id_file(args.ids_file, all_ids)
-    write_id_file(args.changed_file, out_changed)
+    # --reprocess: treat all as changed so check_resume processes everything
+    changed_out = all_ids if reprocess else out_changed
+    write_id_file(args.changed_file, changed_out)
 
-    # Output counts only — IDs are in files
     print(f"TOTAL={len(all_ids)}")
-    print(f"CHANGED={len(out_changed)}")
+    print(f"CHANGED={len(changed_out)}")
     print(f"NEW={len(out_new)}")
-    print(f"UNCHANGED={len(all_ids) - len(out_changed) - len(out_new)}")
+    print(f"UNCHANGED={len(all_ids) - len(changed_out) - len(out_new)}")
 
 
 def main():
