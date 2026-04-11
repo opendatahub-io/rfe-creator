@@ -55,7 +55,6 @@ PHASE_CONFIG = {
         "poll_phase": "fetch",
         "post_verify": "python3 scripts/verify_phase.py --phase fetch"
                        " --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 300,
         "vars": {"KEY": "{ID}"},
     },
     "SETUP": {
@@ -76,7 +75,6 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
                        " --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 600,
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -90,7 +88,6 @@ PHASE_CONFIG = {
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
                        " --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 600,
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
@@ -105,7 +102,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
 
-        "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
     "FIXUP": {
@@ -131,7 +127,6 @@ PHASE_CONFIG = {
         # NO "parallel" — feasibility NOT re-checked (invariant 4.2/5.4)
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
                        " --ids-file tmp/pipeline-reassess-ids.txt",
-        "timeout": 600,
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -145,7 +140,6 @@ PHASE_CONFIG = {
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
                        " --ids-file tmp/pipeline-reassess-ids.txt",
-        "timeout": 600,
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
@@ -165,7 +159,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
 
-        "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
     "REASSESS_FIXUP": {
@@ -181,7 +174,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.split/prompts/split-agent.md",
         "ids_file": "tmp/pipeline-split-ids.txt",
         "poll_phase": "split",
-        "timeout": 600,
         "vars": {
             "ID": "{ID}",
             "TASK_FILE": "artifacts/rfe-tasks/{ID}.md",
@@ -207,7 +199,6 @@ PHASE_CONFIG = {
         ],
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
                        " --ids-file tmp/pipeline-split-children-ids.txt",
-        "timeout": 600,
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -221,7 +212,6 @@ PHASE_CONFIG = {
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
                        " --ids-file tmp/pipeline-split-children-ids.txt",
-        "timeout": 600,
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
@@ -236,7 +226,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
 
-        "timeout": 600,
         "vars": {"ID": "{ID}"},
     },
     "SPLIT_FIXUP": {
@@ -258,7 +247,6 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
                        " --ids-file tmp/pipeline-revise-ids.txt",
-        "timeout": 600,
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -272,7 +260,6 @@ PHASE_CONFIG = {
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
                        " --ids-file tmp/pipeline-revise-ids.txt",
-        "timeout": 600,
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
