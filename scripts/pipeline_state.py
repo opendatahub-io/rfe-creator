@@ -654,6 +654,27 @@ def cmd_run_phase(args):
         f.write(phase)
 
 
+def _check_agent_phase_complete(config):
+    """Return True if all agents for an agent phase are complete."""
+    ids_file = config.get("ids_file")
+    poll_phase = config.get("poll_phase")
+    if not ids_file or not poll_phase:
+        return True
+    ids = _read_ids(ids_file)
+    if not ids:
+        return True
+    from check_review_progress import check_id
+    phases_to_check = [poll_phase]
+    for p in config.get("parallel", []):
+        if p.get("poll_phase"):
+            phases_to_check.append(p["poll_phase"])
+    for phase in phases_to_check:
+        for rfe_id in ids:
+            if check_id(phase, rfe_id) == "pending":
+                return False
+    return True
+
+
 def cmd_advance(args):
     dry_run = "--dry-run" in args
     state = _load_state()
@@ -673,6 +694,21 @@ def cmd_advance(args):
         if marker_phase != phase:
             print(f"advance: dispatch marker is for {marker_phase},"
                   f" not current phase {phase}", file=sys.stderr)
+            sys.exit(1)
+    # Guard: agent phases must have all agents complete before advancing
+    if phase_type == "agent" and not dry_run:
+        if not _check_agent_phase_complete(config):
+            poll_phase = config.get("poll_phase", "")
+            ids_file = config.get("ids_file", "")
+            also = ""
+            for p in config.get("parallel", []):
+                if p.get("poll_phase"):
+                    also += f" --also-phase {p['poll_phase']}"
+            print(f"advance: agent phase {phase} has pending agents."
+                  f" Run: python3 scripts/check_review_progress.py --poll"
+                  f" --phase {poll_phase}{also}"
+                  f" --id-file {ids_file}",
+                  file=sys.stderr)
             sys.exit(1)
     next_phase, summary = advance(state, dry_run=dry_run)
     if not dry_run:
@@ -795,8 +831,12 @@ DISPATCH_PROTOCOL = {
         " run pre_script if set, launch background Agent with prompt:"
         ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
         " If parallel entries exist, launch one additional Agent per entry."
-        " 4. Poll with check_review_progress.py --phase <poll_phase> <IDs>"
-        " until PENDING=0. Sleep NEXT_POLL seconds between polls."
+        " 4. Poll: python3 scripts/check_review_progress.py --poll"
+        " --phase <poll_phase> [--also-phase <p> for each parallel"
+        " entry's poll_phase] [--fast-poll if not headless]"
+        " --id-file <ids_file>"
+        " — exit 0 means complete, exit 3 means pending."
+        " On exit 3, re-run step 4's poll command until exit 0."
         " 5. After all waves: run post_verify if set."
         " 6. Run: python3 scripts/pipeline_state.py advance"
     ),

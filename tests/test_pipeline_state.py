@@ -770,8 +770,12 @@ class TestDispatchMarker:
         assert "FETCH" in buf.getvalue()
 
     def test_advance_skips_marker_for_agent(self, tmp_dir, monkeypatch):
-        """Agent phases don't require a dispatch marker."""
+        """Agent phases don't require a dispatch marker (but do check completion)."""
         ps._save_state(make_state(phase="FETCH"))
+        # All IDs complete — create task files so check_id returns "completed"
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        with open("artifacts/rfe-tasks/RHAIRFE-1001.md", "w") as f:
+            f.write("fetched")
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         import io
         from contextlib import redirect_stdout
@@ -789,6 +793,104 @@ class TestDispatchMarker:
         with redirect_stdout(buf):
             ps.cmd_advance(["--dry-run"])
         assert "REASSESS_CHECK" in buf.getvalue()
+
+
+# ---------- Agent phase guard on advance ----------
+
+
+class TestAgentPhaseGuard:
+    """Verify advance refuses to proceed for agent phases with pending agents."""
+
+    def test_advance_rejects_pending_agents(self, tmp_dir):
+        """advance exits with error when agent phase has pending IDs."""
+        ps._save_state(make_state(phase="FETCH"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        # No task file → pending
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_advance([])
+        assert exc_info.value.code == 1
+
+    def test_advance_accepts_complete_agents(self, tmp_dir, monkeypatch):
+        """advance proceeds when all agent IDs are complete."""
+        ps._save_state(make_state(phase="FETCH"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        with open("artifacts/rfe-tasks/RHAIRFE-1001.md", "w") as f:
+            f.write("fetched")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_advance([])
+        assert "SETUP" in buf.getvalue()
+
+    def test_advance_checks_parallel_phases(self, tmp_dir, monkeypatch):
+        """advance checks parallel poll_phases too (e.g. ASSESS + feasibility)."""
+        ps._save_state(make_state(phase="ASSESS"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        # Assess file exists but feasibility file missing
+        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
+        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+            f.write("assessed")
+        # No feasibility file → pending on parallel phase
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_advance([])
+        assert exc_info.value.code == 1
+
+    def test_advance_parallel_all_complete(self, tmp_dir, monkeypatch):
+        """advance proceeds when both main and parallel phases are complete."""
+        ps._save_state(make_state(phase="ASSESS"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
+        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+            f.write("assessed")
+        with open("artifacts/rfe-reviews/RHAIRFE-1001-feasibility.md", "w") as f:
+            f.write("feasibility done")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_advance([])
+        assert "REVIEW" in buf.getvalue()
+
+    def test_advance_prints_poll_command_on_reject(self, tmp_dir):
+        """Rejection message includes the exact poll command to run."""
+        ps._save_state(make_state(phase="FETCH"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with pytest.raises(SystemExit), redirect_stderr(buf):
+            ps.cmd_advance([])
+        err = buf.getvalue()
+        assert "check_review_progress.py --poll" in err
+        assert "--phase fetch" in err
+        assert "--id-file tmp/pipeline-active-ids.txt" in err
+
+    def test_advance_dry_run_skips_agent_check(self, tmp_dir):
+        """Dry-run bypasses the agent completion check."""
+        ps._save_state(make_state(phase="FETCH"))
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        # No task file → would fail without dry-run
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_advance(["--dry-run"])
+        assert "SETUP" in buf.getvalue()
+
+    def test_advance_empty_ids_file_passes(self, tmp_dir, monkeypatch):
+        """Empty IDs file → no agents to check, advance proceeds."""
+        ps._save_state(make_state(phase="FETCH"))
+        write_ids("tmp/pipeline-active-ids.txt", [])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_advance([])
+        assert "SETUP" in buf.getvalue()
 
 
 # ---------- FIXUP → REASSESS_CHECK ----------
@@ -895,6 +997,33 @@ class TestDispatchLoopE2E:
             buf = io.StringIO()
             with redirect_stdout(buf):
                 ps.cmd_run_phase([])
+
+        # Simulate agent completion for agent phases
+        if phase_type == "agent":
+            ids_file = config.get("ids_file")
+            if ids_file:
+                ids = read_ids(ids_file)
+                poll_phase = config.get("poll_phase")
+                phases_to_sim = [poll_phase]
+                for p in config.get("parallel", []):
+                    if p.get("poll_phase"):
+                        phases_to_sim.append(p["poll_phase"])
+                for pp in phases_to_sim:
+                    for rfe_id in ids:
+                        from check_review_progress import PHASE_CHECKS
+                        path = PHASE_CHECKS[pp](rfe_id)
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        if pp == "review":
+                            with open(path, "w") as f:
+                                f.write("---\nscore: 7\n---\n")
+                        elif pp == "revise":
+                            # Check if file exists (review file); set
+                            # auto_revised
+                            with open(path, "w") as f:
+                                f.write("---\nauto_revised: true\n---\n")
+                        else:
+                            with open(path, "w") as f:
+                                f.write("done")
 
         # Step 3: advance
         buf = io.StringIO()

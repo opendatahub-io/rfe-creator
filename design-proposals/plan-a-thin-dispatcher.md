@@ -41,7 +41,12 @@ Agent phases intentionally expose `pre_script` and `post_verify` commands becaus
 
 ### Invariant 5: Dispatch-before-advance
 
-`advance` refuses to proceed for script phases unless `run-phase` was called first. `run-phase` writes a dispatch marker file (`tmp/.dispatch-marker`) on success; `advance` checks the marker exists and matches the current phase, then deletes it. This prevents the LLM from skipping dispatch and hammering `advance` repeatedly after context compaction — the phase sequence would look correct on disk but no scripts would execute. Noop and agent phases are exempt (noop has no dispatch step; agent dispatch is orchestrator-managed). `advance --dry-run` bypasses the check.
+`advance` refuses to proceed unless dispatch is complete:
+
+- **Script phases**: `run-phase` writes a dispatch marker (`tmp/.dispatch-marker`); `advance` checks the marker exists and matches the current phase. This prevents the LLM from skipping dispatch and hammering `advance` repeatedly after context compaction.
+- **Agent phases**: `advance` calls `check_review_progress.check_id()` for the phase's `poll_phase` (and any parallel `poll_phase` entries) against all IDs in `ids_file`. If any ID is still pending, `advance` refuses and prints the exact `check_review_progress.py --poll` command to run. This catches the case where the LLM skips polling entirely or exits before agents complete — `advance` redirects it back to polling.
+
+Noop phases are exempt. `advance --dry-run` bypasses both checks.
 
 **Manual recovery operations** enabled by the state machine:
 - `pipeline_state.py set-phase <PHASE>` — skip a stuck phase or re-run a failed one
@@ -67,7 +72,7 @@ loop:
     while ids remain:
       wave = take next max_concurrent from ids
       for each id in wave: launch background Agent(...)
-      poll with check_review_progress.py until wave done
+      poll with check_review_progress.py --poll until exit 0
     if config.post_verify:
       run config.post_verify   # writes error frontmatter, removes failed IDs from active set
   elif config.type == "script":
