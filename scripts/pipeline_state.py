@@ -70,7 +70,8 @@ PHASE_CONFIG = {
         "poll_phase": "assess",
         "parallel": [
             {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
-             "poll_phase": "feasibility"},
+             "poll_phase": "feasibility",
+             "vars": {"ID": "{ID}"}},
         ],
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
@@ -195,7 +196,8 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "parallel": [
             {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
-             "poll_phase": "feasibility"},
+             "poll_phase": "feasibility",
+             "vars": {"ID": "{ID}"}},
         ],
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
                        " --ids-file tmp/pipeline-split-children-ids.txt",
@@ -830,7 +832,8 @@ DISPATCH_PROTOCOL = {
         " 3. For each ID: replace {ID} in vars to build KEY=VALUE lines,"
         " run pre_script if set, launch background Agent with prompt:"
         ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
-        " If parallel entries exist, launch one additional Agent per entry."
+        " If parallel entries exist, launch one additional Agent per entry"
+        " using the entry's own vars (not the parent's) with {ID} replaced."
         " 4. Poll: python3 scripts/check_review_progress.py --poll"
         " --phase <poll_phase> [--also-phase <p> for each parallel"
         " entry's poll_phase] [--fast-poll if not headless]"
