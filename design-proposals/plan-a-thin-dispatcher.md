@@ -67,7 +67,7 @@ loop:
     while ids remain:
       wave = take next max_concurrent from ids
       for each id in wave: launch background Agent(...)
-      poll with check_review_progress.py until wave done (or config.timeout)
+      poll with check_review_progress.py until wave done
     if config.post_verify:
       run config.post_verify   # writes error frontmatter, removes failed IDs from active set
   elif config.type == "script":
@@ -78,7 +78,7 @@ loop:
 ```
 
 Three phase types:
-- **`agent`** — fan-out background agents, poll until barrier clears (or timeout). If `post_verify` is set, run post-barrier verification to detect agent failures.
+- **`agent`** — fan-out background agents, poll until barrier clears. If `post_verify` is set, run post-barrier verification to detect agent failures.
 - **`script`** — run a command synchronously (SETUP, FIXUP, ERROR_COLLECT, etc.)
 - **`noop`** — pure decision point, no dispatch. The loop just calls `advance()`, which runs decision scripts internally and sets the next phase. Used by REASSESS_CHECK, BATCH_DONE, COLLECT, SPLIT_CORRECTION_CHECK.
 
@@ -88,9 +88,7 @@ The orchestrator **never reads prompt files** — the agents do. The orchestrato
 
 Agent phases support two additional config fields for failure detection:
 
-- **`timeout`** (seconds): Maximum time to poll before treating remaining PENDING IDs as failures. After timeout, remaining IDs are routed through `post_verify`. This is a new behavior — the current SKILL.md system has no timeout, relying on the operator to manually intervene on stuck agents.
-
-- **`post_verify`** (command): Runs after the barrier clears (or timeout). Checks for expected output files per phase. For each ID where output is missing:
+- **`post_verify`** (command): Runs after the barrier clears. Checks for expected output files per phase. For each ID where output is missing:
   1. Writes error frontmatter to the review file (`error=<phase>_failed`)
   2. Removes the ID from the active IDs file
   3. Prints `FAILED=ID1,ID2` for barrier summary logging
@@ -238,7 +236,6 @@ ids_file: tmp/pipeline-active-ids.txt
 subagent_type: rfe-scorer
 poll_phase: assess
 post_verify: "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt"
-timeout: 600
 vars:
   DATA_FILE: "/tmp/rfe-assess/single/{ID}.md"
   RUN_DIR: "/tmp/rfe-assess/single"
@@ -310,7 +307,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "fetch",
         "post_verify": "python3 scripts/verify_phase.py --phase fetch --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 300,
         "vars": {"KEY": "{ID}"}
     },
     "SETUP": {
@@ -328,7 +324,6 @@ PHASE_CONFIG = {
         ],
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 600,
         "vars": { ... }
     },
     "REVIEW": {
@@ -337,7 +332,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-active-ids.txt",
-        "timeout": 600,
         "vars": {"FIRST_PASS": "true", ...}
     },
     "REVISE": {
@@ -345,7 +339,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
-        "timeout": 600,
         "vars": {"ID": "{ID}"}
     },
     "FIXUP": {
@@ -370,7 +363,6 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         # NO "parallel" — feasibility intentionally NOT re-checked (invariant 4.2/5.4)
         "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-reassess-ids.txt",
-        "timeout": 600,
         "vars": { ... }
     },
     "REASSESS_REVIEW": {
@@ -379,7 +371,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-reassess-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-reassess-ids.txt",
-        "timeout": 600,
         "vars": {
             "FIRST_PASS": "false",  # Critical: prevents before_score/before_scores overwrite
             ...
@@ -395,7 +386,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",  # filtered by advance(REASSESS_RESTORE)
         "poll_phase": "revise",
-        "timeout": 600,
         "vars": {"ID": "{ID}"}
     },
     "REASSESS_FIXUP": {
@@ -411,7 +401,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.split/prompts/split-agent.md",
         "ids_file": "tmp/pipeline-split-ids.txt",
         "poll_phase": "split",
-        "timeout": 600,
         "vars": {"ID": "{ID}", ...}
     },
     "SPLIT_COLLECT": {
@@ -431,7 +420,6 @@ PHASE_CONFIG = {
             {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md", "poll_phase": "feasibility"}
         ],
         "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-split-children-ids.txt",
-        "timeout": 600,
         "vars": { ... }
     },
     "SPLIT_REVIEW": {
@@ -440,7 +428,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-split-children-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-split-children-ids.txt",
-        "timeout": 600,
         "vars": {"FIRST_PASS": "true", ...}
     },
     "SPLIT_REVISE": {
@@ -448,7 +435,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",  # filtered by advance(SPLIT_REVIEW)
         "poll_phase": "revise",
-        "timeout": 600,
         "vars": {"ID": "{ID}"}
     },
     "SPLIT_FIXUP": {
@@ -470,7 +456,6 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         # NO "parallel" — feasibility NOT re-checked for revised children
         "post_verify": "python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-revise-ids.txt",
-        "timeout": 600,
         "vars": { ... }
     },
     "SPLIT_RE_REVIEW": {
@@ -479,7 +464,6 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review --ids-file tmp/pipeline-revise-ids.txt",
-        "timeout": 600,
         "vars": {"FIRST_PASS": "false", ...}
     },
     "SPLIT_RESTORE": {
@@ -857,7 +841,7 @@ Repeat until phase == DONE:
      - For each ID in wave: launch background Agent with:
        "Read <prompt_file> and follow all instructions.
         Substitute: {ID}=<id>, {VAR1}=<val1>, ..."
-     - Write poll file, poll with check_review_progress.py until wave done (or timeout)
+     - Write poll file, poll with check_review_progress.py until wave done
    - If post_verify: run post_verify script
 4. Run: pipeline_state.py advance
 5. Loop
@@ -933,7 +917,7 @@ if phase == "revise":
     return "pending"
 ```
 
-The timeout mechanism (Section 2) serves as a safety net for any other unforeseen polling hangs, but this fix handles the known case directly.
+The `post_verify` mechanism serves as a safety net for any other unforeseen polling hangs, but this fix handles the known case directly.
 
 ## Behavioral Changes vs Current System
 
@@ -943,7 +927,7 @@ Plan A's `REASSESS_CHECK` re-evaluates the reassess set each cycle by calling `c
 
 ### 2. Wave dispatch reduces recoverable work on polling hang
 
-With `max_concurrent=10` and 30 IDs, a hung ID in wave 1 blocks waves 2 and 3. The current system launches all 30 concurrently and gets 29 results. Both systems are equally stuck at the phase barrier (neither can advance until 30/30 complete), but recovery after fixing the hung ID requires reprocessing up to 21 IDs in Plan A (the unstarted waves) vs 1 in the current system. Mitigated by fixing the polling bugs above and adding the `timeout` mechanism.
+With `max_concurrent=10` and 30 IDs, a hung ID in wave 1 blocks waves 2 and 3. The current system launches all 30 concurrently and gets 29 results. Both systems are equally stuck at the phase barrier (neither can advance until 30/30 complete), but recovery after fixing the hung ID requires reprocessing up to 21 IDs in Plan A (the unstarted waves) vs 1 in the current system. Mitigated by fixing the polling bugs above and `post_verify` for detecting agent failures.
 
 ### 3. `auto_revised` flag is set exclusively by `check_revised.py --batch`
 
