@@ -25,6 +25,7 @@ from collections import OrderedDict
 import glob
 import hashlib
 import os
+import random
 import sys
 import urllib.parse
 from datetime import datetime, timezone
@@ -358,14 +359,27 @@ def cmd_fetch(args):
     # changed and new are already ordered lists from diff_snapshots
     changed_set = set(changed)
     new_set = set(new)
-    limit = args.limit or len(current)
 
-    # Select up to limit: changed first, then new, then unchanged
-    all_ids = (changed + new)[:limit]
-    if len(all_ids) < limit:
-        unchanged = [k for k in current
-                     if k not in changed_set and k not in new_set]
-        all_ids.extend(unchanged[:limit - len(all_ids)])
+    random_n = getattr(args, "random", None)
+    if random_n is not None:
+        # Random sampling from all fetched issues (for testing)
+        all_keys = list(current.keys())
+        if random_n >= len(all_keys):
+            print(f"Warning: --random {random_n} >= fetched "
+                  f"{len(all_keys)} issues, using all",
+                  file=sys.stderr)
+            all_ids = sorted(all_keys)
+        else:
+            all_ids = sorted(random.sample(all_keys, random_n))
+    else:
+        limit = args.limit or len(current)
+
+        # Select up to limit: changed first, then new, then unchanged
+        all_ids = (changed + new)[:limit]
+        if len(all_ids) < limit:
+            unchanged = [k for k in current
+                         if k not in changed_set and k not in new_set]
+            all_ids.extend(unchanged[:limit - len(all_ids)])
 
     # Build cumulative snapshot: previous entries + selected issues.
     # Only selected issues get their hashes recorded (or updated).
@@ -447,6 +461,9 @@ def main():
     fetch_p.add_argument("--reprocess", action="store_true",
                          help="Skip Jira fetch, reuse prior IDs, "
                          "mark all as changed")
+    fetch_p.add_argument("--random", type=int, default=None,
+                         help="With --reprocess: randomly sample N IDs "
+                         "from the prior set (for testing)")
 
     args = parser.parse_args()
     if args.command == "fetch":

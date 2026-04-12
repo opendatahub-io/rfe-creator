@@ -623,6 +623,10 @@ def cmd_get_phase_config(args):
     config.pop("command", None)
     if config.get("type") == "script":
         config.pop("ids_file", None)
+    if config.get("type") == "agent":
+        max_concurrent = int(state.get("batch_size", 50))
+        n_parallel = len(config.get("parallel", []))
+        config["wave_size"] = max(1, max_concurrent // (1 + n_parallel))
     print(yaml.dump(config, default_flow_style=False, sort_keys=False),
           end="")
 
@@ -647,6 +651,12 @@ def cmd_run_phase(args):
         ids = _read_ids(config["ids_file"])
         if ids:
             cmd += " " + " ".join(ids)
+        else:
+            print(f"[run-phase] {phase}: no IDs, skipping")
+            # Write dispatch marker and return — nothing to do
+            with open(DISPATCH_MARKER, "w") as f:
+                f.write(phase)
+            return
     print(f"[run-phase] {phase}")
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
@@ -829,7 +839,8 @@ DISPATCH_PROTOCOL = {
         "1. Read IDs from ids_file."
         " 2. Pre-filter: python3 scripts/check_review_progress.py"
         " --phase <poll_phase> <IDs> — remove COMPLETED IDs."
-        " 3. For each ID: replace {ID} in vars to build KEY=VALUE lines,"
+        " 3. Process IDs in waves of wave_size (from config output)."
+        " For each ID: replace {ID} in vars to build KEY=VALUE lines,"
         " run pre_script if set, launch background Agent with prompt:"
         ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
         " If parallel entries exist, launch one additional Agent per entry"
