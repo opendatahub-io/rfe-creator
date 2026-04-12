@@ -717,7 +717,7 @@ def cmd_advance(args):
                 if p.get("poll_phase"):
                     also += f" --also-phase {p['poll_phase']}"
             print(f"advance: agent phase {phase} has pending agents."
-                  f" Run: python3 scripts/check_review_progress.py --poll"
+                  f" Run: python3 scripts/check_review_progress.py --wait"
                   f" --phase {poll_phase}{also}"
                   f" --id-file {ids_file}",
                   file=sys.stderr)
@@ -845,12 +845,12 @@ DISPATCH_PROTOCOL = {
         ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
         " If parallel entries exist, launch one additional Agent per entry"
         " using the entry's own vars (not the parent's) with {ID} replaced."
-        " 4. Poll: python3 scripts/check_review_progress.py --poll"
+        " 4. Wait: python3 scripts/check_review_progress.py --wait"
         " --phase <poll_phase> [--also-phase <p> for each parallel"
         " entry's poll_phase] [--fast-poll if not headless]"
         " --id-file <ids_file>"
         " — exit 0 means complete, exit 3 means pending."
-        " On exit 3, re-run step 4's poll command until exit 0."
+        " On exit 3, re-run step 4's wait command until exit 0."
         " 5. After all waves: run post_verify if set."
         " 6. Run: python3 scripts/pipeline_state.py advance"
     ),
