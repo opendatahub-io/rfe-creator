@@ -124,6 +124,17 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 
 Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all invariants.
 
+## Pipeline Execution Constraint
+
+When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
+
+1. A text-only response (no tool call) during pipeline execution terminates the CI process.
+2. After launching each wave of agents, your next Bash call MUST be
+   `python3 scripts/check_review_progress.py --wait`. This is a blocking
+   synchronization barrier that reads artifact files on disk.
+3. Do not wait for agent-completion notifications — the progress check command
+   is unrelated to the Agent tool's notification system.
+
 ## Architecture Context
 
 `/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.

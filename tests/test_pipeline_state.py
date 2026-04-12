@@ -864,7 +864,7 @@ class TestAgentPhaseGuard:
         with pytest.raises(SystemExit), redirect_stderr(buf):
             ps.cmd_advance([])
         err = buf.getvalue()
-        assert "check_review_progress.py --poll" in err
+        assert "check_review_progress.py --wait" in err
         assert "--phase fetch" in err
         assert "--id-file tmp/pipeline-active-ids.txt" in err
 

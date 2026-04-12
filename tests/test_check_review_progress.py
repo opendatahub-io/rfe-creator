@@ -227,7 +227,7 @@ class TestDetectFast:
         assert _detect_fast(False) is False
 
 
-# ── --poll mode (via main) ──
+# ── --wait mode (via main) ──
 
 
 class TestPollMode:
@@ -260,7 +260,7 @@ class TestPollMode:
             {"fetch": lambda id: str(tmp_path / f"{id}.md")},
         ):
             code, out = self._run_main(
-                ["--poll", "--phase", "fetch",
+                ["--wait", "--phase", "fetch",
                  "RHAIRFE-1", "RHAIRFE-2"])
         assert code == 0
         assert "COMPLETED=2/2" in out
@@ -277,7 +277,7 @@ class TestPollMode:
         ), patch("check_review_progress.time.sleep",
                  side_effect=create_on_sleep) as mock_sleep:
             code, out = self._run_main(
-                ["--poll", "--fast-poll", "--phase", "fetch",
+                ["--wait", "--fast-poll", "--phase", "fetch",
                  "RHAIRFE-1"])
         assert code == 0
         assert "PENDING=1" in out
@@ -296,7 +296,7 @@ class TestPollMode:
         ), patch("check_review_progress.time.sleep",
                  side_effect=create_on_sleep) as mock_sleep:
             code, _ = self._run_main(
-                ["--poll", "--phase", "fetch", "A", "B"])
+                ["--wait", "--phase", "fetch", "A", "B"])
         assert code == 0
         # 1/2 = 50% → 30s interval
         mock_sleep.assert_called_once_with(30)
@@ -314,7 +314,7 @@ class TestPollMode:
             },
         ):
             code, out = self._run_main(
-                ["--poll", "--phase", "fetch",
+                ["--wait", "--phase", "fetch",
                  "--also-phase", "assess", "A", "B"])
         assert code == 0
         assert "fetch:" in out
@@ -338,7 +338,7 @@ class TestPollMode:
         ), patch("check_review_progress.time.sleep",
                  side_effect=create_on_sleep) as mock_sleep:
             code, out = self._run_main(
-                ["--poll", "--fast-poll", "--phase", "fetch",
+                ["--wait", "--fast-poll", "--phase", "fetch",
                  "--also-phase", "assess", "A", "B"])
         assert code == 0
         assert "Sleeping" in out
@@ -361,7 +361,7 @@ class TestPollMode:
         ), patch("check_review_progress.time.sleep",
                  side_effect=create_on_sleep) as mock_sleep:
             code, _ = self._run_main(
-                ["--poll", "--phase", "fetch",
+                ["--wait", "--phase", "fetch",
                  "--also-phase", "assess", "A", "B"])
         assert code == 0
         mock_sleep.assert_called_once_with(60)
@@ -374,7 +374,7 @@ class TestPollMode:
             {"fetch": lambda id: str(tmp_path / f"{id}.md")},
         ):
             code, out = self._run_main(
-                ["--poll", "--phase", "fetch", "A"])
+                ["--wait", "--phase", "fetch", "A"])
         assert code == 0
         assert "All phases complete." not in out
 
@@ -388,7 +388,7 @@ class TestPollMode:
                  side_effect=[0, 0, 0]):
             # monotonic: start=0, before-guard=0, elapsed+60>1 → timeout
             code, out = self._run_main(
-                ["--poll", "--max-wait", "1", "--phase", "fetch",
+                ["--wait", "--max-wait", "1", "--phase", "fetch",
                  "RHAIRFE-1", "RHAIRFE-2"])
         assert code == 3
         assert "RHAIRFE-1" in out
@@ -409,7 +409,7 @@ class TestPollMode:
                  side_effect=[0, 0, 5, 5]):
             # start=0, guard: 0+15<90 → sleep, second iter: complete
             code, out = self._run_main(
-                ["--poll", "--fast-poll", "--max-wait", "90",
+                ["--wait", "--fast-poll", "--max-wait", "90",
                  "--phase", "fetch", "RHAIRFE-1"])
         assert code == 0
         assert "COMPLETED=1/1" in out
@@ -430,7 +430,7 @@ class TestPollMode:
                  side_effect=[0, 0, 100, 100, 200, 200]):
             # Even at elapsed=200, max_wait=0 means no timeout
             code, out = self._run_main(
-                ["--poll", "--max-wait", "0", "--fast-poll",
+                ["--wait", "--max-wait", "0", "--fast-poll",
                  "--phase", "fetch", "A"])
         assert code == 0
         assert call_count[0] == 2
@@ -450,7 +450,7 @@ class TestPollMode:
            patch("check_review_progress.time.monotonic",
                  side_effect=[0, 0, 0]):
             code, out = self._run_main(
-                ["--poll", "--max-wait", "1", "--phase", "fetch",
+                ["--wait", "--max-wait", "1", "--phase", "fetch",
                  "--also-phase", "assess", "A", "B"])
         assert code == 3
         assert "Re-run this command" in out
@@ -465,7 +465,7 @@ class TestPollMode:
                  side_effect=[0, 5]):
             # monotonic: start=0, elapsed=5-0=5, 5+60>1 → timeout
             code, out = self._run_main(
-                ["--poll", "--max-wait", "1", "--phase", "fetch",
+                ["--wait", "--max-wait", "1", "--phase", "fetch",
                  "RHAIRFE-100", "RHAIRFE-200"])
         assert code == 3
         assert "Waited 5s" in out
@@ -485,7 +485,7 @@ class TestPollMode:
            patch("check_review_progress.time.monotonic",
                  side_effect=[0, 0, 0]):
             code, out = self._run_main(
-                ["--poll", "--max-wait", "1", "--phase", "fetch",
+                ["--wait", "--max-wait", "1", "--phase", "fetch",
                  "--also-phase", "assess", "A"])
         assert code == 3
         # "A" pending in both phases but should appear only once
@@ -502,7 +502,7 @@ class TestPollMode:
            patch("check_review_progress.time.monotonic",
                  side_effect=[0, 0, 0]):
             code, out = self._run_main(
-                ["--poll", "--max-wait", "1", "--phase", "fetch"] + ids)
+                ["--wait", "--max-wait", "1", "--phase", "fetch"] + ids)
         assert code == 3
         assert "... and 5 more" in out
         # First 5 sorted IDs should be present
@@ -515,7 +515,7 @@ class TestPollMode:
         from check_review_progress import main
         old_argv = sys.argv
         sys.argv = ["check_review_progress.py",
-                     "--poll", "--max-wait", "-1",
+                     "--wait", "--max-wait", "-1",
                      "--phase", "fetch", "A"]
         old_stderr = sys.stderr
         sys.stderr = io.StringIO()
@@ -540,7 +540,7 @@ class TestPollMode:
             {"fetch": lambda id: str(tmp_path / f"{id}.md")},
         ):
             code, out = self._run_main(
-                ["--poll", "--phase", "fetch",
+                ["--wait", "--phase", "fetch",
                  "--id-file", str(id_file)])
         assert code == 0
         assert "COMPLETED=3/3" in out
@@ -558,14 +558,14 @@ class TestPollMode:
             {"review": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
             code, out = self._run_main(
-                ["--poll", "--phase", "review",
+                ["--wait", "--phase", "review",
                  "RHAIRFE-1", "RHAIRFE-2"])
         assert code == 0
         assert "ERRORS=1" in out
         assert "COMPLETED=1/2" in out
 
 
-# ── Legacy mode (no --poll) ──
+# ── Legacy mode (no --wait) ──
 
 
 class TestLegacyMode:
@@ -605,7 +605,7 @@ class TestLegacyMode:
         assert code == 2
 
     def test_max_wait_ignored_without_poll(self, tmp_path):
-        """--max-wait without --poll runs legacy mode, no timeout behavior."""
+        """--max-wait without --wait runs legacy mode, no timeout behavior."""
         (tmp_path / "A.md").write_text("done")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",

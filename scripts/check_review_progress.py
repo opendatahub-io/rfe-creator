@@ -1,7 +1,7 @@
 """Phase-aware progress checker for agent polling.
 
 Reports completion status for a list of RFE IDs based on the current phase.
-Supports ``--poll`` mode which sleeps internally so the caller does not need
+Supports ``--wait`` mode which sleeps internally so the caller does not need
 to parse ``NEXT_POLL`` values.
 """
 
@@ -122,18 +122,18 @@ def main():
     parser.add_argument("--also-phase", action="append",
                         dest="also_phases",
                         choices=list(PHASE_CHECKS.keys()),
-                        help="Additional phases to check (poll mode)")
+                        help="Additional phases to check (wait mode)")
     parser.add_argument("--id-file",
                         help="File containing IDs (one per line or "
                              "space-separated)")
     parser.add_argument("--fast-poll", action="store_true",
                         help="Cap poll interval at 15s (interactive mode). "
                              "Auto-enabled when config files show headless=false.")
-    parser.add_argument("--poll", action="store_true",
+    parser.add_argument("--wait", action="store_true",
                         help="Block until all agents complete, sleeping "
                              "internally between checks. Exit 0 when done.")
     parser.add_argument("--max-wait", type=int, default=90,
-                        help="Max seconds to wait in --poll mode before timing out (exit 3). "
+                        help="Max seconds to wait in --wait mode before timing out (exit 3). "
                              "Default 90 (fits within 2-min bash timeout).")
     parser.add_argument("ids", nargs="*", metavar="ID",
                         help="RFE IDs to check")
@@ -153,8 +153,8 @@ def main():
     if args.max_wait < 0:
         parser.error("--max-wait must be non-negative")
 
-    if args.poll:
-        # --poll mode: block until all phases show PENDING=0.
+    if args.wait:
+        # --wait mode: block until all phases show PENDING=0.
         # Keeps the LLM inside a bash execution so it can't exit early.
         start = time.monotonic()
         while True:
