@@ -855,7 +855,7 @@ class TestAgentPhaseGuard:
         assert "REVIEW" in buf.getvalue()
 
     def test_advance_prints_poll_command_on_reject(self, tmp_dir):
-        """Rejection message includes the exact poll command to run."""
+        """Rejection message includes the wait-for-wave command."""
         ps._save_state(make_state(phase="FETCH"))
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
         import io
@@ -864,9 +864,7 @@ class TestAgentPhaseGuard:
         with pytest.raises(SystemExit), redirect_stderr(buf):
             ps.cmd_advance([])
         err = buf.getvalue()
-        assert "check_review_progress.py --wait" in err
-        assert "--phase fetch" in err
-        assert "--id-file tmp/pipeline-active-ids.txt" in err
+        assert "wait-for-wave" in err
 
     def test_advance_dry_run_skips_agent_check(self, tmp_dir):
         """Dry-run bypasses the agent completion check."""
@@ -891,6 +889,32 @@ class TestAgentPhaseGuard:
         with redirect_stdout(buf):
             ps.cmd_advance([])
         assert "SETUP" in buf.getvalue()
+
+
+# ---------- set-wave ----------
+
+class TestSetWave:
+    def test_set_wave_writes_ids(self, tmp_dir):
+        """set-wave writes IDs to the wave file."""
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_set_wave(["RHAIRFE-10", "RHAIRFE-20", "RHAIRFE-30"])
+        assert "3 IDs" in buf.getvalue()
+        assert read_ids("tmp/pipeline-wave-ids.txt") == [
+            "RHAIRFE-10", "RHAIRFE-20", "RHAIRFE-30"]
+
+    def test_set_wave_overwrites_previous(self, tmp_dir):
+        """Successive set-wave calls replace the file."""
+        ps.cmd_set_wave(["A", "B", "C"])
+        ps.cmd_set_wave(["X", "Y"])
+        assert read_ids("tmp/pipeline-wave-ids.txt") == ["X", "Y"]
+
+    def test_set_wave_no_args_exits(self, tmp_dir):
+        """set-wave with no IDs exits with error."""
+        with pytest.raises(SystemExit):
+            ps.cmd_set_wave([])
 
 
 # ---------- FIXUP → REASSESS_CHECK ----------
@@ -1531,3 +1555,500 @@ class TestDispatchLoopE2E:
             "FIXUP", "REASSESS_CHECK", "COLLECT", "BATCH_DONE", "REPORT",
         ]
         assert phases == expected
+
+
+# ---------- next-action ----------
+
+
+def _run_next_action():
+    """Run cmd_next_action and return parsed YAML output."""
+    import io
+    from contextlib import redirect_stdout
+    import yaml as _yaml
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        ps.cmd_next_action([])
+    return _yaml.safe_load(buf.getvalue())
+
+
+class TestNextActionDone:
+    def test_done_phase(self, tmp_dir):
+        """DONE phase returns action=done."""
+        ps._save_state(make_state(phase="DONE"))
+        result = _run_next_action()
+        assert result["action"] == "done"
+        assert "complete" in result["message"].lower()
+
+    def test_init_phase_errors(self, tmp_dir):
+        """INIT phase is not dispatchable — next-action exits with error."""
+        ps._save_state(make_state(phase="INIT"))
+        with pytest.raises(SystemExit) as exc_info:
+            _run_next_action()
+        assert exc_info.value.code == 1
+
+
+class TestNextActionNoop:
+    def test_noop_chains_to_agent(self, tmp_dir, monkeypatch):
+        """BATCH_START (noop) auto-advances to FETCH (agent)."""
+        write_ids("tmp/pipeline-batch-1-ids.txt", ["RHAIRFE-1001"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="BATCH_START"))
+
+        # FETCH needs task file to not exist (pending)
+        result = _run_next_action()
+        assert result["action"] == "launch_wave"
+        assert result["phase"] == "FETCH"
+        # State should now be FETCH
+        state = ps._load_state()
+        assert state["phase"] == "FETCH"
+
+    def test_noop_chain_with_side_effects(self, tmp_dir, monkeypatch):
+        """REASSESS_CHECK → COLLECT chains through noops with side-effect scripts."""
+        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+        write_ids("tmp/pipeline-all-ids.txt", ["A"])
+
+        def mock_run_script(cmd):
+            if "collect_recommendations.py --reassess" in cmd:
+                return "REASSESS=\nDONE=A"
+            if "collect_recommendations.py --errors" in cmd:
+                return "ERRORS="
+            if "collect_recommendations.py" in cmd:
+                return "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
+            if "batch_summary.py" in cmd:
+                return "submit=1"
+            return ""
+        monkeypatch.setattr(ps, "_run_script", mock_run_script)
+
+        # REASSESS_CHECK (noop) → COLLECT (noop) → BATCH_DONE (noop) → REPORT (script)
+        # batch=1 matches total_batches=1, so BATCH_DONE exits to REPORT
+        ps._save_state(make_state(phase="REASSESS_CHECK", batch=1))
+        result = _run_next_action()
+        assert result["action"] == "run_script"
+        assert result["phase"] == "REPORT"
+
+    def test_multi_batch_noop_chain(self, tmp_dir, monkeypatch):
+        """BATCH_DONE → BATCH_START → FETCH chains across batch boundary."""
+        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+        write_ids("tmp/pipeline-batch-2-ids.txt", ["B"])
+
+        def mock_run_script(cmd):
+            if "batch_summary.py" in cmd:
+                return "submit=1"
+            if "collect_recommendations.py --errors" in cmd:
+                return "ERRORS="
+            return ""
+        monkeypatch.setattr(ps, "_run_script", mock_run_script)
+
+        ps._save_state(make_state(phase="BATCH_DONE", batch=1, total_batches=2))
+        result = _run_next_action()
+        assert result["action"] == "launch_wave"
+        assert result["phase"] == "FETCH"
+        # State batch counter incremented
+        state = ps._load_state()
+        assert state["batch"] == 2
+
+    def test_state_saved_per_iteration(self, tmp_dir, monkeypatch):
+        """State is saved after each noop advance — verified by checking
+        that a crash mid-chain leaves correct phase on disk."""
+        write_ids("tmp/pipeline-batch-1-ids.txt", ["A"])
+        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+
+        advance_calls = {"count": 0}
+        original_advance = ps.advance
+
+        def counting_advance(state, dry_run=False):
+            advance_calls["count"] += 1
+            return original_advance(state, dry_run=dry_run)
+
+        monkeypatch.setattr(ps, "advance", counting_advance)
+        ps._save_state(make_state(phase="BATCH_START"))
+        _run_next_action()
+        # BATCH_START → FETCH: one advance call for noop, then stops at agent
+        assert advance_calls["count"] == 1
+        # State on disk should be FETCH (saved after noop advance)
+        state = ps._load_state()
+        assert state["phase"] == "FETCH"
+
+
+class TestNextActionScript:
+    def test_script_no_marker(self, tmp_dir):
+        """Script phase without marker returns run_script."""
+        ps._save_state(make_state(phase="FIXUP"))
+        write_ids("tmp/pipeline-revise-ids.txt", ["A"])
+        result = _run_next_action()
+        assert result["action"] == "run_script"
+        assert result["phase"] == "FIXUP"
+
+    def test_script_with_correct_marker(self, tmp_dir, monkeypatch):
+        """Script phase with matching marker auto-advances past it."""
+        ps._save_state(make_state(phase="FIXUP", batch=1))
+        write_ids("tmp/pipeline-revise-ids.txt", ["A"])
+        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+        write_ids("tmp/pipeline-all-ids.txt", ["A"])
+        with open(ps.DISPATCH_MARKER, "w") as f:
+            f.write("FIXUP")
+
+        def mock_run_script(cmd):
+            if "collect_recommendations.py --reassess" in cmd:
+                return "REASSESS=\nDONE=A"
+            if "collect_recommendations.py --errors" in cmd:
+                return "ERRORS="
+            if "collect_recommendations.py" in cmd:
+                return "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
+            if "batch_summary.py" in cmd:
+                return "submit=1"
+            return ""
+        monkeypatch.setattr(ps, "_run_script", mock_run_script)
+
+        result = _run_next_action()
+        # Should have advanced past FIXUP through noops to REPORT (script)
+        assert result["action"] == "run_script"
+        assert result["phase"] == "REPORT"
+        # Marker consumed
+        assert not os.path.exists(ps.DISPATCH_MARKER)
+
+    def test_script_with_stale_marker(self, tmp_dir):
+        """Stale marker (wrong phase) is removed and run_script returned."""
+        ps._save_state(make_state(phase="FIXUP"))
+        write_ids("tmp/pipeline-revise-ids.txt", ["A"])
+        with open(ps.DISPATCH_MARKER, "w") as f:
+            f.write("SETUP")  # stale marker from different phase
+        result = _run_next_action()
+        assert result["action"] == "run_script"
+        assert result["phase"] == "FIXUP"
+        # Stale marker removed
+        assert not os.path.exists(ps.DISPATCH_MARKER)
+
+
+class TestNextActionAgent:
+    def test_agent_wave_output(self, tmp_dir):
+        """ASSESS returns launch_wave with correct agents."""
+        write_ids("tmp/pipeline-active-ids.txt",
+                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        # Need prep_assess.py to succeed
+        import io
+        from contextlib import redirect_stdout
+
+        # Mock _run_script for pre_script
+        original_run_script = ps._run_script
+
+        def mock_run_script(cmd):
+            if "prep_assess.py" in cmd:
+                return ""
+            return original_run_script(cmd)
+
+        import types
+        ps._run_script = mock_run_script
+        try:
+            result = _run_next_action()
+        finally:
+            ps._run_script = original_run_script
+
+        assert result["action"] == "launch_wave"
+        assert result["phase"] == "ASSESS"
+        assert "wave 1" in result["message"]
+        # 2 IDs × (main + parallel) = 4 agents
+        assert len(result["agents"]) == 4
+        # First agent: main assess
+        assert result["agents"][0]["subagent_type"] == "rfe-scorer"
+        assert "assess-agent.md" in result["agents"][0]["prompt_file"]
+        assert "RHAIRFE-1001" in result["agents"][0]["vars"]
+        # Second agent: parallel feasibility
+        assert "feasibility" in result["agents"][1]["prompt_file"].lower()
+        assert "RHAIRFE-1001" in result["agents"][1]["vars"]
+
+    def test_multi_phase_prefilter(self, tmp_dir):
+        """Pre-filter checks both assess and feasibility phases."""
+        write_ids("tmp/pipeline-active-ids.txt",
+                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        # RHAIRFE-1001: assess complete, feasibility missing → still pending
+        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
+        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+            f.write("assessed")
+        # RHAIRFE-1002: both missing → pending
+
+        original_run_script = ps._run_script
+
+        def mock_run_script(cmd):
+            if "prep_assess.py" in cmd:
+                return ""
+            return original_run_script(cmd)
+
+        ps._run_script = mock_run_script
+        try:
+            result = _run_next_action()
+        finally:
+            ps._run_script = original_run_script
+
+        assert result["action"] == "launch_wave"
+        # Both IDs should be in the wave (1001 has assess but not feasibility)
+        wave_ids = read_ids(ps.WAVE_IDS_FILE)
+        assert "RHAIRFE-1001" in wave_ids
+        assert "RHAIRFE-1002" in wave_ids
+
+    def test_all_complete_auto_advances(self, tmp_dir, monkeypatch):
+        """All IDs complete → runs post_verify, auto-advances."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="FETCH", batch=1))
+
+        # Create task file so FETCH phase is complete
+        with open("artifacts/rfe-tasks/RHAIRFE-1001.md", "w") as f:
+            f.write("fetched")
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        result = _run_next_action()
+        # Should have advanced past FETCH to SETUP (script)
+        assert result["action"] == "run_script"
+        assert result["phase"] == "SETUP"
+
+    def test_post_verify_runs(self, tmp_dir, monkeypatch):
+        """post_verify runs when all agents complete before auto-advancing."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="FETCH", batch=1))
+
+        # Create task file so FETCH phase is complete
+        with open("artifacts/rfe-tasks/RHAIRFE-1001.md", "w") as f:
+            f.write("fetched")
+
+        verify_calls = []
+
+        def mock_run_script(cmd):
+            if "verify_phase.py" in cmd:
+                verify_calls.append(cmd)
+            return ""
+
+        monkeypatch.setattr(ps, "_run_script", mock_run_script)
+
+        _run_next_action()
+        # FETCH has post_verify — should have been called
+        assert any("verify_phase.py" in c for c in verify_calls)
+
+    def test_vars_block_scalar(self, tmp_dir, monkeypatch):
+        """vars field uses YAML block scalar (|) for multi-line strings."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_next_action([])
+        raw_output = buf.getvalue()
+        # vars should use block scalar — contains | indicator
+        assert "vars: |" in raw_output or "vars: |\n" in raw_output
+
+
+class TestNextActionWaveSize:
+    def test_wave_size_respects_batch_size(self, tmp_dir, monkeypatch):
+        """Wave size is batch_size / (1 + n_parallel)."""
+        # 6 IDs, batch_size=4, ASSESS has 1 parallel → wave_size=2
+        ids = [f"RHAIRFE-{i}" for i in range(1, 7)]
+        write_ids("tmp/pipeline-active-ids.txt", ids)
+        ps._save_state(make_state(phase="ASSESS", batch=1, batch_size=4))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        result = _run_next_action()
+        assert result["action"] == "launch_wave"
+        wave_ids = read_ids(ps.WAVE_IDS_FILE)
+        # wave_size = max(1, 4 // 2) = 2
+        assert len(wave_ids) == 2
+
+
+# ---------- wait-for-wave ----------
+
+
+class TestWaitForWave:
+    def test_missing_wave_file_errors(self, tmp_dir):
+        """wait-for-wave with no wave file exits with error."""
+        ps._save_state(make_state(phase="ASSESS"))
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_wait_for_wave([])
+        assert exc_info.value.code == 1
+
+    def test_empty_wave_file_returns(self, tmp_dir):
+        """Empty wave file = nothing to wait for, returns successfully."""
+        ps._save_state(make_state(phase="ASSESS"))
+        write_ids(ps.WAVE_IDS_FILE, [])
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            ps.cmd_wait_for_wave([])
+        # Should not exit with error (returns normally)
+
+    def test_builds_correct_flags(self, tmp_dir, monkeypatch):
+        """wait-for-wave builds correct check_review_progress.py flags."""
+        ps._save_state(make_state(phase="ASSESS", headless=True))
+        write_ids(ps.WAVE_IDS_FILE, ["RHAIRFE-1001"])
+
+        captured_cmd = {}
+
+        def mock_subprocess_run(cmd_parts, **kw):
+            captured_cmd["parts"] = cmd_parts
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        ps.cmd_wait_for_wave([])
+
+        parts = captured_cmd["parts"]
+        assert "--phase" in parts
+        idx = parts.index("--phase")
+        assert parts[idx + 1] == "assess"
+        assert "--also-phase" in parts
+        also_idx = parts.index("--also-phase")
+        assert parts[also_idx + 1] == "feasibility"
+        assert "--max-wait" in parts
+        assert "--fast-poll" not in parts  # headless=True
+
+    def test_fast_poll_when_not_headless(self, tmp_dir, monkeypatch):
+        """--fast-poll included when headless=false."""
+        ps._save_state(make_state(phase="ASSESS", headless=False))
+        write_ids(ps.WAVE_IDS_FILE, ["RHAIRFE-1001"])
+
+        captured_cmd = {}
+
+        def mock_subprocess_run(cmd_parts, **kw):
+            captured_cmd["parts"] = cmd_parts
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        ps.cmd_wait_for_wave([])
+
+        assert "--fast-poll" in captured_cmd["parts"]
+
+    def test_exit_3_prints_rerun(self, tmp_dir, monkeypatch):
+        """Exit 3 from check_review_progress prints re-run directive."""
+        ps._save_state(make_state(phase="ASSESS"))
+        write_ids(ps.WAVE_IDS_FILE, ["RHAIRFE-1001"])
+
+        def mock_subprocess_run(cmd_parts, **kw):
+            return type("R", (), {"returncode": 3})()
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with pytest.raises(SystemExit) as exc_info:
+            with redirect_stdout(buf):
+                ps.cmd_wait_for_wave([])
+        assert exc_info.value.code == 3
+        assert "Re-run:" in buf.getvalue()
+        assert "wait-for-wave" in buf.getvalue()
+
+    def test_no_poll_phase_errors(self, tmp_dir):
+        """wait-for-wave on a phase with no poll_phase exits with error."""
+        ps._save_state(make_state(phase="BATCH_START"))
+        write_ids(ps.WAVE_IDS_FILE, ["RHAIRFE-1001"])
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_wait_for_wave([])
+        assert exc_info.value.code == 1
+
+    def test_review_phase_no_parallel(self, tmp_dir, monkeypatch):
+        """REVIEW phase: no --also-phase flag (no parallel)."""
+        ps._save_state(make_state(phase="REVIEW"))
+        write_ids(ps.WAVE_IDS_FILE, ["RHAIRFE-1001"])
+
+        captured_cmd = {}
+
+        def mock_subprocess_run(cmd_parts, **kw):
+            captured_cmd["parts"] = cmd_parts
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        ps.cmd_wait_for_wave([])
+
+        parts = captured_cmd["parts"]
+        assert "--phase" in parts
+        idx = parts.index("--phase")
+        assert parts[idx + 1] == "review"
+        assert "--also-phase" not in parts
+
+
+# ---------- dispatch-context with next-action loop ----------
+
+
+class TestDispatchContextNextAction:
+    def test_active_phase_shows_loop(self, tmp_dir):
+        """dispatch-context for active phase shows next-action loop."""
+        ps._save_state(make_state(phase="ASSESS"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "next-action" in output
+        assert "wait-for-wave" in output
+        assert "run-phase" in output
+        assert "launch_wave" in output
+
+    def test_shows_batch_info(self, tmp_dir):
+        """dispatch-context shows batch progress."""
+        ps._save_state(make_state(phase="REVIEW", batch=2, total_batches=3))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "2/3" in output
+
+    def test_init_unchanged(self, tmp_dir):
+        """INIT phase still shows setup message, not dispatch loop."""
+        ps._save_state(make_state(phase="INIT"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "Setup in progress" in output
+        assert "next-action" not in output
+
+    def test_done_unchanged(self, tmp_dir):
+        """DONE phase still shows pipeline complete."""
+        ps._save_state(make_state(phase="DONE"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_dispatch_context([])
+        output = buf.getvalue()
+        assert "Pipeline complete" in output
+        assert "next-action" not in output
+
+
+# ---------- get-phase-config hygiene ----------
+
+
+class TestGetPhaseConfigHygiene:
+    def test_strips_pre_script(self, tmp_dir):
+        """get-phase-config strips pre_script from output."""
+        ps._save_state(make_state(phase="ASSESS"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_get_phase_config([])
+        output = buf.getvalue()
+        assert "pre_script" not in output
+
+    def test_strips_post_verify(self, tmp_dir):
+        """get-phase-config strips post_verify from output."""
+        ps._save_state(make_state(phase="ASSESS"))
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.cmd_get_phase_config([])
+        output = buf.getvalue()
+        assert "post_verify" not in output
