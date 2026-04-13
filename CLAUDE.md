@@ -130,9 +130,10 @@ When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 
 1. A text-only response (no tool call) during pipeline execution terminates the CI process.
 2. After launching each wave of agents, your next Bash call MUST be
-   `python3 scripts/check_review_progress.py --wait`. This is a blocking
-   synchronization barrier that reads artifact files on disk.
-3. Do not wait for agent-completion notifications — the progress check command
+   `python3 scripts/pipeline_state.py wait-for-wave`. This is a blocking
+   synchronization barrier that reads artifact files on disk. On exit 3,
+   re-run the same command.
+3. Do not wait for agent-completion notifications — the wait-for-wave command
    is unrelated to the Agent tool's notification system.
 
 ## Architecture Context

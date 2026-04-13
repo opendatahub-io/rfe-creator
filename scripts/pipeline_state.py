@@ -10,6 +10,7 @@ Usage:
     python3 scripts/pipeline_state.py get-phase-config
     python3 scripts/pipeline_state.py run-phase
     python3 scripts/pipeline_state.py advance [--dry-run]
+    python3 scripts/pipeline_state.py set-wave <IDs>
     python3 scripts/pipeline_state.py set key=value ...
     python3 scripts/pipeline_state.py get <key>
     python3 scripts/pipeline_state.py status
@@ -27,7 +28,27 @@ from datetime import datetime, timezone
 import yaml
 
 STATE_FILE = "tmp/pipeline-state.yaml"
+WAVE_IDS_FILE = "tmp/pipeline-wave-ids.txt"
 DISPATCH_MARKER = "tmp/.dispatch-marker"
+
+MAX_NEXT_ACTION_ITERATIONS = 50
+
+
+# ---------- YAML block-scalar dumper (scoped) ----------
+
+def _str_representer(dumper, data):
+    if '\n' in data:
+        return dumper.represent_scalar(
+            'tag:yaml.org,2002:str', data, style='|')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+
+class _BlockDumper(yaml.Dumper):
+    """Dumper that uses | for multi-line strings. Scoped to next-action."""
+    pass
+
+
+_BlockDumper.add_representer(str, _str_representer)
 
 # ---------- Phase enum ----------
 
@@ -621,6 +642,8 @@ def cmd_get_phase_config(args):
     config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
     config["phase"] = phase
     config.pop("command", None)
+    config.pop("pre_script", None)
+    config.pop("post_verify", None)
     if config.get("type") == "script":
         config.pop("ids_file", None)
     if config.get("type") == "agent":
@@ -666,6 +689,240 @@ def cmd_run_phase(args):
         f.write(phase)
 
 
+def cmd_set_wave(args):
+    """Write the current wave's IDs to the wave file.
+
+    Called before launching agents for a wave so the wait command
+    can use --id-file without the caller passing IDs.
+    """
+    if not args:
+        print("Usage: set-wave ID1 ID2 ...", file=sys.stderr)
+        sys.exit(1)
+    _write_ids(WAVE_IDS_FILE, args)
+    print(f"Wave: {len(args)} IDs")
+
+
+def cmd_next_action(args):
+    """Compute and return the next action for the dispatch loop.
+
+    Chains through noop phases and completed script phases internally,
+    returning only when the LLM needs to act: launch_wave, run_script,
+    or done.
+    """
+    from check_review_progress import check_id
+
+    state = _load_state()
+    phase = state["phase"]
+
+    if phase == "DONE":
+        print(yaml.dump({"action": "done", "message": "Pipeline complete"},
+                        default_flow_style=False, sort_keys=False), end="")
+        return
+
+    if phase not in PHASES:
+        print(f"next-action: phase '{phase}' is not dispatchable."
+              " Run init and set-phase BATCH_START first.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    for _ in range(MAX_NEXT_ACTION_ITERATIONS):
+        phase = state["phase"]
+        config = PHASE_CONFIG.get(phase, {"type": "noop"})
+        phase_type = config.get("type", "noop")
+
+        # --- DONE ---
+        if phase == "DONE":
+            print(yaml.dump(
+                {"action": "done", "message": "Pipeline complete"},
+                default_flow_style=False, sort_keys=False), end="")
+            return
+
+        # --- Noop: advance and loop ---
+        if phase_type == "noop":
+            next_phase, summary = advance(state)
+            state["phase"] = next_phase
+            _save_state(state)
+            print(summary, file=sys.stderr)
+            continue
+
+        # --- Script: check dispatch marker ---
+        if phase_type == "script":
+            if os.path.exists(DISPATCH_MARKER):
+                with open(DISPATCH_MARKER) as f:
+                    marker_phase = f.read().strip()
+                if marker_phase == phase:
+                    # Script already ran — advance past it
+                    os.remove(DISPATCH_MARKER)
+                    next_phase, summary = advance(state)
+                    state["phase"] = next_phase
+                    _save_state(state)
+                    print(summary, file=sys.stderr)
+                    continue
+                else:
+                    # Stale marker from a different phase — remove it
+                    os.remove(DISPATCH_MARKER)
+            # No marker (or stale removed) — tell LLM to run the script
+            print(yaml.dump(
+                {"action": "run_script", "phase": phase,
+                 "message": f"{phase}: run-phase"},
+                default_flow_style=False, sort_keys=False), end="")
+            return
+
+        # --- Agent: compute next wave ---
+        if phase_type == "agent":
+            ids_file = config.get("ids_file", "")
+            all_ids = _read_ids(ids_file)
+            poll_phase = config.get("poll_phase", "")
+
+            # Build list of all phases to check (main + parallel)
+            phases_to_check = [poll_phase] if poll_phase else []
+            for p in config.get("parallel", []):
+                if p.get("poll_phase"):
+                    phases_to_check.append(p["poll_phase"])
+
+            # Pre-filter: keep only IDs where ANY phase is still pending
+            remaining = []
+            for rfe_id in all_ids:
+                for pphase in phases_to_check:
+                    if check_id(pphase, rfe_id) == "pending":
+                        remaining.append(rfe_id)
+                        break
+
+            if not remaining:
+                # All done — run post_verify if set, then advance
+                if config.get("post_verify"):
+                    _run_script(config["post_verify"])
+                next_phase, summary = advance(state)
+                state["phase"] = next_phase
+                _save_state(state)
+                print(summary, file=sys.stderr)
+                continue
+
+            # Compute wave size
+            max_concurrent = int(state.get("batch_size", 50))
+            n_parallel = len(config.get("parallel", []))
+            wave_size = max(1, max_concurrent // (1 + n_parallel))
+
+            wave_ids = remaining[:wave_size]
+            wave_num = 1 + (len(all_ids) - len(remaining)) // wave_size
+            total_waves = max(1, -(-len(all_ids) // wave_size))  # ceil div
+
+            # Run pre_script for each ID in the wave
+            if config.get("pre_script"):
+                for rfe_id in wave_ids:
+                    cmd = config["pre_script"].replace("{ID}", rfe_id)
+                    _run_script(cmd)
+
+            # Write wave IDs
+            _write_ids(WAVE_IDS_FILE, wave_ids)
+
+            # Build agent entries
+            agents = []
+            for rfe_id in wave_ids:
+                # Main agent
+                entry = {}
+                if config.get("subagent_type"):
+                    entry["subagent_type"] = config["subagent_type"]
+                entry["prompt_file"] = config["prompt"]
+                # Build vars string
+                var_lines = []
+                for k, v in config.get("vars", {}).items():
+                    var_lines.append(
+                        f"{k}={v.replace('{ID}', rfe_id)}")
+                entry["vars"] = "\n".join(var_lines) + "\n"
+                agents.append(entry)
+
+                # Parallel agents
+                for par in config.get("parallel", []):
+                    pentry = {}
+                    if par.get("subagent_type"):
+                        pentry["subagent_type"] = par["subagent_type"]
+                    pentry["prompt_file"] = par["prompt"]
+                    pvar_lines = []
+                    for k, v in par.get("vars", {}).items():
+                        pvar_lines.append(
+                            f"{k}={v.replace('{ID}', rfe_id)}")
+                    pentry["vars"] = "\n".join(pvar_lines) + "\n"
+                    agents.append(pentry)
+
+            msg = (f"{phase}: wave {wave_num}/{total_waves}"
+                   f" ({len(wave_ids)} IDs)")
+            output = {
+                "action": "launch_wave",
+                "phase": phase,
+                "message": msg,
+                "agents": agents,
+            }
+            print(yaml.dump(output, Dumper=_BlockDumper,
+                            default_flow_style=False, sort_keys=False),
+                  end="")
+            return
+
+    # Safety: should never reach here
+    print(f"next-action: exceeded {MAX_NEXT_ACTION_ITERATIONS} iterations"
+          f" at phase {state['phase']}", file=sys.stderr)
+    sys.exit(1)
+
+
+def cmd_wait_for_wave(args):
+    """Block until all agents in the current wave complete.
+
+    Zero-argument command. Reads phase and wave IDs from state files,
+    builds the correct check_review_progress.py flags internally,
+    and delegates. Exits 0 (done) or 3 (pending).
+    """
+    if not os.path.exists(WAVE_IDS_FILE):
+        print("wait-for-wave: no wave file found"
+              f" ({WAVE_IDS_FILE}). Run next-action first.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    wave_ids = _read_ids(WAVE_IDS_FILE)
+    if not wave_ids:
+        print("wait-for-wave: wave file is empty."
+              " All agents may already be complete.",
+              file=sys.stderr)
+        # Empty wave = nothing to wait for
+        return
+
+    state = _load_state()
+    phase = state["phase"]
+    config = PHASE_CONFIG.get(phase, {"type": "noop"})
+
+    poll_phase = config.get("poll_phase")
+    if not poll_phase:
+        print(f"wait-for-wave: phase {phase} has no poll_phase",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # Build check_review_progress.py command
+    cmd_parts = [
+        sys.executable,
+        os.path.join(os.path.dirname(__file__),
+                     "check_review_progress.py"),
+        "--wait",
+        "--max-wait", "90",
+        "--phase", poll_phase,
+    ]
+    for p in config.get("parallel", []):
+        if p.get("poll_phase"):
+            cmd_parts.extend(["--also-phase", p["poll_phase"]])
+    if not state.get("headless", True):
+        cmd_parts.append("--fast-poll")
+    cmd_parts.extend(["--id-file", WAVE_IDS_FILE])
+
+    result = subprocess.run(cmd_parts)
+    if result.returncode == 0:
+        return
+    if result.returncode == 3:
+        print("Re-run: python3 scripts/pipeline_state.py wait-for-wave")
+        sys.exit(3)
+    # Unexpected exit code
+    print(f"wait-for-wave: check_review_progress.py exited with"
+          f" code {result.returncode}", file=sys.stderr)
+    sys.exit(result.returncode)
+
+
 def _check_agent_phase_complete(config):
     """Return True if all agents for an agent phase are complete."""
     ids_file = config.get("ids_file")
@@ -697,7 +954,7 @@ def cmd_advance(args):
     if phase_type == "script" and not dry_run:
         if not os.path.exists(DISPATCH_MARKER):
             print(f"advance: script phase {phase} was not dispatched."
-                  " Run: python3 scripts/pipeline_state.py run-phase",
+                  " Run: python3 scripts/pipeline_state.py next-action",
                   file=sys.stderr)
             sys.exit(1)
         with open(DISPATCH_MARKER) as f:
@@ -717,9 +974,8 @@ def cmd_advance(args):
                 if p.get("poll_phase"):
                     also += f" --also-phase {p['poll_phase']}"
             print(f"advance: agent phase {phase} has pending agents."
-                  f" Run: python3 scripts/check_review_progress.py --wait"
-                  f" --phase {poll_phase}{also}"
-                  f" --id-file {ids_file}",
+                  f" Run: python3 scripts/pipeline_state.py"
+                  f" wait-for-wave",
                   file=sys.stderr)
             sys.exit(1)
     next_phase, summary = advance(state, dry_run=dry_run)
@@ -829,32 +1085,14 @@ def cmd_diagnose(args):
             print(f"  Error IDs: {', '.join(error_ids)}")
 
 
-DISPATCH_PROTOCOL = {
-    "noop": "No action needed. Run: python3 scripts/pipeline_state.py advance",
-    "script": (
-        "Run: python3 scripts/pipeline_state.py run-phase"
-        " Then run: python3 scripts/pipeline_state.py advance"
-    ),
-    "agent": (
-        "1. Read IDs from ids_file."
-        " 2. Pre-filter: python3 scripts/check_review_progress.py"
-        " --phase <poll_phase> <IDs> — remove COMPLETED IDs."
-        " 3. Process IDs in waves of wave_size (from config output)."
-        " For each ID: replace {ID} in vars to build KEY=VALUE lines,"
-        " run pre_script if set, launch background Agent with prompt:"
-        ' "<vars>\\n\\nRead <prompt> and follow all instructions exactly."'
-        " If parallel entries exist, launch one additional Agent per entry"
-        " using the entry's own vars (not the parent's) with {ID} replaced."
-        " 4. Wait: python3 scripts/check_review_progress.py --wait"
-        " --phase <poll_phase> [--also-phase <p> for each parallel"
-        " entry's poll_phase] [--fast-poll if not headless]"
-        " --id-file <ids_file>"
-        " — exit 0 means complete, exit 3 means pending."
-        " On exit 3, re-run step 4's wait command until exit 0."
-        " 5. After all waves: run post_verify if set."
-        " 6. Run: python3 scripts/pipeline_state.py advance"
-    ),
-}
+DISPATCH_LOOP = """\
+Resume the dispatch loop:
+  1. python3 scripts/pipeline_state.py next-action
+  2. If action == done: exit loop, run teardown
+  3. If action == run_script: python3 scripts/pipeline_state.py run-phase, then go to 1
+  4. If action == launch_wave:
+     a. For each agent in agents: launch background Agent(prompt=vars + "\\n\\nRead " + prompt_file + " and follow all instructions exactly.", subagent_type if present)
+     b. python3 scripts/pipeline_state.py wait-for-wave (re-run on exit 3), then go to 1"""
 
 
 def cmd_dispatch_context(args):
@@ -876,16 +1114,11 @@ def cmd_dispatch_context(args):
         return
     config = PHASE_CONFIG.get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
-    protocol = DISPATCH_PROTOCOL.get(phase_type, "")
-    print(f"[PIPELINE STATE RECOVERY] Current phase: {phase} (type: {phase_type})")
+    print(f"[PIPELINE STATE RECOVERY] Current phase: {phase}"
+          f" (type: {phase_type})")
     print(f"Batch: {state.get('batch', 0)}/{state.get('total_batches', 0)}")
-    if config.get("ids_file") and phase_type != "script":
-        print(f"IDs file: {config['ids_file']}")
-    if config.get("poll_phase"):
-        print(f"Poll phase: {config['poll_phase']}")
-    print(f"Dispatch: {protocol}")
-    print("IMPORTANT: Re-read SKILL.md (.claude/skills/rfe.auto-fix/SKILL.md)"
-          " now before taking any action.")
+    print()
+    print(DISPATCH_LOOP)
 
 
 def cmd_post_compact_hook(args):
@@ -901,6 +1134,9 @@ COMMANDS = {
     "set-phase": cmd_set_phase,
     "get-phase-config": cmd_get_phase_config,
     "run-phase": cmd_run_phase,
+    "set-wave": cmd_set_wave,
+    "next-action": cmd_next_action,
+    "wait-for-wave": cmd_wait_for_wave,
     "advance": cmd_advance,
     "set": cmd_set,
     "get": cmd_get,
