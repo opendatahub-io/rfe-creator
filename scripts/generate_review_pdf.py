@@ -12,7 +12,7 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import find_artifact_file_including_archived, read_frontmatter
 
-DEFAULT_ARTIFACTS = os.path.join(os.path.dirname(__file__), '..', 'artifacts')
+DEFAULT_ARTIFACTS = os.path.join(os.getcwd(), 'artifacts')
 
 def get_revision_history(body):
     """Extract revision history section from review body."""
