@@ -12,13 +12,18 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+from unittest.mock import patch, MagicMock
+
 from dedup_search import (
     _cache_age_hours,
     _cache_is_fresh,
+    _escape_jql_keyword,
     _extract_fallback_keywords,
     _load_cache,
     _save_cache,
     _search_cache,
+    _search_jql,
+    search,
     CACHE_TTL_HOURS,
 )
 
@@ -95,33 +100,39 @@ class TestCacheAge:
 
 
 class TestCacheFreshness:
-    def test_fresh(self, monkeypatch):
-        monkeypatch.setenv("JIRA_SERVER", "https://test.atlassian.net")
+    def test_fresh(self):
         cache = {
             "refreshed_at": datetime.now(timezone.utc).isoformat(),
             "server": "https://test.atlassian.net",
             "issues": {},
         }
+        assert _cache_is_fresh(cache, "https://test.atlassian.net") is True
+
+    def test_fresh_no_server(self):
+        cache = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://test.atlassian.net",
+            "issues": {},
+        }
+        # No server passed — skip server check
         assert _cache_is_fresh(cache) is True
 
-    def test_stale(self, monkeypatch):
-        monkeypatch.setenv("JIRA_SERVER", "https://test.atlassian.net")
+    def test_stale(self):
         old = datetime.now(timezone.utc) - timedelta(hours=5)
         cache = {
             "refreshed_at": old.isoformat(),
             "server": "https://test.atlassian.net",
             "issues": {},
         }
-        assert _cache_is_fresh(cache) is False
+        assert _cache_is_fresh(cache, "https://test.atlassian.net") is False
 
-    def test_server_mismatch(self, monkeypatch):
-        monkeypatch.setenv("JIRA_SERVER", "https://other.atlassian.net")
+    def test_server_mismatch(self):
         cache = {
             "refreshed_at": datetime.now(timezone.utc).isoformat(),
             "server": "https://test.atlassian.net",
             "issues": {},
         }
-        assert _cache_is_fresh(cache) is False
+        assert _cache_is_fresh(cache, "https://other.atlassian.net") is False
 
     def test_none_cache(self):
         assert _cache_is_fresh(None) is False
@@ -251,3 +262,178 @@ class TestCLI:
     def test_load_missing_cache(self, tmp_dir):
         """In-process: _load_cache returns None when no cache file exists."""
         assert _load_cache() is None
+
+
+# ─── JQL Escaping ────────────────────────────────────────────────────────────
+
+class TestEscapeJqlKeyword:
+    def test_plain_keyword(self):
+        assert _escape_jql_keyword("model") == "model"
+
+    def test_double_quotes(self):
+        assert _escape_jql_keyword('say "hello"') == 'say \\"hello\\"'
+
+    def test_backslash(self):
+        assert _escape_jql_keyword("path\\to") == "path\\\\to"
+
+    def test_braces_and_brackets(self):
+        assert _escape_jql_keyword("a{b}[c]") == "a\\{b\\}\\[c\\]"
+
+    def test_special_chars(self):
+        result = _escape_jql_keyword("a+b-c*d?e:")
+        assert result == "a\\+b\\-c\\*d\\?e\\:"
+
+    def test_combined(self):
+        # Backslash + quotes + brackets
+        result = _escape_jql_keyword('x\\y"z[w]')
+        assert result == 'x\\\\y\\"z\\[w\\]'
+
+
+# ─── _search_jql (mocked HTTP) ──────────────────────────────────────────────
+
+class TestSearchJql:
+    def _mock_api(self, issues):
+        """Return a mock that simulates api_call_with_retry."""
+        return MagicMock(return_value={
+            "issues": [{"key": k, "fields": {"summary": s}}
+                       for k, s in issues],
+        })
+
+    @patch("dedup_search.api_call_with_retry")
+    def test_returns_results(self, mock_api):
+        mock_api.return_value = {
+            "issues": [
+                {"key": "RHAIRFE-100", "fields": {"summary": "Model serving"}},
+                {"key": "RHAIRFE-101", "fields": {"summary": "Model training"}},
+            ],
+        }
+        results = _search_jql("https://s", "u", "t", ["model"], 10)
+        assert len(results) == 2
+        assert results[0] == ("RHAIRFE-100", "Model serving")
+        mock_api.assert_called_once()
+
+    @patch("dedup_search.api_call_with_retry")
+    def test_escapes_keywords_in_jql(self, mock_api):
+        mock_api.return_value = {"issues": []}
+        _search_jql("https://s", "u", "t", ['say "hi"', "a\\b"], 5)
+        call_path = mock_api.call_args[0][1]
+        # Keywords should be escaped in the encoded JQL
+        assert "say" in call_path
+        mock_api.assert_called_once()
+
+    def test_no_creds_returns_empty(self):
+        assert _search_jql("", "", "", ["model"], 10) == []
+
+    @patch("dedup_search.api_call_with_retry", side_effect=Exception("timeout"))
+    def test_api_error_returns_empty(self, mock_api):
+        results = _search_jql("https://s", "u", "t", ["model"], 10)
+        assert results == []
+
+
+# ─── search() (mocked internals) ────────────────────────────────────────────
+
+class TestSearch:
+    """Tests for the top-level search() function with mocked dependencies."""
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search._ensure_fresh_cache")
+    @patch("dedup_search._search_jql", return_value=[])
+    def test_cache_only_when_enough_results(self, mock_jql, mock_cache, mock_env):
+        """When cache has >= 3 results, JQL is not called."""
+        mock_cache.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": {
+                "T-1": "model serving infra",
+                "T-2": "model training pipeline",
+                "T-3": "model registry integration",
+                "T-4": "model monitoring dashboard",
+            },
+        }
+        result = search("model stuff", ["model"], max_results=10)
+        assert result["source"] == "cache"
+        assert len(result["matches"]) == 4
+        mock_jql.assert_not_called()
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search._ensure_fresh_cache")
+    @patch("dedup_search._search_jql")
+    def test_jql_fallback_when_sparse_cache(self, mock_jql, mock_cache, mock_env):
+        """When cache has < 3 results, JQL fallback is triggered."""
+        mock_cache.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": {
+                "T-1": "model serving infra",
+            },
+        }
+        mock_jql.return_value = [
+            ("T-50", "model fine-tuning"),
+            ("T-1", "model serving infra"),  # duplicate of cache
+        ]
+        result = search("model stuff", ["model"], max_results=10)
+        assert result["source"] == "cache+jira"
+        mock_jql.assert_called_once()
+        # T-1 should appear once (deduped)
+        keys = [m["key"] for m in result["matches"]]
+        assert keys.count("T-1") == 1
+        assert "T-50" in keys
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search._ensure_fresh_cache")
+    @patch("dedup_search._search_jql")
+    def test_jql_only_when_no_cache_results(self, mock_jql, mock_cache, mock_env):
+        """When cache has 0 results, source is 'jira' not 'cache+jira'."""
+        mock_cache.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": {},
+        }
+        mock_jql.return_value = [("T-50", "model fine-tuning")]
+        result = search("model", ["model"], max_results=10)
+        assert result["source"] == "jira"
+
+    @patch("dedup_search.require_env", return_value=("", "", ""))
+    @patch("dedup_search._ensure_fresh_cache", return_value=None)
+    def test_no_creds_no_cache(self, mock_cache, mock_env):
+        result = search("model", ["model"])
+        assert result["error"] == "no_credentials"
+        assert result["matches"] == []
+
+    @patch("dedup_search.require_env", return_value=("", "", ""))
+    @patch("dedup_search._ensure_fresh_cache")
+    def test_no_creds_stale_cache(self, mock_cache, mock_env):
+        mock_cache.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": {"T-1": "model serving"},
+        }
+        result = search("model", ["model"])
+        assert result["error"] == "no_credentials_using_stale_cache"
+        assert len(result["matches"]) == 1
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    def test_empty_input(self, mock_env):
+        result = search("", [])
+        assert result["source"] == "none"
+        assert result["matches"] == []
+        assert result["error"] is None
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search._ensure_fresh_cache")
+    @patch("dedup_search._search_jql", return_value=[])
+    def test_max_results_respected(self, mock_jql, mock_cache, mock_env):
+        """Matches list is capped at max_results."""
+        issues = {f"T-{i}": f"model variant {i}" for i in range(20)}
+        mock_cache.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": issues,
+        }
+        result = search("model", ["model"], max_results=5)
+        assert len(result["matches"]) == 5

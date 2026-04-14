@@ -31,6 +31,23 @@ CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 CACHE_TTL_HOURS = 4
 JQL_BASE = "project = RHAIRFE AND statusCategory != Done"
 
+_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "can", "shall", "to", "of", "in", "for",
+    "on", "with", "at", "by", "from", "as", "into", "through", "during",
+    "before", "after", "above", "below", "between", "out", "off", "over",
+    "under", "again", "further", "then", "once", "and", "but", "or",
+    "nor", "not", "so", "yet", "both", "either", "neither", "each",
+    "every", "all", "any", "few", "more", "most", "other", "some", "such",
+    "no", "only", "own", "same", "than", "too", "very", "just", "because",
+    "if", "when", "where", "how", "what", "which", "who", "whom", "this",
+    "that", "these", "those", "i", "me", "my", "we", "our", "you", "your",
+    "he", "him", "his", "she", "her", "it", "its", "they", "them", "their",
+    "want", "need", "like", "use", "using", "support", "enable", "allow",
+    "make", "get", "set", "add", "new", "also", "about",
+})
+
 
 # ─── Cache Management ────────────────────────────────────────────────────────
 
@@ -71,12 +88,11 @@ def _cache_age_hours(cache):
         return None
 
 
-def _cache_is_fresh(cache):
-    """Check if cache is fresh (within TTL) and matches current server."""
+def _cache_is_fresh(cache, server=None):
+    """Check if cache is fresh (within TTL) and matches given server."""
     age = _cache_age_hours(cache)
     if age is None or age > CACHE_TTL_HOURS:
         return False
-    server, _, _ = require_env()
     if server and cache.get("server") != server:
         return False
     return True
@@ -122,7 +138,7 @@ def refresh_cache(server, user, token):
 def _ensure_fresh_cache(server, user, token):
     """Return a fresh cache, refreshing if needed."""
     cache = _load_cache()
-    if _cache_is_fresh(cache):
+    if _cache_is_fresh(cache, server):
         return cache
     # Stale or missing — need credentials to refresh
     if not all([server, user, token]):
@@ -152,6 +168,16 @@ def _search_cache(cache, keywords, max_results):
     return scored[:max_results]
 
 
+def _escape_jql_keyword(kw):
+    """Escape JQL special characters in a keyword for use inside quotes."""
+    # Backslash must be escaped first to avoid double-escaping
+    kw = kw.replace("\\", "\\\\")
+    kw = kw.replace('"', '\\"')
+    for ch in "{}[]()+-&|!^~*?:":
+        kw = kw.replace(ch, f"\\{ch}")
+    return kw
+
+
 def _search_jql(server, user, token, keywords, max_results):
     """Search Jira via JQL text operator. Returns list of (key, summary)."""
     if not all([server, user, token]):
@@ -161,7 +187,7 @@ def _search_jql(server, user, token, keywords, max_results):
     escaped = []
     for kw in keywords:
         # Escape JQL special characters in keyword
-        clean = kw.replace('"', '\\"')
+        clean = _escape_jql_keyword(kw)
         escaped.append(f'"{clean}"')
     text_query = " OR ".join(escaped)
 
@@ -257,7 +283,7 @@ def cmd_refresh_cache(args):
               file=sys.stderr)
         sys.exit(1)
     cache = _load_cache()
-    if not args.force and _cache_is_fresh(cache):
+    if not args.force and _cache_is_fresh(cache, server):
         age = _cache_age_hours(cache)
         print(f"Cache is fresh ({age}h old, TTL={CACHE_TTL_HOURS}h). "
               f"Use --force to override.", file=sys.stderr)
@@ -271,34 +297,32 @@ def cmd_cache_info(args):
         print("No cache found.")
         return
     age = _cache_age_hours(cache)
-    fresh = _cache_is_fresh(cache)
-    print(f"Cache file: {CACHE_PATH}")
-    print(f"Refreshed: {cache.get('refreshed_at', 'unknown')}")
-    print(f"Age: {age}h (TTL: {CACHE_TTL_HOURS}h, {'fresh' if fresh else 'stale'})")
-    print(f"Server: {cache.get('server', 'unknown')}")
-    print(f"Issues: {cache.get('issue_count', 0)}")
+    server, _, _ = require_env()
+    fresh = _cache_is_fresh(cache, server)
+    info = {
+        "cache_file": CACHE_PATH,
+        "refreshed_at": cache.get("refreshed_at", "unknown"),
+        "age_hours": age,
+        "ttl_hours": CACHE_TTL_HOURS,
+        "fresh": fresh,
+        "server": cache.get("server", "unknown"),
+        "issue_count": cache.get("issue_count", 0),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(info, indent=2))
+    else:
+        print(f"Cache file: {info['cache_file']}")
+        print(f"Refreshed: {info['refreshed_at']}")
+        print(f"Age: {info['age_hours']}h (TTL: {info['ttl_hours']}h, "
+              f"{'fresh' if info['fresh'] else 'stale'})")
+        print(f"Server: {info['server']}")
+        print(f"Issues: {info['issue_count']}")
 
 
 def _extract_fallback_keywords(text):
     """Basic keyword extraction when LLM doesn't provide --keywords."""
-    stopwords = {
-        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "can", "shall", "to", "of", "in", "for",
-        "on", "with", "at", "by", "from", "as", "into", "through", "during",
-        "before", "after", "above", "below", "between", "out", "off", "over",
-        "under", "again", "further", "then", "once", "and", "but", "or",
-        "nor", "not", "so", "yet", "both", "either", "neither", "each",
-        "every", "all", "any", "few", "more", "most", "other", "some", "such",
-        "no", "only", "own", "same", "than", "too", "very", "just", "because",
-        "if", "when", "where", "how", "what", "which", "who", "whom", "this",
-        "that", "these", "those", "i", "me", "my", "we", "our", "you", "your",
-        "he", "him", "his", "she", "her", "it", "its", "they", "them", "their",
-        "want", "need", "like", "use", "using", "support", "enable", "allow",
-        "make", "get", "set", "add", "new", "also", "about",
-    }
     words = text.lower().split()
-    candidates = [w for w in words if w not in stopwords and len(w) > 2]
+    candidates = [w for w in words if w not in _STOPWORDS and len(w) > 2]
     # Deduplicate preserving order
     seen = set()
     unique = []
@@ -331,6 +355,8 @@ def main():
 
     # cache-info
     p_info = sub.add_parser("cache-info", help="Show cache status")
+    p_info.add_argument("--json", action="store_true",
+                        help="Output as JSON for scripting")
     p_info.set_defaults(func=cmd_cache_info)
 
     args = parser.parse_args()
