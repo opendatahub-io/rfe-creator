@@ -52,15 +52,18 @@ def collect_reassess(ids):
 
 
 def collect_errors(ids):
-    """Collect IDs with non-null error field."""
+    """Collect IDs with non-null error field or missing review files."""
     error_ids = []
     for rfe_id in ids:
         path = os.path.join(ARTIFACTS_DIR, "rfe-reviews", f"{rfe_id}-review.md")
         if not os.path.exists(path):
+            # Missing review file is an error — the pipeline failed to produce output
+            error_ids.append(rfe_id)
             continue
         try:
             data, _ = read_frontmatter(path)
         except Exception:
+            error_ids.append(rfe_id)
             continue
         if data.get("error"):
             error_ids.append(rfe_id)

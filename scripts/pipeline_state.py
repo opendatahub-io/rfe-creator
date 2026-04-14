@@ -120,6 +120,7 @@ PHASE_CONFIG = {
                 "vars": {"ID": "{ID}"},
             },
         ],
+        "parallel_timeout": 300,
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-active-ids.txt",
@@ -242,6 +243,7 @@ PHASE_CONFIG = {
                 "vars": {"ID": "{ID}"},
             },
         ],
+        "parallel_timeout": 300,
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
@@ -474,6 +476,16 @@ def advance(state, dry_run=False):
     # --- Linear sequences ---
     for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if phase in seq[:-1]:
+            # Enforce post_verify before advancing from agent phases
+            config = PHASE_CONFIG.get(phase, {})
+            if not dry_run and config.get("post_verify") and config.get("type") == "agent":
+                try:
+                    _run_script(config["post_verify"])
+                except Exception as e:
+                    print(f"ERROR: {phase} post_verify failed: {e}. "
+                          f"Dispatch agents for this phase before advancing.",
+                          file=sys.stderr)
+                    sys.exit(1)
             nxt = seq[seq.index(phase) + 1]
             return nxt, f"{phase} → {nxt}"
 
@@ -598,10 +610,20 @@ def advance(state, dry_run=False):
             f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\nERROR_COLLECT → BATCH_START",
         )
 
-    # --- REPORT → DONE (with optional announce) ---
+    # --- REPORT → DONE (generate report, then optional announce) ---
     if phase == "REPORT":
-        if not dry_run and state.get("announce_complete"):
-            _run_script("python3 scripts/finish.py")
+        if not dry_run:
+            config = PHASE_CONFIG.get("REPORT", {})
+            cmd = config.get("command", "")
+            if cmd:
+                cmd = cmd.format_map(state)
+                try:
+                    _run_script(cmd)
+                except SystemExit:
+                    print("WARNING: report generation failed, continuing",
+                          file=sys.stderr)
+            if state.get("announce_complete"):
+                _run_script("python3 scripts/finish.py")
         return "DONE", "REPORT → DONE"
 
     print(f"No transition defined for phase: {phase}", file=sys.stderr)
