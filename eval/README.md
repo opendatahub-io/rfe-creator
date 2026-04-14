@@ -6,6 +6,8 @@ Automated evaluation of the `rfe.speedrun` pipeline using the [agent-eval-harnes
 
 ### Setup
 
+Slash commands below (`/eval-setup`, `/eval-run`, etc.) require the [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness) to be installed.
+
 ```bash
 # Install dependencies and configure environment
 /eval-setup
@@ -22,6 +24,9 @@ Automated evaluation of the `rfe.speedrun` pipeline using the [agent-eval-harnes
 
 # Compare against a previous run
 /eval-run --model opus --baseline <previous-run-id>
+
+# Run a subset of cases for faster iteration
+/eval-run --model opus --case autoscaling
 ```
 
 ### Review results

@@ -8,7 +8,7 @@ skill_hash: c4efe3b7bf1c
 headless: true
 dry_run: true
 
-# Suggested judges (summary from analysis)
+# Suggested judges (initial recommendations from analysis — eval.yaml is authoritative)
 suggested_judges:
   - name: files_exist
     type: check

@@ -5,7 +5,11 @@ arguments: --headless --dry-run --input batch.yaml
 runner: claude-code
 
 permissions:
-  allow: []
+  allow:
+    - "Write(/tmp/rfe-assess/**)"
+    - "Write(/private/tmp/rfe-assess/**)"
+    - "Edit(/tmp/rfe-assess/**)"
+    - "Edit(/private/tmp/rfe-assess/**)"
   deny: []
 
 runner_options:
@@ -268,6 +272,10 @@ judges:
     description: |
       Verify expected execution flow from stdout: all phases ran,
       no errors or unexpected file deletions during Phase 1.
+      Note: phase detection uses string matching on stdout, which is
+      inherently fragile — if log messages change, update the patterns
+      below. A future improvement would be to emit stable phase markers
+      from the skills (e.g. "## Phase: create") for reliable detection.
     check: |
       import re
       stdout = outputs.get("stdout", "")
@@ -357,10 +365,16 @@ judges:
       revised version (in artifacts/rfe-tasks/) and the pipeline's review
       (in artifacts/rfe-reviews/).
 
-      If no originals exist (the RFE was not revised), score based on the
-      final RFE quality alone.
+      First, check the review frontmatter for `auto_revised` and
+      `revision_cycles`. This tells you whether a revision happened.
 
-      Assess across these dimensions, then provide a single overall score 1-5:
+      **If no revision was performed** (auto_revised: false or no originals
+      in artifacts/rfe-originals/): assess the pipeline's *decision* not to
+      revise. If the RFE is already high quality (score ≥ 8) and doesn't
+      have critical issues, skipping revision is correct — score 4-5. Only
+      score low if the RFE has clear problems the pipeline should have fixed.
+
+      **If a revision was performed**: compare original vs revised and assess:
 
       **Revision quality**: Did revisions genuinely improve the RFE?
       Clarified requirements, strengthened justification, reframed
@@ -375,9 +389,10 @@ judges:
       Or was it simply deleted without reframing the underlying need?
 
       Score 1-5:
-      - **5**: Substantial improvement — targeted fixes, content preserved,
-        prescriptive content expertly reframed as business needs
-      - **4**: Good improvement — most changes beneficial, minor content shifts
+      - **5**: Excellent — revision substantially improved the RFE (or
+        correctly skipped for an already-excellent RFE)
+      - **4**: Good — beneficial changes with minor content shifts (or
+        correctly skipped for a strong RFE with only minor gaps)
       - **3**: Mixed — some improvements but also introduced issues or lost specificity
       - **2**: Marginal — cosmetic changes, no real quality improvement, or minor content loss
       - **1**: Harmful — revision made the RFE worse, lost critical information
@@ -387,7 +402,7 @@ judges:
   - name: pairwise
     description: Blind A/B comparison of RFE pipeline output quality across runs
     prompt_file: eval/config/pairwise-judge.md
-    model: claude-sonnet-4-6
+    model: claude-sonnet-4-6  # different model avoids self-judging bias
 
 thresholds:
   files_exist:
