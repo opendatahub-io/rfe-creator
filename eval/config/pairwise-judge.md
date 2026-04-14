@@ -33,7 +33,7 @@ Be decisive. Only declare "tie" if the outputs are genuinely equivalent across a
 
 Be aware that outputs are presented in arbitrary order. Do not let presentation order influence your judgment.
 
-Output your assessment as JSON:
+You MUST output ONLY a JSON object — no prose before or after. Do not include any text outside the JSON block.
 
 ```json
 {
