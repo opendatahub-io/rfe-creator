@@ -68,14 +68,14 @@ class TestCheckId:
             assert check_id("review", "RHAIRFE-1") == "error"
 
     def test_review_phase_unparseable(self, tmp_path):
-        """Review phase: unparseable frontmatter → pending."""
+        """Review phase: unparseable frontmatter → error."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n: bad yaml [[\n---\nBody\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"review": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("review", "RHAIRFE-1") == "pending"
+            assert check_id("review", "RHAIRFE-1") == "error"
 
     def test_revise_phase_auto_revised_true(self, tmp_path):
         """Revise phase: auto_revised=true → completed."""
@@ -108,14 +108,45 @@ class TestCheckId:
             assert check_id("revise", "RHAIRFE-1") == "completed"
 
     def test_revise_phase_bad_frontmatter(self, tmp_path):
-        """Revise phase: unparseable frontmatter → pending."""
+        """Revise phase: unparseable frontmatter → error."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n: bad [[\n---\nBody\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"revise": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("revise", "RHAIRFE-1") == "pending"
+            assert check_id("revise", "RHAIRFE-1") == "error"
+
+    def test_review_phase_missing_closing_delimiter(self, tmp_path):
+        """Review phase: missing closing --- → error (CI #128 regression)."""
+        f = tmp_path / "RHAIRFE-1-review.md"
+        f.write_text("---\nscore: 7\npass: true\nrecommendation: submit\n"
+                      "Review body without closing delimiter.\n")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"review": lambda id: str(tmp_path / f"{id}-review.md")},
+        ):
+            assert check_id("review", "RHAIRFE-1") == "error"
+
+    def test_review_phase_empty_frontmatter(self, tmp_path):
+        """Review phase: empty --- / --- → error (CI #122 regression)."""
+        f = tmp_path / "RHAIRFE-1-review.md"
+        f.write_text("---\n---\nReview body with empty frontmatter.\n")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"review": lambda id: str(tmp_path / f"{id}-review.md")},
+        ):
+            assert check_id("review", "RHAIRFE-1") == "error"
+
+    def test_revise_phase_empty_frontmatter(self, tmp_path):
+        """Revise phase: empty frontmatter → error."""
+        f = tmp_path / "RHAIRFE-1-review.md"
+        f.write_text("---\n---\nBody.\n")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"revise": lambda id: str(tmp_path / f"{id}-review.md")},
+        ):
+            assert check_id("revise", "RHAIRFE-1") == "error"
 
 
 # ── _check_phase ──

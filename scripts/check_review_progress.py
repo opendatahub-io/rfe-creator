@@ -35,7 +35,9 @@ def check_id(phase, rfe_id):
         try:
             data, _ = read_frontmatter(path)
         except Exception:
-            return "pending"
+            return "error"
+        if not data:
+            return "error"
         if data.get("score") is None:
             return "pending"
         if data.get("error"):
@@ -44,7 +46,9 @@ def check_id(phase, rfe_id):
         try:
             data, _ = read_frontmatter(path)
         except Exception:
-            return "pending"
+            return "error"
+        if not data:
+            return "error"
         if data.get("auto_revised"):
             return "completed"
         if data.get("recommendation") == "split":

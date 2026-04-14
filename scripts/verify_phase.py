@@ -63,11 +63,15 @@ def verify(phase, ids_file):
             try:
                 subprocess.run([
                     "python3", "scripts/frontmatter.py", "set", review_path,
+                    f"rfe_id={rfe_id}",
                     f"error={error_msg}",
                     "score=0", "pass=false", "recommendation=revise",
                     "feasibility=feasible", "auto_revised=false",
                     "needs_attention=true",
                     f"needs_attention_reason=Agent failed: {error_msg}",
+                    "scores.what=0", "scores.why=0",
+                    "scores.open_to_how=0", "scores.not_a_task=0",
+                    "scores.right_sized=0",
                 ], check=True, capture_output=True)
             except Exception:
                 pass
