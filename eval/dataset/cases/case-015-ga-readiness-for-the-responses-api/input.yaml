@@ -1,0 +1,36 @@
+clarifying_context: 'Customers: Southern European Public Sector (7 accounts: NARC, AGRI, NPSI, Posta Nazionale, PTI, ENER, GASI), Keystone Financial (MaaS deployment), Nexus Semiconductor (provider portability), Meridian Bank (Backstage plugin integration), Aegean Mobile (pluggable
+  RAG/agent stack), Bosphorus Bank (OpenAI-compatible standard interface), VAS (migrating from Watsonx for better OpenAI compatibility),
+  15+ validated customers across financial services, public sector, telecom, and manufacturing
+
+  Business justification: OpenAI compatibility is the top adoption driver validated across customer discovery. 7 Italian public
+  sector accounts position Red Hat AI as ''Private OpenAI'' — API parity is the entire value proposition. Keystone requires OpenAI-compatible
+  endpoints for Model-as-a-Service. Nexus Semiconductor explicitly wants to ''interface via OpenAI API standard to easily switch models.''
+  Meridian Bank''s Backstage integration depends on endpoint parity. VAS is migrating from Watsonx specifically because of OpenAI-style
+  API limitations. Incomplete API parity directly blocks the largest revenue opportunity in the pipeline. This is the single
+  highest-leverage action to convert TP users into GA production customers.
+
+  User problem: Customers cannot migrate production workloads from OpenAI to Red Hat AI because the current Tech Preview implementation
+  silently drops fields, is missing parameters, and has undocumented behavioral differences. This forces customers to maintain
+  dual codepaths (one for OpenAI, one for Red Hat AI) or accept unexpected failures when switching providers. The Responses
+  API is the primary interface for agentic capabilities (tool use, multi-turn reasoning, structured outputs), so gaps here
+  block the core use cases.
+
+  Scope: This is a large effort with multiple sub-workstreams. The core need is full OpenAI Responses API field/parameter
+  parity with SSE streaming and Conversations API integration. Recommended split-offs include: (1) Production-grade response
+  storage and persistence with retention policies and scale validation, (2) Multi-provider validation matrix across vLLM,
+  remote::openai, remote::anthropic with automated CI testing, (3) Responses API observability integration with GenAI semantic
+  conventions, MLflow/OTEL tracing, and dashboard templates, (4) TP-to-GA upgrade and migration path with documented migration
+  steps, automated tooling, and QE validation.
+
+  Success criteria: A customer application written against the OpenAI Responses API (Python SDK) works against Red Hat AI''s
+  Responses API with zero code changes, or all differences are documented in a published compatibility matrix. No silent field
+  drops — every unsupported field returns a clear error or is documented as unsupported. Streaming behavior matches OpenAI
+  SSE event format for all supported response types. Compatibility matrix published documenting per-field, per-parameter coverage
+  compared to OpenAI Responses API. Performance benchmarks published for representative workloads (latency p50/p95/p99, throughput,
+  resource consumption) with sizing guidance.'
+priority: Critical
+prompt: We need to get the Responses API ready for GA. Right now it's in Tech Preview and we intentionally shipped with incomplete
+  OpenAI API coverage to move fast, but customers can't migrate production workloads because of silent field drops, missing
+  parameters, and undocumented behavioral differences. We have 20+ customers across financial services, public sector, and
+  telecom who are blocked on this — the whole value proposition of Red Hat AI as an OpenAI-compatible platform falls apart
+  without full API parity. We need to close the gap so TP users can convert to GA production customers.

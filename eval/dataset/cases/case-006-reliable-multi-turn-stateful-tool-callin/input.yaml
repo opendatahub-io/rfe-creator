@@ -1,0 +1,32 @@
+clarifying_context: 'Customers: Altus Capital (major enterprise account building internal AI tooling on RHOAI), Meridian Bank (major enterprise account running agentic workflows in regulated financial services). Both are regulated financial institutions requiring
+  self-hosted infrastructure.
+
+  Business justification: Altus Capital and Meridian Bank represent major enterprise accounts whose agentic AI initiatives depend on reliable
+  multi-turn tool calling. Deal expansion is at risk if tool calling degrades over multi-turn conversations. Competitors (hosted
+  API providers like OpenAI with integrated, tested tool calling) become the path of least resistance. Llama Stack is RHOAI''s
+  strategic answer to OpenAI''s Responses API — if multi-turn tool calling doesn''t work, the entire agentic platform story
+  stalls.
+
+  User problem: Two compounding issues make multi-turn tool calling unreliable. (1) Llama Stack''s Responses API is built
+  on chat completions, which causes reasoning text to be stripped between turns — subsequent turns lack the full context needed
+  for coherent multi-step tool use. (2) vLLM''s tool call parsing has significant variance across models, with per-model parsers
+  inconsistently developed and tested. These issues compound as context grows: small parsing inconsistencies accumulate and
+  lost reasoning text further degrades the model''s ability to make correct tool calls, causing progressive reliability degradation
+  with each turn.
+
+  Scope: This is a focused but cross-layer problem spanning vLLM tool call parsing quality and Llama Stack''s Responses API
+  implementation. The core need is ensuring reasoning text preservation across turns and consistent tool call parsing across
+  supported models. It touches both the inference layer (vLLM) and the orchestration layer (Llama Stack) but is a single coherent
+  capability: reliable stateful multi-turn tool calling.
+
+  Success criteria: A multi-turn tool calling scenario (model calls tool, receives result, reasons, calls another tool) completes
+  successfully through Llama Stack without degradation across turns. Reasoning text is preserved across turns so subsequent
+  tool calls benefit from prior reasoning. Tool call parsing quality through Llama Stack matches quality observed when calling
+  vLLM directly via Chat Completions for the same model and prompt. End-to-end test coverage validates multi-turn tool calling
+  both directly against vLLM and through Llama Stack across multiple supported models. Altus Capital and Meridian Bank can build multi-turn
+  agent workflows on the Responses API without falling back to direct vLLM access.'
+priority: Major
+prompt: We're hearing from our biggest financial services accounts that multi-turn tool calling through Llama Stack is unreliable
+  and gets worse as conversations progress. Altus Capital and Meridian Bank are both trying to build agentic workflows on RHOAI, but tool calls
+  start failing after a few turns because reasoning context gets lost between turns and vLLM's tool call parsing is inconsistent
+  across models. We need to fix this before these accounts look at hosted alternatives.
