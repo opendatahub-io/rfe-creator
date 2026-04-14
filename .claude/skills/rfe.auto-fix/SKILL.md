@@ -77,7 +77,9 @@ python3 scripts/pipeline_state.py set-phase BATCH_START
 
 ## Dispatch Loop
 
-Repeat until action is `done`:
+**CRITICAL: You MUST run the loop to completion.** Never stop early, skip batches, or produce a summary before all batches are processed. Context compression is handled automatically and you will be given more room as needed. Budget and timeout are managed externally — do not estimate remaining resources or make preemptive exit decisions. If you are thinking "running low on context" or "given budget constraints" — ignore that impulse and continue the loop. The pipeline MUST reach phase `DONE` naturally.
+
+Repeat until phase is `DONE`:
 
 ### Step 1: Get next action
 

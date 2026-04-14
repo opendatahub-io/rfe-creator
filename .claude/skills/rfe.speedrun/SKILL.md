@@ -2,7 +2,7 @@
 name: rfe.speedrun
 description: End-to-end RFE pipeline. Accepts a single idea, Jira key(s), or a YAML batch file. Creates, reviews, auto-fixes (with splits), and submits. Supports --headless, --announce-complete, and --dry-run for CI.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 ---
 
 You are running the full RFE pipeline in speedrun mode. Your goal is to go from problem statements to submitted Jira tickets with minimal interaction. You orchestrate by calling other skills — never duplicate their work.
@@ -21,6 +21,7 @@ Clean temp state and persist parsed flags. `batch_size` MUST always be a concret
 
 ```bash
 python3 scripts/state.py clean
+python3 scripts/prep_assess.py --clean-all
 python3 scripts/state.py init tmp/speedrun-config.yaml headless=<true/false> announce_complete=<true/false> dry_run=<true/false> batch_size=<N or 5> input_file=<path or null>
 ```
 
@@ -102,7 +103,21 @@ Build the auto-fix command using flags from the config file:
 
 Pass `--headless` and `--announce-complete` through if set in the config. **Always** pass `--batch-size <batch_size>` using the value from `tmp/speedrun-config.yaml` — never omit it, never let auto-fix's own default take over. The speedrun default (5) was already pinned in Step 0; relying on it here is what makes runs reproducible.
 
-Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-assessment, splitting oversized RFEs, retry queue, and report generation. Wait for it to complete.
+Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-assessment, splitting oversized RFEs, retry queue, and report generation. Wait for it to complete. **Do NOT stop, summarize, or skip remaining batches early** — the pipeline must process every ID through all phases. Never emit a text-only response (no tool call) during pipeline execution — this terminates the CI process.
+
+After auto-fix returns, verify all RFEs were processed:
+
+```bash
+python3 scripts/check_autofix_complete.py
+```
+
+If incomplete (exit code 1), the output shows `MISSING_IDS=RFE-006,RFE-007,...`. Re-invoke auto-fix with only the missing IDs:
+
+```
+/rfe.auto-fix [--headless] [--batch-size N] <missing_IDs>
+```
+
+Repeat the verify+retry cycle until all RFEs have reviews or 3 retries have been exhausted.
 
 ## Phase 3: Submit
 
@@ -131,7 +146,7 @@ If no IDs are ready to submit, skip to Phase 4.
 If IDs are ready:
 
 ```
-/rfe.submit [--dry-run] <passing_IDs>
+/rfe.submit [--dry-run] [--headless] <passing_IDs>
 ```
 
 If not headless: `/rfe.submit` will show a confirmation table before writing to Jira — this is the one mandatory interaction point.
