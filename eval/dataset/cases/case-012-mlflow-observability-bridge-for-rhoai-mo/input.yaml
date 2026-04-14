@@ -1,0 +1,28 @@
+clarifying_context: 'Customers: Enterprise RHOAI customers running shared multi-tenant clusters, such as Sterling Bank Group ML
+  Platform team, Kronos AI Factory, Central Telco data science division
+
+  Business justification: Core platform observability gap blocking enterprise RHOAI adoption at scale — multiple large accounts
+  have flagged the inability to correlate training and infrastructure metrics as a friction point during POCs and expansion
+  deals. Unified monitoring is a table-stakes expectation for production ML platforms.
+
+  User problem: Data scientists cannot see MLflow training metrics (loss, accuracy, custom metrics) alongside infrastructure
+  metrics (GPU utilization, memory) in a single correlated timeline, forcing constant context-switching between tools and
+  making it nearly impossible to diagnose whether poor training performance is due to code issues or resource contention.
+  Platform administrators have zero visibility into MLflow server health, storage consumption, or per-tenant usage from the
+  centralized monitoring stack, making capacity planning and troubleshooting the shared MLflow infrastructure guesswork.
+
+  Scope: Single focused need — building an observability bridge from MLflow into the RHOAI monitoring pipeline. Specifically
+  covers two areas: (1) bridging experiment/run training metrics into the monitoring stack, and (2) exposing MLflow server
+  operational metrics. Explicitly out of scope: OTEL collector pipeline deployment, tenant-scoped metric query enforcement,
+  and custom ML model drift/bias monitoring — each handled by separate RFEs.
+
+  Success criteria: MLflow experiment and run metrics are bridgeable to the platform monitoring pipeline; training metrics
+  logged to MLflow can be visualized alongside infrastructure metrics in Grafana/Perses dashboards correlated by run ID and
+  timestamp; MLflow server operational metrics (request latency, active experiments, storage usage per tenant) are collected
+  by the monitoring stack; documentation covers MLflow metrics bridging setup.'
+priority: Major
+prompt: We need to connect MLflow metrics with our RHOAI monitoring stack. Right now data scientists have to constantly switch
+  between the MLflow UI and infrastructure dashboards to understand how GPU/memory usage relates to their training metrics
+  like loss and accuracy. Admins also have no way to monitor MLflow server health or per-tenant usage from our centralized
+  monitoring. We need a bridge that brings experiment metrics and MLflow operational metrics into the same observability pipeline
+  so everyone gets a unified view.

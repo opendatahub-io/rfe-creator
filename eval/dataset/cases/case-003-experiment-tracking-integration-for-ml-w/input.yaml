@@ -1,0 +1,25 @@
+clarifying_context: 'Customers: MLflow Enterprise ML Platform team, Summit Financial Group AI Research group, SoundWave ML Engineering, Helix Biotech data science division
+
+  Business justification: 95% of ML teams use experiment tracking, and the lack of native integration is a top friction point
+  in onboarding. Multiple enterprise prospects (est. $4.2M pipeline) have flagged this as a requirement. Expected 60% reduction
+  in experiment tracking setup time and 100% adoption of automated tracking vs. manual configuration.
+
+  User problem: Data scientists running distributed training have no SDK-level integration with experiment tracking systems.
+  They must manually configure tracking servers, inject credentials into job environments, manage artifact storage, and wire
+  up callbacks — all without standardization. This leads to inconsistent setups across teams, broken tracking in production,
+  and significant time wasted on boilerplate infrastructure work instead of model development.
+
+  Scope: Single focused need — pluggable experiment tracking integration at the cluster and job level. Includes a TrackingBackend
+  base class with registry pattern, four built-in backends (MLflow, Weights & Biases, Ray native, TensorBoard), cluster-level
+  configuration via create_cluster() parameters, automatic environment variable injection into jobs, and Ray Train/Tune callback
+  integration. Also includes a custom backend registration API for extensibility.
+
+  Success criteria: Users can specify a tracking backend (e.g., MLflow, W&B) and its configuration at cluster creation time,
+  and all training jobs on that cluster automatically have the correct environment variables, credentials, and callbacks injected
+  without any manual setup. Custom backends can be registered via a public API. Experiment parameters, metrics, and artifacts
+  are tracked automatically through Ray Train/Tune integration.'
+priority: Undefined
+prompt: Our data scientists are spending way too much time setting up experiment tracking when running distributed training
+  jobs. Every team has to manually configure MLflow or W&B servers, deal with credentials, and wire up artifact storage themselves
+  — there's no standard way to do it through our SDK. We need native experiment tracking integration so teams can just specify
+  their tracking backend at the cluster level and have it automatically available in their training jobs.

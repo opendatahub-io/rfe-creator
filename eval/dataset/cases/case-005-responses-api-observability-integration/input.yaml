@@ -1,0 +1,26 @@
+clarifying_context: 'Customers: Orion Travel Systems (400+ AI initiatives, explicitly stated ''OpenTelemetry is really important — to trace
+  between agent and LLM''), Nova Wireless (needs comprehensive observability for agents, token usage, performance metrics), Keystone Financial (requires comprehensive observability and monitoring of entire LLM inferencing pipeline), Posta Nazionale (needs
+  real-time model performance visibility across operations)
+
+  Business justification: Four named enterprise customers with large-scale AI deployments require GenAI-specific observability
+  for the Responses API. Orion Travel Systems alone has 400+ AI initiatives. Without instrumentation, operations teams are completely blind
+  to Responses API behavior in production, blocking production readiness and SLA compliance. These are strategic accounts
+  with significant expansion potential.
+
+  User problem: Responses API calls on RHOAI are not instrumented with GenAI-specific telemetry. Operations teams cannot trace
+  requests, measure token usage, or monitor latency and error rates for Responses API workloads. This makes it impossible
+  to debug issues, optimize costs, or meet SLA requirements in production environments.
+
+  Scope: Single focused need — adding GenAI-specific observability instrumentation to the Responses API. Core requirement
+  is OTEL integration with GenAI semantic conventions. Secondary needs include MLflow integration for experiment tracking,
+  dashboard templates, and per-user/per-agent usage attribution for chargeback.
+
+  Success criteria: Every Responses API call generates a traceable OTEL span with GenAI attributes (e.g., gen_ai.usage.input_tokens,
+  gen_ai.response.model). A dashboard shows real-time latency, token usage, and error rates. End-to-end trace visibility is
+  available through OpenTelemetry integration.'
+priority: Major
+prompt: We're getting consistent feedback from large enterprise customers that they have no visibility into Responses API
+  workloads running on RHOAI. Operations teams can't trace requests, see token usage, or monitor latency and errors. This
+  is a blocker for production deployments — customers like Orion Travel Systems and Nova Wireless are specifically asking for OpenTelemetry-based
+  observability for their AI agents and LLM inferencing pipelines. We need to instrument the Responses API with GenAI-specific
+  telemetry.

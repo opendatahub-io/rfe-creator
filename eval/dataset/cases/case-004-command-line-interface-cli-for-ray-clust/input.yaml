@@ -1,0 +1,27 @@
+clarifying_context: 'Customers: Enterprise platform engineering teams at companies like Pinnacle Investments, DataPulse, and
+  Frontier Banking; SRE teams managing ML infrastructure; DevOps engineers building CI/CD pipelines for ML workloads
+
+  Business justification: Expected 10x increase in non-data-scientist users (SREs, platform engineers) by removing the Python-only
+  barrier. 90% reduction in pipeline complexity for cluster management automation. Every major competitor (AWS CLI, gcloud,
+  az ml) provides CLI tooling — this is table stakes for enterprise adoption. Kubernetes ecosystem users expect CLI tools
+  and will not adopt a Python-only SDK.
+
+  User problem: Users must write and execute Python scripts or use Jupyter notebooks for even the simplest operations like
+  listing clusters or checking status. There is no way to integrate cluster management into CI/CD pipelines, shell scripts,
+  or standard DevOps workflows. Platform engineers and SREs who are not Python-focused are effectively locked out of managing
+  Ray clusters through the SDK.
+
+  Scope: Single focused feature — a comprehensive CLI built with the click framework, organized into command groups: cluster
+  (list, get, create, delete, scale, status, dashboard, metrics) and job (submit, create, list, get, logs, stop, wait, delete),
+  plus capabilities and config commands. Includes multiple output formats (table, JSON, YAML), preset support for cluster
+  creation, and shell completion for bash, zsh, and fish.
+
+  Success criteria: Users can perform all major cluster and job management operations from the command line without writing
+  Python code. Output is available in table, JSON, and YAML formats for easy scripting and automation. Shell completion works
+  for bash, zsh, and fish. Quick status checks are 5x faster than the current Python script approach. CI/CD pipelines can
+  integrate cluster management using standard shell commands.'
+priority: Undefined
+prompt: We need a CLI for managing Ray clusters through our SDK. Right now everything requires writing Python scripts, which
+  is a huge barrier for SREs and platform engineers who just want to do quick operations like listing clusters or checking
+  status. We're losing out to competitors who all offer kubectl-style CLI tools, and our users can't easily integrate cluster
+  management into their CI/CD pipelines or shell scripts.

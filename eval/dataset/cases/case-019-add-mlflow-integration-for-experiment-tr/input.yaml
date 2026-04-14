@@ -1,0 +1,28 @@
+clarifying_context: 'Customers: Internal ML engineering teams, enterprise customers using the AI training platform (e.g.,
+  Ledger AI division, BioTech Labs data science group, RoboDrive ML team)
+
+  Business justification: Lack of experiment tracking is slowing down iteration cycles and making it difficult for enterprise
+  customers to meet auditability and governance requirements. At least 4 enterprise accounts have flagged experiment observability
+  as a gap during renewal discussions, representing ~$4.2M in ARR. Strategic investment in ML platform maturity and competitive
+  parity with platforms that offer built-in tracking.
+
+  User problem: Users cannot compare experiment runs across training strategies (LoRA, SFT, OSFT), track how hyperparameter
+  changes impact model performance, or inspect metrics and artifacts in a centralized location. Debugging, optimization, and
+  reproducibility are manual and fragmented — teams resort to ad-hoc spreadsheets and custom scripts to track experiments,
+  leading to lost context and unreproducible results.
+
+  Scope: Single focused enhancement — adding MLflow integration as a cross-cutting concern across the existing pipeline. No
+  structural changes to training modularity or Eval Hub integration. Touches validate_dataset (dataset metadata logging),
+  training components (metric emission), evaluate_with_eval_hub (forwarding evaluation outputs), and register_model (attaching
+  run IDs). One new component: log_to_mlflow.
+
+  Success criteria: End-to-end pipeline runs successfully with MLflow logging enabled. Each run logs parameters (strategy,
+  hyperparameters, dataset version), metrics (training loss/accuracy, Eval Hub results), artifacts (model artifacts, logs,
+  evaluation reports), and lineage (pipeline run ID, model version, dataset reference). MLflow run is linked to pipeline run,
+  Model Registry entry, and Eval Hub evaluation results. Users can compare runs in MLflow UI, inspect metrics and artifacts,
+  and trace experiment lineage without external tooling.'
+priority: Undefined
+prompt: Our AI training pipeline supports multiple training strategies like LoRA, SFT, and OSFT, and we already have Eval
+  Hub integration for evaluation, but we have no centralized experiment tracking. Teams are manually comparing runs, tracking
+  hyperparameters in spreadsheets, and struggling with reproducibility. We need to integrate MLflow into the pipeline so that
+  every training run automatically logs parameters, metrics, artifacts, and lineage in one place.

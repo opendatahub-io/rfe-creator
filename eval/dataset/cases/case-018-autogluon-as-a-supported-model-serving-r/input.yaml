@@ -1,0 +1,32 @@
+clarifying_context: 'Customers: Data analysts and citizen data scientists at enterprise organizations in financial services
+  (fraud detection, credit scoring), healthcare (patient outcome prediction), retail (demand forecasting, churn prediction),
+  and manufacturing (predictive maintenance). Also ISVs and partners building AutoML solutions on OpenShift AI.
+
+  Business justification: AutoML market projected to reach $12.8B by 2030; tabular data represents 70%+ of enterprise ML use
+  cases. Supporting AutoGluon natively attracts ease-of-use-focused users and increases platform adoption. Eliminates 2-4
+  hours of manual configuration per model deployment. Official Red Hat support removes enterprise adoption risk and unlocks
+  customers who cannot use unsupported custom runtimes.
+
+  User problem: Today, deploying an AutoGluon model requires users to manually obtain a KServe container image, navigate to
+  Settings → Serving runtimes, write or paste complex ServingRuntime YAML requiring knowledge of KServe specs, API protocols,
+  and resource configuration. The resulting custom runtime is explicitly marked as unsupported by Red Hat. This creates a
+  massive barrier for non-ML-expert users (citizen data scientists, data analysts) who chose AutoML precisely because training
+  was easy, but now face Kubernetes-level complexity at deployment time. Unlike vLLM, OpenVINO, and Triton, there is no streamlined
+  one-click deployment experience for AutoGluon.
+
+  Scope: Single focused need — adding AutoGluon as a pre-configured, officially supported serving runtime in the OpenShift
+  AI dashboard. Initial GA scope covers tabular models (regression, binary/multiclass classification, time series forecasting),
+  CSV input/JSON output, single-model serving (KServe-based), and REST API protocol.
+
+  Success criteria: AutoGluon appears in the runtime selection dropdown alongside vLLM, OpenVINO, and Triton. Users can deploy
+  an AutoGluon TabularPredictor model by selecting AutoGluon from the dropdown, specifying a model location, and clicking
+  Deploy — no YAML authoring required. A Red Hat-verified container image is published and maintained. AutoGluon runtime is
+  listed in the Red Hat OpenShift AI Supported Configurations document and included in Red Hat support scope. Official documentation
+  including deployment guide, examples, API reference, and troubleshooting is available. Existing custom AutoGluon runtimes
+  continue to work (backward compatibility).'
+priority: Critical
+prompt: We're hearing from customers that deploying AutoGluon models on OpenShift AI is way too complicated. Users have to
+  manually create custom serving runtimes with hand-written YAML, and the result is marked as unsupported by Red Hat. For
+  a framework that's all about making ML easy (AutoML), the deployment experience is a huge contradiction. We should make
+  AutoGluon a first-class supported serving runtime like vLLM and OpenVINO so users can just select it from a dropdown and
+  deploy.

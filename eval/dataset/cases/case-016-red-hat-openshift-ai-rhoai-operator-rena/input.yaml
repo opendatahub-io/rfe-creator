@@ -1,0 +1,29 @@
+clarifying_context: 'Customers: Platform Operators deploying Red Hat AI portfolio products, enterprises running RHOAI on OpenShift
+  looking to adopt RHAIIS and future AI products, Red Hat partners integrating with the AI operator ecosystem
+
+  Business justification: A portfolio-aligned operator name reduces onboarding friction for Platform Operators deploying new
+  products and supports a coherent product identity as the portfolio grows. It also eliminates the need to create and maintain
+  a separate operator for RHAIIS on OpenShift, reducing net new development work and ongoing support burden. This is strategically
+  important as the Red Hat AI portfolio expands beyond OpenShift-specific tooling.
+
+  User problem: Platform Operators see an operator named ''Red Hat OpenShift AI'' which implies it is specific to OpenShift,
+  creating confusion as the portfolio expands to cover broader AI products like RHAIIS with distributed inference across xKS
+  and OpenShift. The current naming also blocks the natural reuse of this operator for new products without creating a misleading
+  product identity.
+
+  Scope: Single focused need — a renaming effort across all customer-facing artifacts (CRDs, API groups, container images,
+  namespace defaults, CLI references, metrics, traces, telemetry, documentation). No functional changes to operator behavior,
+  capabilities, or supported configurations. Must include seamless upgrade path from RHOAI to RHAI without redeploying managed
+  workloads or manual CR migration.
+
+  Success criteria: All customer-facing operator artifacts carry the new RHAI name with no remnants of RHOAI naming; existing
+  RHOAI installations can upgrade to RHAI without redeploying managed workloads; existing Custom Resources created under RHOAI
+  continue to reconcile after upgrade without manual migration; metrics, distributed traces, and telemetry reflect the new
+  naming convention; Platform Operators can confirm rename completion and operator health from existing monitoring; installation
+  guide, upgrade guide, and CRD reference documentation updated to reflect the new name with explicit transition steps.'
+priority: Blocker
+prompt: We need to rename the Red Hat OpenShift AI (RHOAI) Operator to Red Hat AI (RHAI) Operator. The current name is too
+  narrow — it implies the operator is specific to OpenShift, but we're expanding the portfolio to include things like Red
+  Hat AI Inference Server (RHAIIS) with distributed inference on both xKS and OpenShift. Rather than building a completely
+  new operator for RHAIIS on OpenShift, we want to leverage the existing RHOAI operator, but the name needs to reflect the
+  broader portfolio scope. This is primarily a renaming effort across all customer-facing artifacts, not a functional change.
