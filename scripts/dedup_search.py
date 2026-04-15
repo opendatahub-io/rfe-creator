@@ -178,14 +178,49 @@ def _search_cache(cache, keywords, max_results):
     return scored[:max_results]
 
 
-def _escape_jql_keyword(kw):
-    """Escape JQL special characters in a keyword for use inside quotes."""
-    # Backslash must be escaped first to avoid double-escaping
-    kw = kw.replace("\\", "\\\\")
-    kw = kw.replace('"', '\\"')
-    for ch in "{}[]()+-&|!^~*?:":
-        kw = kw.replace(ch, f"\\{ch}")
-    return kw
+_LUCENE_SPECIALS = '+-&|!(){}[]^"~*?:/'
+
+
+def _lucene_escape(term):
+    """Escape Lucene-syntax metacharacters in a single term."""
+    # Backslash first so we don't double-escape the ones we add below
+    term = term.replace("\\", "\\\\")
+    for ch in _LUCENE_SPECIALS:
+        term = term.replace(ch, f"\\{ch}")
+    return term
+
+
+def _jql_string_escape(s):
+    """Escape a string for embedding inside a JQL double-quoted string."""
+    # Only \ and " need escaping at the JQL string layer
+    s = s.replace("\\", "\\\\")
+    s = s.replace('"', '\\"')
+    return s
+
+
+def _build_text_query_jql(keywords):
+    """Build a JQL-embeddable `text ~ "..."` clause from keywords.
+
+    Single-word keywords become bare Lucene terms. Multi-word keywords
+    become Lucene phrase queries (wrapped in Lucene double quotes). The
+    whole Lucene expression is then escaped for the outer JQL string.
+
+    Returns e.g. `text ~ "mlflow OR \\"model registry\\""`.
+    """
+    parts = []
+    for kw in keywords:
+        kw = kw.strip()
+        if not kw:
+            continue
+        escaped = _lucene_escape(kw)
+        if " " in kw:
+            parts.append(f'"{escaped}"')  # Lucene phrase query
+        else:
+            parts.append(escaped)
+    if not parts:
+        return None
+    lucene_expr = " OR ".join(parts)
+    return f'text ~ "{_jql_string_escape(lucene_expr)}"'
 
 
 def _search_jql(server, user, token, keywords, max_results, recent_days=None):
@@ -198,15 +233,11 @@ def _search_jql(server, user, token, keywords, max_results, recent_days=None):
     if not all([server, user, token]):
         return []
 
-    # Build text query: "kw1 OR kw2 OR kw3"
-    escaped = []
-    for kw in keywords:
-        # Escape JQL special characters in keyword
-        clean = _escape_jql_keyword(kw)
-        escaped.append(f'"{clean}"')
-    text_query = " OR ".join(escaped)
+    text_clause = _build_text_query_jql(keywords)
+    if text_clause is None:
+        return []
 
-    jql = f'{JQL_BASE} AND text ~ "{text_query}"'
+    jql = f'{JQL_BASE} AND {text_clause}'
     if recent_days:
         jql += f' AND created >= -{int(recent_days)}d'
     jql_encoded = urllib.parse.quote(jql, safe="")

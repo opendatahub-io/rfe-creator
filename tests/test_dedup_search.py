@@ -15,11 +15,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from unittest.mock import patch, MagicMock
 
 from dedup_search import (
+    _build_text_query_jql,
     _cache_age_hours,
     _cache_is_fresh,
-    _escape_jql_keyword,
     _extract_fallback_keywords,
+    _jql_string_escape,
     _load_cache,
+    _lucene_escape,
     _save_cache,
     _search_cache,
     _search_jql,
@@ -264,29 +266,128 @@ class TestCLI:
         assert _load_cache() is None
 
 
-# ─── JQL Escaping ────────────────────────────────────────────────────────────
+# ─── JQL / Lucene Escaping ───────────────────────────────────────────────────
 
-class TestEscapeJqlKeyword:
-    def test_plain_keyword(self):
-        assert _escape_jql_keyword("model") == "model"
-
-    def test_double_quotes(self):
-        assert _escape_jql_keyword('say "hello"') == 'say \\"hello\\"'
-
-    def test_backslash(self):
-        assert _escape_jql_keyword("path\\to") == "path\\\\to"
-
-    def test_braces_and_brackets(self):
-        assert _escape_jql_keyword("a{b}[c]") == "a\\{b\\}\\[c\\]"
+class TestLuceneEscape:
+    def test_plain_term(self):
+        assert _lucene_escape("model") == "model"
 
     def test_special_chars(self):
-        result = _escape_jql_keyword("a+b-c*d?e:")
-        assert result == "a\\+b\\-c\\*d\\?e\\:"
+        # All Lucene specials get a backslash prefix
+        assert _lucene_escape("a+b") == "a\\+b"
+        assert _lucene_escape("a(b)") == "a\\(b\\)"
+        assert _lucene_escape("a:b") == "a\\:b"
 
-    def test_combined(self):
-        # Backslash + quotes + brackets
-        result = _escape_jql_keyword('x\\y"z[w]')
-        assert result == 'x\\\\y\\"z\\[w\\]'
+    def test_backslash_first(self):
+        # Literal backslash must be escaped BEFORE we add more escapes
+        # (otherwise we'd double-escape our own escapes)
+        assert _lucene_escape("a\\b") == "a\\\\b"
+
+    def test_quote(self):
+        assert _lucene_escape('a"b') == 'a\\"b'
+
+
+class TestJqlStringEscape:
+    def test_plain(self):
+        assert _jql_string_escape("hello") == "hello"
+
+    def test_quote_and_backslash(self):
+        # JQL string layer: only \ and " need escaping
+        assert _jql_string_escape('a"b') == 'a\\"b'
+        assert _jql_string_escape("a\\b") == "a\\\\b"
+
+    def test_lucene_specials_untouched(self):
+        # Lucene specials are NOT JQL specials; pass through
+        assert _jql_string_escape("a+b") == "a+b"
+        assert _jql_string_escape("a(b)") == "a(b)"
+
+
+class TestBuildTextQueryJql:
+    """Regression tests — the previous implementation double-wrapped keywords
+    in quotes, producing malformed JQL like `text ~ ""a" OR "b""`."""
+
+    def test_single_word_keywords(self):
+        # Bug reproducer: this was producing `text ~ ""mlflow" OR "registry"…"`
+        clause = _build_text_query_jql(
+            ["mlflow", "registry", "sync", "integration"])
+        # No nested double quotes
+        assert '""' not in clause
+        # Single-word terms are bare, not phrase-quoted
+        assert clause == 'text ~ "mlflow OR registry OR sync OR integration"'
+
+    def test_multi_word_phrase(self):
+        # Multi-word keywords become Lucene phrases; JQL escapes the
+        # surrounding Lucene quotes as \"
+        clause = _build_text_query_jql(["model registry"])
+        assert clause == 'text ~ "\\"model registry\\""'
+
+    def test_mixed_single_and_phrase(self):
+        clause = _build_text_query_jql(["mlflow", "model registry"])
+        assert clause == 'text ~ "mlflow OR \\"model registry\\""'
+
+    def test_empty_keyword_stripped(self):
+        # Empty / whitespace-only entries are skipped (defensive — callers
+        # already strip, but don't trust the arg)
+        clause = _build_text_query_jql(["mlflow", "", "  "])
+        assert clause == 'text ~ "mlflow"'
+
+    def test_all_empty_returns_none(self):
+        assert _build_text_query_jql([]) is None
+        assert _build_text_query_jql(["", "  "]) is None
+
+    def test_lucene_specials_escaped(self):
+        # `+` is a Lucene metachar → becomes `\+` in Lucene, then `\\+`
+        # after JQL escapes the backslash.
+        clause = _build_text_query_jql(["a+b"])
+        assert clause == 'text ~ "a\\\\+b"'
+
+    def test_embedded_quote_in_phrase(self):
+        # A `"` inside a phrase: Lucene-escape to `\"`, then JQL-escape
+        # each backslash and quote.
+        clause = _build_text_query_jql(['say "hi"'])
+        # Lucene layer: `say \"hi\"` wrapped as `"say \"hi\""`
+        # JQL layer: every `\` → `\\`, every `"` → `\"`
+        # Final: text ~ "\"say \\\"hi\\\"\""
+        assert clause == 'text ~ "\\"say \\\\\\"hi\\\\\\"\\""'
+
+
+class TestSearchJqlEndToEnd:
+    """End-to-end validation that the URL sent to Jira contains syntactically
+    valid JQL (no double-quote collisions)."""
+
+    @patch("dedup_search.api_call_with_retry")
+    def test_generated_jql_is_parseable(self, mock_api):
+        """Regression for the 'Expecting OR/AND but got mlflow' HTTP 400."""
+        mock_api.return_value = {"issues": []}
+        _search_jql("https://s", "u", "t",
+                    ["mlflow", "registry", "sync", "integration"], 10)
+        call_path = mock_api.call_args[0][1]
+        decoded_jql = urllib.parse.unquote(
+            call_path.split("jql=", 1)[1].split("&", 1)[0])
+        # The decoded JQL must NOT contain the broken `""term"` pattern
+        assert '""' not in decoded_jql, \
+            f"Malformed JQL — nested empty quotes: {decoded_jql!r}"
+        # Sanity check the overall shape
+        assert decoded_jql.startswith(
+            'project = RHAIRFE AND statusCategory != Done AND text ~ ')
+        assert "mlflow" in decoded_jql
+        assert " OR " in decoded_jql
+
+    @patch("dedup_search.api_call_with_retry")
+    def test_generated_jql_with_phrase(self, mock_api):
+        mock_api.return_value = {"issues": []}
+        _search_jql("https://s", "u", "t",
+                    ["mlflow", "model registry"], 10)
+        call_path = mock_api.call_args[0][1]
+        decoded_jql = urllib.parse.unquote(
+            call_path.split("jql=", 1)[1].split("&", 1)[0])
+        # The phrase should survive as an escaped Lucene phrase
+        assert '\\"model registry\\"' in decoded_jql
+        # Whole JQL should be the expected exact form
+        assert decoded_jql == (
+            'project = RHAIRFE AND statusCategory != Done AND '
+            'text ~ "mlflow OR \\"model registry\\""'
+        )
 
 
 # ─── _search_jql (mocked HTTP) ──────────────────────────────────────────────
