@@ -5,10 +5,10 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 import pytest
-import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
@@ -51,7 +51,7 @@ def tmp_dir(tmp_path, monkeypatch):
     # Point CACHE_PATH to temp dir
     import dedup_search
     monkeypatch.setattr(dedup_search, "CACHE_PATH",
-                        str(tmp_path / "tmp" / "dedup-cache.yaml"))
+                        str(tmp_path / "tmp" / "dedup-cache.json"))
     yield tmp_path
     os.chdir(orig)
 
@@ -163,7 +163,7 @@ class TestCacheIO:
         import dedup_search
         os.makedirs(os.path.dirname(dedup_search.CACHE_PATH), exist_ok=True)
         with open(dedup_search.CACHE_PATH, "w") as f:
-            f.write("{{invalid yaml::")
+            f.write("{{invalid json::")
         assert _load_cache() is None
 
 
@@ -437,3 +437,96 @@ class TestSearch:
         }
         result = search("model", ["model"], max_results=5)
         assert len(result["matches"]) == 5
+
+
+# ─── --headless and --recent-only modes ──────────────────────────────────────
+
+class TestHeadlessMode:
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.refresh_cache")
+    @patch("dedup_search._load_cache", return_value=None)
+    @patch("dedup_search._search_jql")
+    def test_headless_skips_cache_build(self, mock_jql, mock_load,
+                                         mock_refresh, mock_env):
+        """Headless mode must never call refresh_cache, even if cache missing."""
+        mock_jql.return_value = [("T-50", "model fine-tuning")]
+        result = search("model", ["model"], headless=True)
+        mock_refresh.assert_not_called()
+        # Should have fallen through to JQL with recent_days set
+        assert mock_jql.called
+        kwargs = mock_jql.call_args.kwargs
+        # recent_days should be set when headless with no cache
+        assert kwargs.get("recent_days") == 30
+        assert result["source"] == "jira"
+        assert len(result["matches"]) == 1
+
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.refresh_cache")
+    @patch("dedup_search._load_cache")
+    @patch("dedup_search._search_jql", return_value=[])
+    def test_headless_uses_fresh_cache(self, mock_jql, mock_load,
+                                        mock_refresh, mock_env):
+        """Headless mode uses a fresh cache normally — no refresh, no narrowed JQL."""
+        mock_load.return_value = {
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "server": "https://s",
+            "issues": {
+                "T-1": "model serving",
+                "T-2": "model training",
+                "T-3": "model registry",
+                "T-4": "model monitoring",
+            },
+        }
+        result = search("model", ["model"], headless=True)
+        mock_refresh.assert_not_called()
+        mock_jql.assert_not_called()  # 4 cache hits → no fallback
+        assert result["source"] == "cache"
+
+
+class TestRecentOnlyMode:
+    @patch("dedup_search.require_env",
+           return_value=("https://s", "u", "t"))
+    @patch("dedup_search._ensure_fresh_cache")
+    @patch("dedup_search._search_jql")
+    def test_recent_only_bypasses_cache(self, mock_jql, mock_cache, mock_env):
+        """--recent-only must skip _ensure_fresh_cache entirely."""
+        mock_jql.return_value = [("T-99", "recent model RFE")]
+        result = search("model", ["model"], recent_only=True)
+        mock_cache.assert_not_called()
+        mock_jql.assert_called_once()
+        kwargs = mock_jql.call_args.kwargs
+        assert kwargs.get("recent_days") == 30
+        assert result["source"] == "jira-recent"
+        assert result["cache_age_hours"] is None
+        assert len(result["matches"]) == 1
+
+    @patch("dedup_search.require_env", return_value=("", "", ""))
+    @patch("dedup_search._ensure_fresh_cache")
+    def test_recent_only_no_creds(self, mock_cache, mock_env):
+        """--recent-only with no credentials returns structured error, no crash."""
+        result = search("model", ["model"], recent_only=True)
+        mock_cache.assert_not_called()
+        assert result["source"] == "jira-recent"
+        assert result["error"] == "no_credentials"
+        assert result["matches"] == []
+
+
+class TestSearchJqlRecentDays:
+    @patch("dedup_search.api_call_with_retry")
+    def test_recent_days_appended_to_jql(self, mock_api):
+        mock_api.return_value = {"issues": []}
+        _search_jql("https://s", "u", "t", ["model"], 10, recent_days=30)
+        call_path = mock_api.call_args[0][1]
+        # JQL gets URL-encoded, so look for the encoded form of "created >= -30d"
+        decoded = urllib.parse.unquote(call_path)
+        assert "created >= -30d" in decoded
+
+    @patch("dedup_search.api_call_with_retry")
+    def test_recent_days_omitted_by_default(self, mock_api):
+        mock_api.return_value = {"issues": []}
+        _search_jql("https://s", "u", "t", ["model"], 10)
+        call_path = mock_api.call_args[0][1]
+        decoded = urllib.parse.unquote(call_path)
+        assert "created" not in decoded

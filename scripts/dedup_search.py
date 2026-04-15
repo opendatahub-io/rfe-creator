@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Search for potential duplicate RFEs in Jira.
 
-Maintains a local YAML cache of RFE summaries for fast lookups,
+Maintains a local JSON cache of RFE summaries for fast lookups,
 with JQL text search as fallback.
 
 Usage:
     python3 scripts/dedup_search.py search "problem text" --keywords "kw1,kw2" [--max-results 10]
+    python3 scripts/dedup_search.py search "..." --keywords "..." --headless      # CI: never block on cache build
+    python3 scripts/dedup_search.py search "..." --keywords "..." --recent-only   # Skip cache, narrow JQL only
     python3 scripts/dedup_search.py refresh-cache [--force]
-    python3 scripts/dedup_search.py cache-info
+    python3 scripts/dedup_search.py cache-info [--json]
 """
 
 import argparse
@@ -17,19 +19,15 @@ import sys
 import urllib.parse
 from datetime import datetime, timezone
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
-
 # Add parent directory so we can import jira_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jira_utils import require_env, api_call_with_retry
 
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "..", "tmp", "dedup-cache.yaml")
+                          "..", "tmp", "dedup-cache.json")
 CACHE_TTL_HOURS = 4
 JQL_BASE = "project = RHAIRFE AND statusCategory != Done"
+RECENT_ONLY_DAYS = 30
 
 _STOPWORDS = frozenset({
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -53,25 +51,21 @@ _STOPWORDS = frozenset({
 
 def _load_cache():
     """Load cache from disk. Returns dict or None if unavailable/corrupt."""
-    if yaml is None:
-        return None
     try:
         with open(CACHE_PATH, "r") as f:
-            data = yaml.safe_load(f)
+            data = json.load(f)
         if not isinstance(data, dict) or "issues" not in data:
             return None
         return data
-    except (FileNotFoundError, yaml.YAMLError, OSError):
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
 
 
 def _save_cache(data):
     """Write cache to disk."""
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-    if yaml is None:
-        return
     with open(CACHE_PATH, "w") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def _cache_age_hours(cache):
@@ -135,14 +129,29 @@ def refresh_cache(server, user, token):
     return cache
 
 
-def _ensure_fresh_cache(server, user, token):
-    """Return a fresh cache, refreshing if needed."""
+def _ensure_fresh_cache(server, user, token, allow_build=True):
+    """Return a fresh cache, refreshing if needed.
+
+    If allow_build is False, never trigger a build — return the existing
+    cache (possibly stale or None) as-is. This is used by headless callers
+    that can't afford to block on a full rebuild.
+    """
     cache = _load_cache()
     if _cache_is_fresh(cache, server):
         return cache
+    if not allow_build:
+        return cache  # Caller opted out of blocking build
     # Stale or missing — need credentials to refresh
     if not all([server, user, token]):
         return cache  # Return stale cache (or None) if no creds
+    # Let the user know why there's a pause
+    if cache is None:
+        print("Building duplicate-detection cache (first run, "
+              "this may take a moment)...", file=sys.stderr)
+    else:
+        age = _cache_age_hours(cache)
+        print(f"Refreshing duplicate-detection cache "
+              f"(last built {age}h ago)...", file=sys.stderr)
     try:
         return refresh_cache(server, user, token)
     except Exception as e:
@@ -157,10 +166,11 @@ def _search_cache(cache, keywords, max_results):
     if not cache or not cache.get("issues"):
         return []
 
+    keywords_lower = [kw.lower() for kw in keywords]
     scored = []
     for key, summary in cache["issues"].items():
         summary_lower = summary.lower()
-        hits = sum(1 for kw in keywords if kw.lower() in summary_lower)
+        hits = sum(1 for kw in keywords_lower if kw in summary_lower)
         if hits > 0:
             scored.append((hits, key, summary))
 
@@ -178,8 +188,13 @@ def _escape_jql_keyword(kw):
     return kw
 
 
-def _search_jql(server, user, token, keywords, max_results):
-    """Search Jira via JQL text operator. Returns list of (key, summary)."""
+def _search_jql(server, user, token, keywords, max_results, recent_days=None):
+    """Search Jira via JQL text operator. Returns list of (key, summary).
+
+    If recent_days is set, scope the query to issues created within that
+    window (e.g. 30) — used for fast "recent-only" searches that skip the
+    cache entirely.
+    """
     if not all([server, user, token]):
         return []
 
@@ -192,6 +207,8 @@ def _search_jql(server, user, token, keywords, max_results):
     text_query = " OR ".join(escaped)
 
     jql = f'{JQL_BASE} AND text ~ "{text_query}"'
+    if recent_days:
+        jql += f' AND created >= -{int(recent_days)}d'
     jql_encoded = urllib.parse.quote(jql, safe="")
     path = (f"/search/jql?jql={jql_encoded}&maxResults={max_results}"
             f"&fields=key,summary")
@@ -209,8 +226,16 @@ def _search_jql(server, user, token, keywords, max_results):
         return []
 
 
-def search(text, keywords, max_results=10):
-    """Run two-tier duplicate search. Returns JSON-serializable dict."""
+def search(text, keywords, max_results=10, headless=False, recent_only=False):
+    """Run two-tier duplicate search. Returns JSON-serializable dict.
+
+    headless:     never trigger a blocking cache build. If the cache is
+                  missing or stale, fall straight to a scoped JQL query.
+                  Intended for CI / non-interactive callers.
+    recent_only:  bypass the cache entirely and run a narrow JQL scoped to
+                  recently-created issues. Fast, but only catches recent
+                  duplicates. Useful when the user declines a cache build.
+    """
     server, user, token = require_env()
     has_creds = all([server, user, token])
 
@@ -218,18 +243,44 @@ def search(text, keywords, max_results=10):
         return {"source": "none", "cache_age_hours": None,
                 "keywords_used": [], "matches": [], "error": None}
 
-    # Ensure cache is fresh
-    cache = _ensure_fresh_cache(server, user, token)
+    # Recent-only: skip the cache entirely
+    if recent_only:
+        jql_results = _search_jql(server, user, token, keywords, max_results,
+                                  recent_days=RECENT_ONLY_DAYS) if has_creds else []
+        matches = []
+        seen = set()
+        for key, summary in jql_results:
+            if key not in seen:
+                seen.add(key)
+                url = f"{server}/browse/{key}" if server else ""
+                matches.append({"key": key, "summary": summary, "url": url})
+        matches = matches[:max_results]
+        return {
+            "source": "jira-recent",
+            "cache_age_hours": None,
+            "keywords_used": keywords,
+            "matches": matches,
+            "error": None if has_creds else "no_credentials",
+        }
+
+    # Normal path: cache + JQL fallback.
+    # In headless mode, don't trigger a blocking cache build.
+    cache = _ensure_fresh_cache(server, user, token,
+                                allow_build=not headless)
     age = _cache_age_hours(cache)
 
     # Tier 1: local cache search
     cache_results = _search_cache(cache, keywords, max_results)
     source = "cache"
 
-    # Tier 2: JQL fallback if cache results are sparse
+    # Tier 2: JQL fallback if cache results are sparse.
+    # In headless mode without a usable cache, narrow the JQL to recent
+    # issues so we don't fan out to a slow unbounded text search.
     jql_results = []
     if has_creds and len(cache_results) < 3:
-        jql_results = _search_jql(server, user, token, keywords, max_results)
+        recent_days = RECENT_ONLY_DAYS if (headless and not cache) else None
+        jql_results = _search_jql(server, user, token, keywords, max_results,
+                                  recent_days=recent_days)
         source = "cache+jira" if cache_results else "jira"
 
     # Merge and deduplicate
@@ -272,7 +323,8 @@ def search(text, keywords, max_results=10):
 def cmd_search(args):
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()] \
         if args.keywords else _extract_fallback_keywords(args.text)
-    result = search(args.text, keywords, args.max_results)
+    result = search(args.text, keywords, args.max_results,
+                    headless=args.headless, recent_only=args.recent_only)
     print(json.dumps(result, indent=2))
 
 
@@ -342,9 +394,20 @@ def main():
     p_search = sub.add_parser("search", help="Search for duplicates")
     p_search.add_argument("text", help="Problem statement text")
     p_search.add_argument("--keywords",
-                          help="Comma-separated key phrases (LLM-extracted)")
+                          help="Comma-separated key phrases (LLM-extracted). "
+                               "Optional — a simple stopword-filtered fallback "
+                               "is used if omitted.")
     p_search.add_argument("--max-results", type=int, default=10,
                           help="Maximum matches to return")
+    p_search.add_argument("--headless", action="store_true",
+                          help="Never trigger a blocking cache build. If the "
+                               "cache is missing/stale, fall through to a "
+                               "narrow JQL query scoped to recent issues.")
+    p_search.add_argument("--recent-only", action="store_true",
+                          help="Skip the cache entirely and run a targeted "
+                               f"JQL scoped to issues created in the last "
+                               f"{RECENT_ONLY_DAYS} days. Fast, but only "
+                               f"catches recent duplicates.")
     p_search.set_defaults(func=cmd_search)
 
     # refresh-cache
