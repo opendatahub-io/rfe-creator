@@ -41,11 +41,9 @@ The pipeline chains 5 sub-skills: `rfe.create` -> `rfe.auto-fix` -> `rfe.review`
 
 ## Inputs
 
-Each test case in `eval/dataset/cases/` contains 4 files:
+Each test case in `eval/dataset/cases/` contains 2 files:
 
 - **input.yaml**: The test input with `prompt` (concise problem), `clarifying_context` (structured business context), `rfe_content` (full RFE markdown), plus metadata (`rfe_id`, `title`, `priority`, `size`, `status`, `source_labels`, `comments`)
-- **reference-rfe.md**: Gold standard RFE output with frontmatter (`rfe_id`, `title`, `priority`, `size`, `status`) and body sections (Summary, Problem Statement, Affected Customers, Business Justification, Acceptance Criteria, Success Criteria)
-- **reference-review.md**: Gold standard review with frontmatter (scores, pass, recommendation, feasibility) and body (Assessor Feedback table, Verdict, Technical Feasibility, Strategy Considerations)
 - **annotations.yaml**: Expected scores per criterion (nullable), pass/fail, recommendation, tolerance, tags, difficulty
 
 ## Outputs
