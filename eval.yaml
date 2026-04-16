@@ -1,8 +1,11 @@
 name: rfe-speedrun
 description: End-to-end RFE pipeline — create, review, auto-fix, split, and submit RFEs
 skill: rfe.speedrun
-arguments: --headless --dry-run --input batch.yaml
 runner: claude-code
+
+execution:
+  mode: batch
+  arguments: --headless --dry-run --input batch.yaml
 
 permissions:
   allow:
@@ -13,32 +16,20 @@ permissions:
   deny: []
 
 runner_options:
-  timeout: 10800     # 3 hours — opus with 20 cases + splits needs >90 min
+  timeout: 7200     # 2 hours — opus with 20 cases + splits needs ~60 min
 
 mlflow_experiment: rfe-speedrun-eval
 
 dataset:
   path: eval/dataset/cases
   schema: |
-    Each case directory contains 4 files:
+    Each case directory contains 2 files:
 
     - input.yaml: Test input with fields:
       - prompt (string): Concise problem statement (1-2 sentences)
       - priority (string): Blocker/Critical/Major/Normal/Minor
       - clarifying_context (string): Extended business context with
         customer segments, justification, scope, success criteria
-
-    - reference-rfe.md: Gold standard RFE output. Markdown with YAML
-      frontmatter (rfe_id, title, priority, size, status, parent_key).
-      Body sections: Summary, Problem Statement, Affected Customers,
-      Business Justification, Acceptance Criteria, Success Criteria.
-
-    - reference-review.md: Gold standard review. Markdown with YAML
-      frontmatter (rfe_id, score 0-10, pass boolean, recommendation,
-      feasibility, revised, needs_attention, scores.what/why/open_to_how/
-      not_a_task/right_sized each 0-2, before_score, before_scores).
-      Body: Assessor Feedback table, Verdict, Feedback, Technical
-      Feasibility, Strategy Considerations, Revision History.
 
     - annotations.yaml: Test metadata with fields:
       - expected_scores (dict with what/why/open_to_how/not_a_task/right_sized, nullable floats)
