@@ -14,7 +14,7 @@ import yaml
 
 EXACT_FIELDS = ["pass", "recommendation", "auto_revised", "feasibility", "needs_attention"]
 TOLERANCE_FIELDS = ["score"]
-SCORE_SUB_FIELDS = ["what", "why", "open_to_how", "not_a_task", "right_sized"]
+SCORE_SUB_FIELDS = ["what", "why", "open_to_how", "not_a_task", "right_sized", "title_quality"]
 
 
 def compare_review(rfe_id, golden_dir, new_dir, golden_review_path):

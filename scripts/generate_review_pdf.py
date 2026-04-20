@@ -179,10 +179,10 @@ def main():
             before_scores = parse_before_scores(revision_history, after_scores)
 
         fm_before_score = review_fm.get('before_score')
-        before_total = fm_before_score if fm_before_score is not None else sum(before_scores.values())
-        after_total = review_fm.get('score', sum(after_scores.values()))
+        before_total = fm_before_score if fm_before_score is not None else sum(v for v in before_scores.values() if v is not None)
+        after_total = review_fm.get('score', sum(v for v in after_scores.values() if v is not None))
 
-        before_pass = before_total >= 7 and all(v > 0 for v in before_scores.values())
+        before_pass = before_total >= 7 and all(v > 0 for v in before_scores.values() if v is not None)
         after_pass = review_fm.get('pass', False)
 
         diff_text = generate_diff(rfe_id, tasks_dir, originals_dir)
@@ -307,15 +307,18 @@ def main():
     reworded_blocks = sum(1 for r in rfes if r['removed_context'] for b in r['removed_context'].get('blocks', []) if b.get('type') == 'reworded')
 
     # Per-criterion score distributions for existing RFEs
-    criterion_keys = ['what', 'why', 'open_to_how', 'not_a_task', 'right_sized']
+    criterion_keys = ['what', 'why', 'open_to_how', 'not_a_task', 'right_sized', 'title_quality']
     criterion_labels_map = {'what': 'WHAT', 'why': 'WHY', 'open_to_how': 'HOW',
-                            'not_a_task': 'Task', 'right_sized': 'Scope'}
+                            'not_a_task': 'Task', 'right_sized': 'Scope',
+                            'title_quality': 'Title (advisory)'}
     ex_no_errors = [r for r in existing if not r.get('error')]
     criterion_dist = {}
     for key in criterion_keys:
-        before_counts = Counter(r['before_scores'].get(key, 0) for r in ex_no_errors)
-        after_counts = Counter(r['after_scores'].get(key, 0) for r in ex_no_errors)
-        n = len(ex_no_errors) or 1
+        before_vals = [r['before_scores'].get(key) for r in ex_no_errors if r['before_scores'].get(key) is not None]
+        after_vals = [r['after_scores'].get(key) for r in ex_no_errors if r['after_scores'].get(key) is not None]
+        before_counts = Counter(before_vals)
+        after_counts = Counter(after_vals)
+        n = max(len(before_vals), len(after_vals), 1)
         criterion_dist[key] = {
             'before': {s: before_counts.get(s, 0) / n * 100 for s in [0, 1, 2]},
             'after': {s: after_counts.get(s, 0) / n * 100 for s in [0, 1, 2]},
