@@ -23,6 +23,7 @@ models:
 # Permissions for headless execution
 permissions:
   allow:
+    - "Skill"
     - "Write(/tmp/rfe-assess/**)"
     - "Write(/private/tmp/rfe-assess/**)"
     - "Edit(/tmp/rfe-assess/**)"
