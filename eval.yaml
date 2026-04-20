@@ -317,6 +317,26 @@ judges:
           errors.append(f"Only found phases: {phases_found}; expected create + auto-fix + submit")
       return (len(errors) == 0, "; ".join(errors) if errors else f"Phases: {', '.join(phases_found)}")
 
+  - name: architecture_context_used
+    description: |
+      Verify that every feasibility review used architecture context.
+      The LATEST_VERSION file and PLATFORM.md must have been read,
+      and no feasibility file should contain "architecture context was
+      not available".
+    check: |
+      files = outputs.get("files", {})
+      feasibility = {k: v for k, v in files.items()
+                     if k.endswith("-feasibility.md")}
+      if not feasibility:
+          return (False, "No feasibility files found")
+      errors = []
+      for fname, content in sorted(feasibility.items()):
+          lower = content.lower()
+          if "architecture context was not available" in lower:
+              errors.append(f"{fname}: architecture context not used")
+      return (len(errors) == 0,
+              "; ".join(errors) if errors else f"{len(feasibility)} feasibility reviews used architecture context")
+
   # --- LLM judges ---
 
   - name: rfe_quality
@@ -418,6 +438,8 @@ thresholds:
   recommendation_consistency:
     min_pass_rate: 1.0
   pipeline_flow:
+    min_pass_rate: 1.0
+  architecture_context_used:
     min_pass_rate: 1.0
   rfe_quality:
     min_mean: 3.5
