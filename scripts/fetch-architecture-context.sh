@@ -24,4 +24,5 @@ else
   git -C "$CONTEXT_DIR" sparse-checkout set "architecture/$LATEST"
 fi
 
+echo "$LATEST" > "$CONTEXT_DIR/LATEST_VERSION"
 echo "Architecture context ready: $CONTEXT_DIR/architecture/$LATEST"
