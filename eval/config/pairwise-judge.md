@@ -33,9 +33,18 @@ Be decisive. Only declare "tie" if the outputs are genuinely equivalent across a
 
 Be aware that outputs are presented in arbitrary order. Do not let presentation order influence your judgment.
 
-You MUST output ONLY a JSON object — no prose before or after. Do not include any text outside the JSON block.
+## Output format (strict)
 
-```json
+Return a single JSON object and nothing else.
+
+- The first character of your response MUST be `{` and the last character MUST be `}`.
+- Put ALL of your reasoning *inside* the JSON, in the `reasoning` fields. Do not write any prose, headers, bullet lists, or commentary outside the JSON object.
+- Do not wrap the JSON in code fences (no ```json), no leading "Here is..." sentence, no trailing analysis.
+- The object MUST close — every `{` needs a matching `}`. Do not stop mid-object.
+
+Schema:
+
+```
 {
   "dimensions": {
     "rfe_quality": {"preferred": "A" or "B" or "tie", "reasoning": "..."},
