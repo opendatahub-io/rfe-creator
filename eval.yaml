@@ -1,12 +1,26 @@
 name: rfe-speedrun
 description: End-to-end RFE pipeline — create, review, auto-fix, split, and submit RFEs
 skill: rfe.speedrun
-runner: claude-code
 
+# Execution — how the skill processes test cases (runner-agnostic)
 execution:
   mode: batch
   arguments: --headless --dry-run --input batch.yaml
+  timeout: 7200          # 2 hours — opus with 20 cases + splits needs ~60 min
+  max_budget_usd: 100.0  # Per-invocation cost cap
 
+# Runner — agent harness + runner-specific knobs
+runner:
+  type: claude-code
+  effort: high            # Claude Code reasoning effort: low | medium | high | xhigh | max
+
+# Models — defaults for each role (CLI flags override)
+models:
+  skill: claude-opus-4-7
+  subagent: claude-opus-4-7
+  judge: claude-opus-4-7
+
+# Permissions for headless execution
 permissions:
   allow:
     - "Write(/tmp/rfe-assess/**)"
@@ -15,10 +29,9 @@ permissions:
     - "Edit(/private/tmp/rfe-assess/**)"
   deny: []
 
-runner_options:
-  timeout: 7200     # 2 hours — opus with 20 cases + splits needs ~60 min
-
-mlflow_experiment: rfe-speedrun-eval
+# MLflow logging target
+mlflow:
+  experiment: rfe-speedrun-eval
 
 dataset:
   path: eval/dataset/cases
@@ -393,7 +406,6 @@ judges:
   - name: pairwise
     description: Blind A/B comparison of RFE pipeline output quality across runs
     prompt_file: eval/config/pairwise-judge.md
-    model: claude-sonnet-4-6  # different model avoids self-judging bias
 
 thresholds:
   files_exist:
