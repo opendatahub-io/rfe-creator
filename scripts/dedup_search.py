@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Add parent directory so we can import jira_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -199,28 +199,26 @@ def _jql_string_escape(s):
 
 
 def _build_text_query_jql(keywords):
-    """Build a JQL-embeddable `text ~ "..."` clause from keywords.
+    """Build JQL text search clauses from keywords.
 
-    Single-word keywords become bare Lucene terms. Multi-word keywords
-    become Lucene phrase queries (wrapped in Lucene double quotes). The
-    whole Lucene expression is then escaped for the outer JQL string.
+    Each keyword becomes a separate ``text ~ "keyword"`` clause joined
+    with OR.  This avoids embedding Lucene OR/phrase syntax inside a
+    single ``text ~`` value, which is not portable across all Jira
+    implementations.
 
-    Returns e.g. `text ~ "mlflow OR \\"model registry\\""`.
+    Returns e.g. ``(text ~ "mlflow" OR text ~ "model registry")``.
     """
-    parts = []
+    clauses = []
     for kw in keywords:
         kw = kw.strip()
         if not kw:
             continue
-        escaped = _lucene_escape(kw)
-        if " " in kw:
-            parts.append(f'"{escaped}"')  # Lucene phrase query
-        else:
-            parts.append(escaped)
-    if not parts:
+        clauses.append(f'text ~ "{_jql_string_escape(kw)}"')
+    if not clauses:
         return None
-    lucene_expr = " OR ".join(parts)
-    return f'text ~ "{_jql_string_escape(lucene_expr)}"'
+    if len(clauses) == 1:
+        return clauses[0]
+    return "(" + " OR ".join(clauses) + ")"
 
 
 def _search_jql(server, user, token, keywords, max_results, recent_days=None):
@@ -239,7 +237,9 @@ def _search_jql(server, user, token, keywords, max_results, recent_days=None):
 
     jql = f'{JQL_BASE} AND {text_clause}'
     if recent_days:
-        jql += f' AND created >= -{int(recent_days)}d'
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(recent_days))
+                  ).strftime("%Y-%m-%d")
+        jql += f' AND created >= "{cutoff}"'
     jql_encoded = urllib.parse.quote(jql, safe="")
     path = (f"/search/jql?jql={jql_encoded}&maxResults={max_results}"
             f"&fields=key,summary")

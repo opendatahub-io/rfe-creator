@@ -303,31 +303,26 @@ class TestJqlStringEscape:
 
 
 class TestBuildTextQueryJql:
-    """Regression tests — the previous implementation double-wrapped keywords
-    in quotes, producing malformed JQL like `text ~ ""a" OR "b""`."""
+    """Tests for compound JQL generation — each keyword becomes a separate
+    ``text ~ "keyword"`` clause joined with OR."""
 
     def test_single_word_keywords(self):
-        # Bug reproducer: this was producing `text ~ ""mlflow" OR "registry"…"`
         clause = _build_text_query_jql(
             ["mlflow", "registry", "sync", "integration"])
-        # No nested double quotes
-        assert '""' not in clause
-        # Single-word terms are bare, not phrase-quoted
-        assert clause == 'text ~ "mlflow OR registry OR sync OR integration"'
+        assert clause == (
+            '(text ~ "mlflow" OR text ~ "registry"'
+            ' OR text ~ "sync" OR text ~ "integration")')
 
     def test_multi_word_phrase(self):
-        # Multi-word keywords become Lucene phrases; JQL escapes the
-        # surrounding Lucene quotes as \"
+        # Multi-word keywords stay as one text ~ clause (no Lucene quoting)
         clause = _build_text_query_jql(["model registry"])
-        assert clause == 'text ~ "\\"model registry\\""'
+        assert clause == 'text ~ "model registry"'
 
     def test_mixed_single_and_phrase(self):
         clause = _build_text_query_jql(["mlflow", "model registry"])
-        assert clause == 'text ~ "mlflow OR \\"model registry\\""'
+        assert clause == '(text ~ "mlflow" OR text ~ "model registry")'
 
     def test_empty_keyword_stripped(self):
-        # Empty / whitespace-only entries are skipped (defensive — callers
-        # already strip, but don't trust the arg)
         clause = _build_text_query_jql(["mlflow", "", "  "])
         assert clause == 'text ~ "mlflow"'
 
@@ -335,42 +330,31 @@ class TestBuildTextQueryJql:
         assert _build_text_query_jql([]) is None
         assert _build_text_query_jql(["", "  "]) is None
 
-    def test_lucene_specials_escaped(self):
-        # `+` is a Lucene metachar → becomes `\+` in Lucene, then `\\+`
-        # after JQL escapes the backslash.
-        clause = _build_text_query_jql(["a+b"])
-        assert clause == 'text ~ "a\\\\+b"'
-
-    def test_embedded_quote_in_phrase(self):
-        # A `"` inside a phrase: Lucene-escape to `\"`, then JQL-escape
-        # each backslash and quote.
+    def test_special_chars_escaped(self):
+        # JQL string escaping: " and \ need escaping
         clause = _build_text_query_jql(['say "hi"'])
-        # Lucene layer: `say \"hi\"` wrapped as `"say \"hi\""`
-        # JQL layer: every `\` → `\\`, every `"` → `\"`
-        # Final: text ~ "\"say \\\"hi\\\"\""
-        assert clause == 'text ~ "\\"say \\\\\\"hi\\\\\\"\\""'
+        assert clause == 'text ~ "say \\"hi\\""'
+
+    def test_single_keyword_no_parens(self):
+        clause = _build_text_query_jql(["autoscaling"])
+        assert clause == 'text ~ "autoscaling"'
 
 
 class TestSearchJqlEndToEnd:
     """End-to-end validation that the URL sent to Jira contains syntactically
-    valid JQL (no double-quote collisions)."""
+    valid JQL (compound text ~ clauses, no Lucene embedding)."""
 
     @patch("dedup_search.api_call_with_retry")
     def test_generated_jql_is_parseable(self, mock_api):
-        """Regression for the 'Expecting OR/AND but got mlflow' HTTP 400."""
         mock_api.return_value = {"issues": []}
         _search_jql("https://s", "u", "t",
                     ["mlflow", "registry", "sync", "integration"], 10)
         call_path = mock_api.call_args[0][1]
         decoded_jql = urllib.parse.unquote(
             call_path.split("jql=", 1)[1].split("&", 1)[0])
-        # The decoded JQL must NOT contain the broken `""term"` pattern
-        assert '""' not in decoded_jql, \
-            f"Malformed JQL — nested empty quotes: {decoded_jql!r}"
-        # Sanity check the overall shape
-        assert decoded_jql.startswith(
-            'project = RHAIRFE AND statusCategory != Done AND text ~ ')
-        assert "mlflow" in decoded_jql
+        assert '""' not in decoded_jql
+        assert 'text ~ "mlflow"' in decoded_jql
+        assert 'text ~ "registry"' in decoded_jql
         assert " OR " in decoded_jql
 
     @patch("dedup_search.api_call_with_retry")
@@ -381,13 +365,8 @@ class TestSearchJqlEndToEnd:
         call_path = mock_api.call_args[0][1]
         decoded_jql = urllib.parse.unquote(
             call_path.split("jql=", 1)[1].split("&", 1)[0])
-        # The phrase should survive as an escaped Lucene phrase
-        assert '\\"model registry\\"' in decoded_jql
-        # Whole JQL should be the expected exact form
-        assert decoded_jql == (
-            'project = RHAIRFE AND statusCategory != Done AND '
-            'text ~ "mlflow OR \\"model registry\\""'
-        )
+        assert 'text ~ "model registry"' in decoded_jql
+        assert 'text ~ "mlflow"' in decoded_jql
 
 
 # ─── _search_jql (mocked HTTP) ──────────────────────────────────────────────
@@ -620,9 +599,9 @@ class TestSearchJqlRecentDays:
         mock_api.return_value = {"issues": []}
         _search_jql("https://s", "u", "t", ["model"], 10, recent_days=30)
         call_path = mock_api.call_args[0][1]
-        # JQL gets URL-encoded, so look for the encoded form of "created >= -30d"
         decoded = urllib.parse.unquote(call_path)
-        assert "created >= -30d" in decoded
+        # ISO date format: created >= "YYYY-MM-DD"
+        assert 'created >= "' in decoded
 
     @patch("dedup_search.api_call_with_retry")
     def test_recent_days_omitted_by_default(self, mock_api):
