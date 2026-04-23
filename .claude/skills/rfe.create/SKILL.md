@@ -72,17 +72,18 @@ Before asking clarifying questions, check whether similar RFEs already exist in 
 
 4. Parse the JSON output. If matches were found:
 
-   **Interactive mode**: Present the top 5 matches as a table:
+   **Interactive mode**: Use AskUserQuestion to present matches AND ask in one call — do NOT output matches as a text response (a text-only response ends the conversation without asking). Include the matches table in the question text:
 
-   | Key | Summary | Link |
-   |-----|---------|------|
-   | RFE-1234 | Example summary | [View](https://...) |
+   > "I found existing RFEs that may overlap with your idea:
+   > - RHAIRFE-1234: Example summary (http://...)
+   > - RHAIRFE-5678: Another summary (http://...)
+   >
+   > Do any of these already cover what you need?"
+   >
+   > Options: "Yes, already covered" / "No, mine is different" / "Not sure"
 
-   Then ask the user:
-   > "I found existing RFEs that may overlap with your idea. Do any of these already cover what you need? (yes/no/not sure)"
-
-   - If **yes**: Ask which one(s). Suggest they comment on the existing RFE instead of creating a new one. Offer to continue creating a new RFE anyway if they want.
-   - If **no** or **not sure**: Continue to Step 2.
+   - If **"Yes, already covered"**: Suggest they comment on the existing RFE instead. Offer to continue creating a new RFE anyway if they want.
+   - If **"No, mine is different"** or **"Not sure"**: Continue to Step 2.
 
    **Headless mode (`--headless`)**: Log the matches to stderr but do not block. Proceed directly to Step 3.
 
