@@ -1,0 +1,28 @@
+clarifying_context: 'Customers: Regulated industry customers (financial services, government, healthcare)
+  requiring cryptographic proof that deployed AI models have not been tampered with since training.
+
+  Business justification: The platform already supports model signing at storage time via Trusted
+  Artifact Signer integration, but the runtime serving layer performs no integrity checks. This
+  creates a gap in the trust chain — customers cannot prove to auditors that the model being served
+  is the same one that was signed and approved. Compliance frameworks (SOC 2, FedRAMP) increasingly
+  require end-to-end provenance for AI workloads.
+
+  User problem: Platform administrators have no mechanism to enforce model integrity checks at
+  the serving layer. When a model is deployed via KServe or llm-d, there is no verification that
+  the model artifacts match their cryptographic signatures. A compromised or substituted model
+  could be served without detection, undermining the entire signing workflow.
+
+  Scope: Runtime model integrity verification at the serving layer. Covers models stored in
+  object storage with detached signatures and OCI container images with embedded signatures.
+  Requires integration with the existing serving infrastructure and policy-based enforcement
+  (block vs. warn modes).
+
+  Success criteria: Serving infrastructure validates model signatures before deployment. Policy
+  controls allow administrators to configure enforcement mode. Clear error reporting when
+  verification fails. End-to-end trust chain from model training through serving is verifiable.'
+priority: Critical
+prompt: We need runtime integrity verification for AI models at the serving layer. We already
+  sign models at storage time, but nothing checks those signatures when the model is actually
+  deployed and served. This means a tampered or substituted model could be served without anyone
+  knowing. We need to close this gap with cryptographic verification at serve time, covering
+  both object storage models with detached signatures and OCI images with embedded signatures.

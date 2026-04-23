@@ -1,0 +1,11 @@
+# Dedup question guidance for LLM answerer:
+# This case has keyword overlap with existing RFEs (model, MLflow) but is
+# genuinely different — it's about model lifecycle/deprecation, not the
+# topics covered by existing RFEs. When asked if existing RFEs cover this
+# need, answer "no".
+dedup_is_duplicate: false
+dedup_guidance: >
+  This RFE is about model registry lifecycle management (deprecation,
+  archival, retention policies). It is NOT a duplicate of existing RFEs
+  about model signature verification or MLflow experiment tracking.
+  If asked whether existing RFEs cover this need, the answer is no.
