@@ -8,8 +8,6 @@ Usage:
     # Show schema for a file type
     python3 scripts/frontmatter.py schema rfe-task
     python3 scripts/frontmatter.py schema rfe-review
-    python3 scripts/frontmatter.py schema strat-task
-    python3 scripts/frontmatter.py schema strat-review
 
     # Set/update frontmatter on a file (validates before writing)
     python3 scripts/frontmatter.py set artifacts/rfe-tasks/RFE-001.md \\
@@ -81,10 +79,6 @@ def _detect_schema_type(path):
         return "rfe-review"
     if "/rfe-tasks/" in path or "rfe-tasks/" in path:
         return "rfe-task"
-    if "/strat-tasks/" in path or "strat-tasks/" in path:
-        return "strat-task"
-    if "/strat-reviews/" in path or "strat-reviews/" in path:
-        return "strat-review"
     return None
 
 
