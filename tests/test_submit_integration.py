@@ -44,7 +44,7 @@ def art_dir(tmp_path):
     os.chdir(orig)
 
 
-def _run_submit(artifacts_dir, server_url):
+def _run_submit(artifacts_dir, server_url, extra_flags=None):
     """Run submit.py (non-dry-run) against the jira-emulator."""
     env = {
         **os.environ,
@@ -52,10 +52,10 @@ def _run_submit(artifacts_dir, server_url):
         "JIRA_USER": "admin",
         "JIRA_TOKEN": "admin",
     }
-    return subprocess.run(
-        [sys.executable, SCRIPT, "--artifacts-dir", artifacts_dir],
-        capture_output=True, text=True, env=env,
-    )
+    cmd = [sys.executable, SCRIPT, "--artifacts-dir", artifacts_dir]
+    if extra_flags:
+        cmd.extend(extra_flags)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
 # ── Templates ────────────────────────────────────────────────────────────────
@@ -1044,3 +1044,81 @@ class TestSplitChildSnapshot:
         with open(snap_path) as f:
             data = yaml.safe_load(f)
         assert data["issues"] == {"RHAIRFE-1000": "parent-hash"}
+
+
+class TestApprovedTransition:
+    def test_existing_rfe_transitions_to_approved(self, art_dir, jira):
+        """--auto-approve + passing review → existing RFE moved to Approved."""
+        body = "Original."
+        jira.create("RHAIRFE-1234", "Test RFE", body)
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234", auto_revised="true"))
+
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        assert "Transitioned to Approved" in r.stdout
+
+        issue = jira.get("RHAIRFE-1234")
+        assert issue["fields"]["status"]["name"] == "Approved"
+
+        comments = jira.request(
+            "GET", "/rest/api/3/issue/RHAIRFE-1234/comment")
+        bodies = [c["body"] for c in comments["comments"]]
+        assert any("automatically transitioned to Approved" in json.dumps(b)
+                    for b in bodies)
+
+    def test_new_rfe_transitions_to_approved(self, art_dir, jira):
+        """--auto-approve + new RFE with passing review → Approved."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               _review("RFE-001"))
+
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        assert "Transitioned to Approved" in r.stdout
+
+        issues = jira.search("project = RHAIRFE")
+        assert len(issues) == 1
+        issue = jira.get(issues[0]["key"])
+        assert issue["fields"]["status"]["name"] == "Approved"
+
+    def test_failing_review_not_transitioned(self, art_dir, jira):
+        """--auto-approve + failing review → status unchanged."""
+        body = "Original."
+        jira.create("RHAIRFE-1234", "Test RFE", body)
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        assert "Transitioned to Approved" not in r.stdout
+
+        issue = jira.get("RHAIRFE-1234")
+        assert issue["fields"]["status"]["name"] == "New"
+
+    def test_no_flag_no_transition(self, art_dir, jira):
+        """Without --auto-approve → no transition even with passing review."""
+        body = "Original."
+        jira.create("RHAIRFE-1234", "Test RFE", body)
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234", auto_revised="true"))
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "Transitioned to Approved" not in r.stdout
+
+        issue = jira.get("RHAIRFE-1234")
+        assert issue["fields"]["status"]["name"] == "New"

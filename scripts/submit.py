@@ -38,6 +38,7 @@ from jira_utils import (
     remove_labels,
     add_comment,
     get_issue,
+    transition_issue,
     adf_to_markdown,
     strip_metadata,
     markdown_to_adf,
@@ -137,6 +138,9 @@ def main():
                         help="Print planned actions without making API calls")
     parser.add_argument("--artifacts-dir", default="artifacts",
                         help="Artifacts directory (default: artifacts)")
+    parser.add_argument("--auto-approve", action="store_true",
+                        help="Transition qualifying RFEs to Approved status "
+                             "in Jira (pass=true + feasibility=feasible)")
     parser.add_argument("--generate-report", action="store_true",
                         help="Generate YAML and HTML reports after submission")
     parser.add_argument("--report-timestamp",
@@ -373,6 +377,11 @@ def main():
         if review_data and review_data.get("needs_attention", False):
             attn_reason = review_data.get("needs_attention_reason")
 
+        # Determine if this RFE qualifies for auto-approve
+        auto_approve = (review_data
+                        and review_data.get("pass", False)
+                        and review_data.get("feasibility") == "feasible")
+
         if rec in ("reject", "autorevise_reject"):
             # Check if rubric-pass label needs to be removed (RFE was
             # previously passing but no longer does after re-review)
@@ -388,6 +397,7 @@ def main():
                 "skip_reason": None if remove else "rejected",
                 "task_path": task_path,
                 "attn_reason": None, "original_labels": original_labels,
+                "auto_approve": False,
             })
             continue
 
@@ -421,6 +431,7 @@ def main():
                             "task_path": task_path,
                             "attn_reason": None,
                             "original_labels": original_labels,
+                            "auto_approve": False,
                         })
                         continue
                 except Exception as e:
@@ -455,6 +466,7 @@ def main():
                         "task_path": task_path,
                         "attn_reason": attn_reason,
                         "original_labels": original_labels,
+                        "auto_approve": auto_approve,
                     })
                     continue
 
@@ -476,6 +488,7 @@ def main():
             "action": action, "labels": labels, "remove_labels": [],
             "skip_reason": None, "task_path": task_path,
             "attn_reason": attn_reason, "original_labels": original_labels,
+            "auto_approve": auto_approve,
         })
 
     # Print summary
@@ -494,6 +507,27 @@ def main():
         if entry["skip_reason"]:
             print(f"{'':>10} Reason: {entry['skip_reason']}")
     print()
+
+    _APPROVE_COMMENT = (
+        "*[RFE Creator]* This RFE has been automatically transitioned to "
+        "Approved status based on passing rubric scoring and technical "
+        "feasibility checks. Approval does not constitute a commitment to "
+        "customers until this RFE is prioritized into a product release "
+        "by product management."
+    )
+
+    def _maybe_approve(rfe_id, jira_key, entry):
+        """Transition to Approved if --auto-approve and review qualifies."""
+        if not args.auto_approve or not entry.get("auto_approve"):
+            return
+        if args.dry_run:
+            print(f"  {rfe_id}: Would transition to Approved")
+            return
+        if transition_issue(server, user, token, jira_key, "Approved"):
+            print(f"  {rfe_id}: Transitioned to Approved")
+            comment_adf = markdown_to_adf(_APPROVE_COMMENT)
+            add_comment(server, user, token, jira_key, comment_adf)
+            print(f"  {rfe_id}: Posted auto-approve comment")
 
     # Execute
     results = {}  # rfe_id -> assigned jira key
@@ -534,6 +568,7 @@ def main():
                 results[rfe_id] = rfe_id
                 _post_needs_attention_comment(
                     server, user, token, entry, results, args.dry_run)
+                _maybe_approve(rfe_id, rfe_id, entry)
                 mark_processed_ids.append(rfe_id)
                 continue
 
@@ -600,6 +635,11 @@ def main():
             # Post needs-attention comment if newly flagged
             _post_needs_attention_comment(
                 server, user, token, entry, results, args.dry_run)
+
+            # Auto-approve if qualifying
+            target_key = results.get(rfe_id)
+            if target_key:
+                _maybe_approve(rfe_id, target_key, entry)
 
             # Rename new RFEs after all Jira ops succeed (must be after
             # comment posting which looks up files by original rfe_id)

@@ -205,6 +205,23 @@ def do_transition(server, user, token, issue_key, transition_id, fields=None):
     api_call_with_retry(server, path, user, token, body=body)
 
 
+def transition_issue(server, user, token, issue_key, target_status):
+    """Transition an issue to the named target status. Returns True on success."""
+    transitions = get_transitions(server, user, token, issue_key)
+    match = None
+    for t in transitions:
+        if t["to"].get("name", "").lower() == target_status.lower():
+            match = t
+            break
+    if not match:
+        available = [t["name"] for t in transitions]
+        print(f"  WARNING: No '{target_status}' transition found for "
+              f"{issue_key}. Available: {available}", file=sys.stderr)
+        return False
+    do_transition(server, user, token, issue_key, match["id"])
+    return True
+
+
 # ─── ADF Helpers ──────────────────────────────────────────────────────────────
 
 def _adf_doc(content):
