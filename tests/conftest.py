@@ -99,7 +99,14 @@ def jira(jira_emu):
         if lt["name"] not in {x["name"] for x in _orig}
     ]
 
-    # Reset all data before each test (re-seeds with patched link types)
+    # Patch RHAIRFE workflow to add global "Approve" transition (matches
+    # production Jira where the workflow is fully open).
+    _wf = seed_service.WORKFLOWS.get("RHAIRFE Workflow", [])
+    _global_approve = (None, "Approve", "Approved")
+    if _global_approve not in _wf:
+        seed_service.WORKFLOWS["RHAIRFE Workflow"] = _wf + [_global_approve]
+
+    # Reset all data before each test (re-seeds with patched data)
     req = urllib.request.Request(
         f"{jira_emu}/api/admin/reset", method="POST", data=b"")
     urllib.request.urlopen(req)

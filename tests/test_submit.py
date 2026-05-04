@@ -17,7 +17,7 @@ def _write(path, content):
         f.write(content)
 
 
-def _run_submit(artifacts_dir):
+def _run_submit(artifacts_dir, extra_flags=None):
     """Run submit.py --dry-run and return stdout."""
     env = {
         **os.environ,
@@ -25,10 +25,10 @@ def _run_submit(artifacts_dir):
         "JIRA_USER": "fake@example.com",
         "JIRA_TOKEN": "fake-token",
     }
-    result = subprocess.run(
-        ["python3", SCRIPT, "--dry-run", "--artifacts-dir", artifacts_dir],
-        capture_output=True, text=True, env=env,
-    )
+    cmd = ["python3", SCRIPT, "--dry-run", "--artifacts-dir", artifacts_dir]
+    if extra_flags:
+        cmd.extend(extra_flags)
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return result.stdout, result.stderr, result.returncode
 
 
@@ -478,3 +478,58 @@ class TestGenerateReportFlag:
         )
         assert result.returncode == 0
         assert "--report-timestamp is required" not in result.stderr
+
+
+class TestApprovedTransition:
+    def test_passing_review_prints_would_transition(self, art_dir):
+        """--auto-approve + passing review → prints would-transition."""
+        body = "Original.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"))
+
+        stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
+        assert rc == 0, stderr
+        assert "Would transition to Approved" in stdout
+
+    def test_failing_review_no_transition(self, art_dir):
+        """--auto-approve + failing review → no transition message."""
+        body = "Original.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+
+        stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
+        assert rc == 0, stderr
+        assert "Would transition to Approved" not in stdout
+
+    def test_new_rfe_prints_would_transition(self, art_dir):
+        """--auto-approve + new RFE with passing review → would-transition."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
+               TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+
+        stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
+        assert rc == 0, stderr
+        assert "Would transition to Approved" in stdout
+
+    def test_no_flag_no_transition(self, art_dir):
+        """Without --auto-approve → no transition even if review passes."""
+        body = "Original.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"))
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert rc == 0, stderr
+        assert "Would transition to Approved" not in stdout
