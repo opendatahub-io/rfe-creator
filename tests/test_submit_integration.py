@@ -357,6 +357,79 @@ class TestRemoveLabels:
         assert entry == {"hash": "original-hash", "processed": True}
 
 
+FEAS_REVIEW_TEMPLATE = """\
+---
+rfe_id: {rfe_id}
+score: 9
+pass: true
+recommendation: submit
+feasibility: {verdict}
+auto_revised: false
+needs_attention: false
+scores:
+  what: 2
+  why: 2
+  open_to_how: 2
+  not_a_task: 2
+  right_sized: 1
+---
+
+## Assessor Feedback
+ok.
+"""
+
+
+class TestFeasibilityLabelExecutor:
+    """End-to-end coverage that the executor actually fires remove_labels()
+    in both the Label-only and Update branches when feasibility flips."""
+
+    def test_label_only_path_calls_remove(self, art_dir, jira):
+        """Re-submit existing RHAIRFE, no body change, verdict flipped →
+        Label-only branch must remove stale feasibility label."""
+        body = "## Problem\n\nSame content.\n"
+        jira.create("RHAIRFE-1234", "Test RFE", body,
+                    labels=["rfe-creator-feasibility-fail"])
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n"
+               f"original_labels:\n- rfe-creator-feasibility-fail\n"
+               f"---\n{body}")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234",
+                                           verdict="feasible"))
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+
+        issue = jira.get("RHAIRFE-1234")
+        assert "rfe-creator-feasibility-pass" in issue["fields"]["labels"]
+        assert "rfe-creator-feasibility-fail" not in issue["fields"]["labels"]
+
+    def test_update_path_calls_remove(self, art_dir, jira):
+        """Body change AND verdict flip → Update branch must remove stale."""
+        original_body = "## Problem\n\nOriginal content.\n"
+        new_body = "## Problem\n\nUpdated content.\n"
+        jira.create("RHAIRFE-1234", "Test RFE", original_body,
+                    labels=["rfe-creator-feasibility-fail"])
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", original_body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n"
+               f"original_labels:\n- rfe-creator-feasibility-fail\n"
+               f"---\n{new_body}")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234",
+                                           verdict="feasible"))
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+
+        issue = jira.get("RHAIRFE-1234")
+        assert "rfe-creator-feasibility-pass" in issue["fields"]["labels"]
+        assert "rfe-creator-feasibility-fail" not in issue["fields"]["labels"]
+
+
 class TestConflictDetection:
     def test_conflict_prevents_update(self, art_dir, jira):
         """Jira description differs from original → skip, no PUT."""
