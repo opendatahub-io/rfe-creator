@@ -62,6 +62,32 @@ from artifact_utils import (
 )
 
 
+FEASIBILITY_LABELS = {
+    "feasible": "rfe-creator-feasibility-pass",
+    "infeasible": "rfe-creator-feasibility-fail",
+    "indeterminate": "rfe-creator-feasibility-unknown",
+}
+
+
+def feasibility_label_changes(verdict, *, is_reject, original_labels):
+    """Return (label_to_add_or_None, [labels_to_remove]) for feasibility labels.
+
+    Conditional removal: only labels actually in original_labels (mirrors
+    the rubric-pass pattern at submit.py reject path). original_labels may
+    be None (NOT []) when the Jira issue has no labels.
+    """
+    original = original_labels or []
+    if is_reject:
+        return None, [lbl for lbl in FEASIBILITY_LABELS.values()
+                      if lbl in original]
+    if verdict not in FEASIBILITY_LABELS:
+        return None, []
+    new_label = FEASIBILITY_LABELS[verdict]
+    stale = [lbl for lbl in FEASIBILITY_LABELS.values()
+             if lbl != new_label and lbl in original]
+    return new_label, stale
+
+
 def _render_jira_comment(yaml_path):
     """Read removed-context YAML and render postable blocks as markdown.
 
@@ -380,6 +406,10 @@ def main():
             if (is_existing
                     and "rfe-creator-autofix-rubric-pass" in original_labels):
                 remove.append("rfe-creator-autofix-rubric-pass")
+            # Strip any feasibility labels currently on the issue
+            _, feas_remove = feasibility_label_changes(
+                None, is_reject=True, original_labels=original_labels)
+            remove.extend(feas_remove)
             plan.append({
                 "rfe_id": rfe_id, "title": title,
                 "is_existing": is_existing, "priority": priority, "size": size,
@@ -445,13 +475,24 @@ def main():
                         no_change_labels.append("rfe-creator-needs-attention")
                     if review_data and rec == "submit":
                         no_change_labels.append("rfe-creator-autofix-rubric-pass")
+                    feas_remove = []
+                    if review_data:
+                        feas_add, feas_remove = feasibility_label_changes(
+                            review_data.get("feasibility"),
+                            is_reject=False,
+                            original_labels=original_labels,
+                        )
+                        if feas_add:
+                            no_change_labels.append(feas_add)
+                    has_work = no_change_labels or feas_remove
                     plan.append({
                         "rfe_id": rfe_id, "title": title,
                         "is_existing": is_existing, "priority": priority,
                         "size": size,
-                        "action": "Label only" if no_change_labels else "SKIP",
-                        "labels": no_change_labels, "remove_labels": [],
-                        "skip_reason": None if no_change_labels else "no changes",
+                        "action": "Label only" if has_work else "SKIP",
+                        "labels": no_change_labels,
+                        "remove_labels": feas_remove,
+                        "skip_reason": None if has_work else "no changes",
                         "task_path": task_path,
                         "attn_reason": attn_reason,
                         "original_labels": original_labels,
@@ -468,12 +509,21 @@ def main():
             labels.append("rfe-creator-needs-attention")
         if review_data and rec == "submit":
             labels.append("rfe-creator-autofix-rubric-pass")
+        feas_remove = []
+        if review_data:
+            feas_add, feas_remove = feasibility_label_changes(
+                review_data.get("feasibility"),
+                is_reject=False,
+                original_labels=original_labels,
+            )
+            if feas_add:
+                labels.append(feas_add)
 
         action = f"Update {rfe_id}" if is_existing else "Create"
         plan.append({
             "rfe_id": rfe_id, "title": title,
             "is_existing": is_existing, "priority": priority, "size": size,
-            "action": action, "labels": labels, "remove_labels": [],
+            "action": action, "labels": labels, "remove_labels": feas_remove,
             "skip_reason": None, "task_path": task_path,
             "attn_reason": attn_reason, "original_labels": original_labels,
         })
@@ -522,12 +572,22 @@ def main():
                 continue
             if entry["action"] == "Label only":
                 labels = entry["labels"]
+                remove = entry.get("remove_labels") or []
                 if args.dry_run:
-                    print(f"  {rfe_id}: Would add labels: "
-                          f"{', '.join(labels)}")
+                    if remove:
+                        print(f"  {rfe_id}: Would remove labels: "
+                              f"{', '.join(remove)}")
+                    if labels:
+                        print(f"  {rfe_id}: Would add labels: "
+                              f"{', '.join(labels)}")
                 else:
-                    add_labels(server, user, token, rfe_id, labels)
-                    print(f"  {rfe_id}: Labels: {', '.join(labels)}")
+                    if remove:
+                        remove_labels(server, user, token, rfe_id, remove)
+                        print(f"  {rfe_id}: Removed labels: "
+                              f"{', '.join(remove)}")
+                    if labels:
+                        add_labels(server, user, token, rfe_id, labels)
+                        print(f"  {rfe_id}: Labels: {', '.join(labels)}")
                     update_frontmatter(entry["task_path"],
                                        {"status": "Submitted"},
                                        "rfe-task")
@@ -545,15 +605,22 @@ def main():
 
             title = entry["title"]
             labels = entry["labels"]
+            remove = entry.get("remove_labels") or []
 
             if entry["is_existing"]:
                 # Update existing ticket (rfe_id is the Jira key)
                 if args.dry_run:
                     print(f"  {rfe_id}: Would update")
+                    if remove:
+                        print(f"           Would remove: "
+                              f"{', '.join(remove)}")
                 else:
                     update_issue(server, user, token, rfe_id, title,
                                  description_adf)
                     print(f"  {rfe_id}: Updated")
+                    if remove:
+                        remove_labels(server, user, token, rfe_id, remove)
+                        print(f"           Removed: {', '.join(remove)}")
                     if labels:
                         add_labels(server, user, token, rfe_id, labels)
                         print(f"           Labels: {', '.join(labels)}")

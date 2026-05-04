@@ -31,6 +31,9 @@ ordering; unchanged issues fill remaining capacity within the limit.
 | `rfe-creator-ignore` | JQL | JQL | Permanent human override — never touch |
 | `rfe-creator-autofix-rubric-pass` | JQL | Hash diff | If someone edits a passing RFE, we should see it |
 | `rfe-creator-needs-attention` | Not filtered | Hash diff | If a human resolves the flag and revises the description, we should re-evaluate |
+| `rfe-creator-feasibility-pass` | Not filtered | Hash diff | Informational verdict; description change triggers re-review and may flip the label |
+| `rfe-creator-feasibility-fail` | Not filtered | Hash diff | Same as above; not filtered out so re-edited infeasible RFEs surface |
+| `rfe-creator-feasibility-unknown` | Not filtered | Hash diff | Same as above |
 
 Soft-filtered labels are no longer excluded from the query. Issues with
 these labels are fetched and hashed like everything else. If their

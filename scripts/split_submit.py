@@ -59,6 +59,15 @@ from artifact_utils import (
 
 MAX_LEAF_CHILDREN = 6
 
+# Mirrors FEASIBILITY_LABELS in submit.py — keep in sync.
+# Duplicated rather than cross-imported to avoid loading submit.py's
+# heavy module-level imports (generate_run_report, snapshot_fetch).
+FEASIBILITY_LABELS = {
+    "feasible": "rfe-creator-feasibility-pass",
+    "infeasible": "rfe-creator-feasibility-fail",
+    "indeterminate": "rfe-creator-feasibility-unknown",
+}
+
 
 # ─── Recovery / State Detection ──────────────────────────────────────────────
 
@@ -202,6 +211,7 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         review_path = find_review_file(artifacts_dir, rfe_id)
         review_rec = None
         attn_reason = None
+        feas_label = None
         if review_path:
             try:
                 review_data, _ = read_frontmatter_validated(
@@ -212,10 +222,14 @@ def phase2_create_link(server, user, token, parent_key, children, state,
                 if review_data.get("needs_attention", False):
                     labels.append("rfe-creator-needs-attention")
                     attn_reason = review_data.get("needs_attention_reason")
+                feas_label = FEASIBILITY_LABELS.get(
+                    review_data.get("feasibility"))
             except (ValidationError, Exception):
                 pass  # proceed without review data
         if review_rec == "submit":
             labels.append("rfe-creator-autofix-rubric-pass")
+        if feas_label:
+            labels.append(feas_label)
 
         # Inherit non-automation labels from parent
         labels = state.parent_labels + labels

@@ -348,6 +348,197 @@ class TestRemoveLabels:
         assert "Would remove labels" in stdout
 
 
+class TestFeasibilityLabelHelper:
+    """Direct unit tests for feasibility_label_changes()."""
+
+    @pytest.fixture(autouse=True)
+    def _import_helper(self):
+        from submit import (
+            FEASIBILITY_LABELS,
+            feasibility_label_changes,
+        )
+        self.LABELS = FEASIBILITY_LABELS
+        self.fn = feasibility_label_changes
+
+    @pytest.mark.parametrize("verdict,expected_label", [
+        ("feasible", "rfe-creator-feasibility-pass"),
+        ("infeasible", "rfe-creator-feasibility-fail"),
+        ("indeterminate", "rfe-creator-feasibility-unknown"),
+    ])
+    def test_each_verdict_no_existing_labels(self, verdict, expected_label):
+        add, remove = self.fn(verdict, is_reject=False, original_labels=None)
+        assert add == expected_label
+        assert remove == []
+
+    def test_each_verdict_with_matching_label_already_present(self):
+        for verdict, label in self.LABELS.items():
+            add, remove = self.fn(
+                verdict, is_reject=False, original_labels=[label])
+            assert add == label, (
+                f"{verdict}: matching label is added (Jira no-ops)")
+            assert remove == []
+
+    def test_flip_removes_only_present_stale(self):
+        # original has fail; new verdict feasible
+        add, remove = self.fn(
+            "feasible", is_reject=False,
+            original_labels=["rfe-creator-feasibility-fail"])
+        assert add == "rfe-creator-feasibility-pass"
+        assert remove == ["rfe-creator-feasibility-fail"]
+
+    def test_reject_with_no_feasibility_labels(self):
+        add, remove = self.fn(
+            None, is_reject=True, original_labels=["unrelated-label"])
+        assert add is None
+        assert remove == []
+
+    def test_reject_with_one_feasibility_label(self):
+        add, remove = self.fn(
+            None, is_reject=True,
+            original_labels=["rfe-creator-feasibility-pass", "other"])
+        assert add is None
+        assert remove == ["rfe-creator-feasibility-pass"]
+
+    def test_missing_verdict(self):
+        for verdict in (None, "", "yes", "TBD"):
+            add, remove = self.fn(
+                verdict, is_reject=False, original_labels=None)
+            assert add is None
+            assert remove == []
+
+    def test_original_labels_none_treated_as_empty(self):
+        add, remove = self.fn(
+            "feasible", is_reject=False, original_labels=None)
+        assert add == "rfe-creator-feasibility-pass"
+        assert remove == []
+
+
+FEAS_TASK_FM = """\
+---
+rfe_id: {rfe_id}
+title: Test RFE
+priority: Major
+status: Ready
+{extra}---
+
+## Problem Statement
+
+Users need better logging for compliance audits.
+
+## Acceptance Criteria
+
+- Audit logs capture all inference requests
+"""
+
+
+def _feas_review(rfe_id, verdict, recommendation="submit"):
+    return f"""\
+---
+rfe_id: {rfe_id}
+score: 9
+pass: true
+recommendation: {recommendation}
+feasibility: {verdict}
+auto_revised: false
+needs_attention: false
+scores:
+  what: 2
+  why: 2
+  open_to_how: 2
+  not_a_task: 2
+  right_sized: 1
+---
+
+## Assessor Feedback
+ok.
+"""
+
+
+class TestFeasibilityLabelOnSubmit:
+    """End-to-end (dry-run) tests for feasibility label wiring."""
+
+    def _task(self, rfe_id, original_labels=None):
+        if original_labels is None:
+            extra = ""
+        else:
+            labels_yaml = "\n".join(f"- {l}" for l in original_labels)
+            extra = f"original_labels:\n{labels_yaml}\n"
+        return FEAS_TASK_FM.format(rfe_id=rfe_id, extra=extra)
+
+    @pytest.mark.parametrize("verdict,label", [
+        ("feasible", "rfe-creator-feasibility-pass"),
+        ("infeasible", "rfe-creator-feasibility-fail"),
+        ("indeterminate", "rfe-creator-feasibility-unknown"),
+    ])
+    def test_feasibility_label_on_create(self, art_dir, verdict, label):
+        """Each verdict applies the matching label on a new RFE."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self._task("RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
+               _feas_review("RFE-001", verdict))
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert label in stdout
+
+    def test_feasibility_label_flip_on_update(self, art_dir):
+        """Existing RHAIRFE with stale label → flip adds new, removes stale."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               self._task("RHAIRFE-1234",
+                          original_labels=["rfe-creator-feasibility-fail"]))
+        # Original snapshot identical to current body for "no content change"
+        # path exercising remove + add via Label only.
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md",
+               self._task("RHAIRFE-1234",
+                          original_labels=["rfe-creator-feasibility-fail"]))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _feas_review("RHAIRFE-1234", "feasible"))
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "rfe-creator-feasibility-pass" in stdout
+        assert "rfe-creator-feasibility-fail" in stdout
+        assert "Would remove labels" in stdout
+
+    def test_reject_strips_present_feasibility_label(self, art_dir):
+        """Rejected RFE with stale feasibility label → Remove labels."""
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               self._task("RHAIRFE-1234",
+                          original_labels=["rfe-creator-feasibility-pass"]))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _feas_review("RHAIRFE-1234", "feasible",
+                            recommendation="reject"))
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Remove labels" in stdout
+        assert "rfe-creator-feasibility-pass" in stdout
+
+    def test_reject_without_feasibility_label_stays_skip(self, art_dir):
+        """Rejected RFE with no feasibility labels → SKIP, no remove ops.
+
+        Locks the conditional-removal behavior so a future "blind self-healing"
+        refactor can't silently shift this case to Remove labels.
+        """
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               self._task("RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _feas_review("RHAIRFE-1234", "feasible",
+                            recommendation="reject"))
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "SKIP" in stdout
+        assert "Remove labels" not in stdout
+        assert "rfe-creator-feasibility" not in stdout
+
+    def test_no_review_skips_feasibility_op(self, art_dir):
+        """Missing review file → no feasibility label, but submit still runs."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self._task("RFE-001"))
+        # No review file written
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        # Still creates the RFE
+        assert "Create" in stdout or "Would create" in stdout
+        # But no feasibility label
+        assert "rfe-creator-feasibility" not in stdout
+
+
 class TestSplitRefusal:
     """Tests for submit.py handling split_submit.py exit code 2."""
 

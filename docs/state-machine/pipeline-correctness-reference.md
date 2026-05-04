@@ -183,7 +183,12 @@ applies to issues that have never appeared in any snapshot.
 | `rfe-creator-needs-attention` | submit.py, split_submit.py | Never (by pipeline) | Human escalation flag |
 | `rfe-creator-split-original` | split_submit.py Phase 3 | Never | Parent ticket was decomposed into children |
 | `rfe-creator-split-result` | split_submit.py Phase 2 | Never | Child ticket created from split |
+| `rfe-creator-feasibility-pass` | submit.py, split_submit.py | submit.py (on verdict change or reject, when present in `original_labels`) | Technical feasibility verdict was `feasible` |
+| `rfe-creator-feasibility-fail` | submit.py, split_submit.py | submit.py (on verdict change or reject, when present in `original_labels`) | Technical feasibility verdict was `infeasible` |
+| `rfe-creator-feasibility-unknown` | submit.py, split_submit.py | submit.py (on verdict change or reject, when present in `original_labels`) | Technical feasibility verdict was `indeterminate` |
 | `rfe-creator-ignore` | Human (manually) | Human (manually) | Permanent exclusion from all pipeline queries |
+
+The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one is present per ticket at any time. Conditional removal (only labels present in `original_labels`) preserves the existing action decision tree.
 
 ### 1.13 Speedrun Phases
 
@@ -270,10 +275,10 @@ The `parent_key` exclusion ensures split children are only processed by
 | Action | Condition | Jira Operation | Snapshot Effect |
 |---|---|---|---|
 | **SKIP (rejected)** | `rec` in `(reject, autorevise_reject)` AND no label to remove | None | Marked processed |
-| **Remove labels** | `rec` in `(reject, autorevise_reject)` AND `rubric-pass` in `original_labels` | `remove_labels()` only; does NOT set `status=Submitted` | Marked processed |
+| **Remove labels** | `rec` in `(reject, autorevise_reject)` AND any of (`rubric-pass`, `feasibility-pass`, `feasibility-fail`, `feasibility-unknown`) in `original_labels` | `remove_labels()` only; does NOT set `status=Submitted` | Marked processed |
 | **SKIP (conflict)** | `rfe-originals/{ID}.md` exists AND differs from live Jira | None | NOT marked processed (enables retry) |
 | **SKIP (no changes)** | Content unchanged, no new labels needed | None | Marked processed |
-| **Label only** | Content unchanged but labels needed | `add_labels()` only | Marked processed, but NO content hash recorded |
+| **Label only** | Content unchanged but labels needed (existing label triggers OR new feasibility label needed OR stale feasibility label present in `original_labels`) | `remove_labels()` (if any) then `add_labels()` (if any) | Marked processed, but NO content hash recorded |
 | **Create** | `rfe_id` starts with `RFE-` | `create_issue()` + `rename_to_jira_key()` | Content hash recorded |
 | **Update** | Existing `RHAIRFE-` with content changes | `update_issue()` | Content hash recorded |
 
@@ -798,7 +803,7 @@ failures that may not surface until production runs.
 - **Split submit Phase 1 completion guard:** Phase 2 refuses to proceed (exit 1) if any archival comment is missing.
 - **Split submit transition fallback:** Logs WARNING and skips closure gracefully if no "Closed" transition exists on the parent ticket.
 - **Label-only path still sets `status=Submitted`** (`submit.py:507-509`).
-- **`rfe-creator-autofix-rubric-pass` is the only label ever removed** by the pipeline (L5). Guard: `is_existing AND label in original_labels`.
+- **Pipeline-removed labels:** `rfe-creator-autofix-rubric-pass` (on re-review regression to reject) and the three `rfe-creator-feasibility-*` labels (on verdict change or reject). All use the same conditional guard: `label in original_labels`. No other automation labels are ever removed by the pipeline.
 - **Conflict check compares `rfe-originals/{ID}.md` against live Jira** via `normalize_for_compare()`. Stale (conflict) → skip, NOT marked processed.
 - **Submit error (E8) also sets `needs_attention=true`** as side effect, not just `error` field.
 - **Content preservation filtering:** `submit.py` only posts `genuine`/`unclassified` removed-context blocks to Jira; `reworded`/`non-substantive` silently dropped (see 1.19).
