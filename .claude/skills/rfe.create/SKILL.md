@@ -18,19 +18,43 @@ Parse `$ARGUMENTS` for:
 
 If `--headless` is present, skip Step 2 entirely and proceed directly from Step 1 to Step 3 using the provided input.
 
-## Step 1: Load Rubric
+## Step 1: Load Rubric and JTBD Registry
 
-If `artifacts/rfe-rubric.md` does not exist, try to bootstrap and export it:
+Bootstrap dependencies in parallel:
 
 1. Run `bash scripts/bootstrap-assess-rfe.sh` to fetch the assess-rfe skills
-2. When any assess-rfe skill resolves its `{PLUGIN_ROOT}`, it should use the absolute path of `.context/assess-rfe/` in the project working directory.
-3. Invoke `/export-rubric` to export the rubric to `artifacts/rfe-rubric.md`
+2. Run `bash scripts/bootstrap-jtbd-registry.sh` to clone/update the JTBD knowledge registry
 
-If either step fails (network issue, script missing), proceed without the rubric.
+**Rubric setup:** If `artifacts/rfe-rubric.md` does not exist after bootstrap, try:
+1. When any assess-rfe skill resolves its `{PLUGIN_ROOT}`, it should use the absolute path of `.context/assess-rfe/` in the project working directory.
+2. Invoke `/export-rubric` to export the rubric to `artifacts/rfe-rubric.md`
+
+If rubric bootstrap fails (network issue, script missing), proceed without the rubric.
 
 If `artifacts/rfe-rubric.md` exists (either already present or just exported), read it. Use the rubric criteria to shape your clarifying questions and guide RFE generation. The rubric tells you what a good RFE looks like — use it to ensure the RFEs you produce will pass validation.
 
 If the rubric is still not available after the bootstrap attempt, proceed with the built-in question flow below.
+
+**JTBD registry setup:** If `bootstrap-jtbd-registry.sh` fails, note that JTBD enrichment is unavailable and proceed without it. This is not a blocking failure — the RFE will be created normally.
+
+## Step 1.5: JTBD Enrichment
+
+If `.context/jtbd-registry/index.yaml` exists, spawn a background **JTBD agent** (model: opus, run_in_background: true):
+
+```
+Read .claude/skills/rfe.create/prompts/jtbd-agent.md and follow all instructions. The problem statement to match is: <user's problem statement from $ARGUMENTS>
+```
+
+The JTBD agent navigates the registry using progressive disclosure:
+1. Reads `governance.yaml` first (behavioral constraints)
+2. Reads `index.yaml` (18 jobs ranked by opportunity score, ~500 tokens)
+3. Matches the problem statement to 1–3 relevant jobs
+4. Reads only the matched job files for full detail (pain points, scores, user quotes)
+5. Returns structured match data with confidence level
+
+Store the agent's output for use in Steps 2 and 3.
+
+If the JTBD agent returns `confidence: none` (no match found), proceed normally — not every RFE maps to a known JTBD. If the registry is unavailable, skip this step entirely.
 
 ## Step 2: Clarifying Questions
 
@@ -47,6 +71,12 @@ If the rubric is loaded, adapt your questions to cover any rubric criteria the P
 - If the rubric penalizes prescribed architecture, do NOT ask "how should this be implemented?"
 - If the rubric penalizes task-framing, ensure the PM describes a need, not an activity.
 
+**If JTBD data is available from Step 1.5**, incorporate it into your questions:
+- Reference the matched job by name: "This sounds related to [job name] (opportunity score: [X]) — is that the user need you're addressing?"
+- Surface specific pain points from the registry: "Users report difficulty with [pain point]. Is that what's motivating this request?"
+- Ask about persona scope: "This appears to primarily affect [persona]. Are there other roles impacted?"
+- If the match confidence is `medium` or `low`, ask a question to confirm the mapping: "Does this relate to [job name], or is it addressing a different need?"
+
 Do NOT ask about implementation approach, architecture, technology choices, or API design. Those belong in the strategy phase.
 
 ## Step 3: Generate RFEs
@@ -60,6 +90,14 @@ Key rules:
 - **Priority uses Jira values.** Choose from: Blocker, Critical, Major, Normal, Minor. Default to Normal unless the PM's input clearly indicates urgency.
 - **Acceptance criteria from the user's perspective.** "User can do X" not "System implements Y." No implementation details in acceptance criteria.
 - **Platform vocabulary is allowed in describing the problem domain** — terms like KServe, ModelMesh, RHOAI, Operator are fine for describing what area the RFE touches. But do not prescribe that specific technologies must be used in the solution.
+
+**If JTBD data is available from Step 1.5**, enrich the generated RFEs:
+- In the Business Justification / WHY section, cite the matched JTBD opportunity score and relevant pain points as evidence for the investment ask.
+- Include 1–2 relevant user quotes from the registry as verbatim supporting evidence (do NOT paraphrase — cite exactly as written in the registry).
+- Reference the job name and lifecycle phase to frame the user need in the shared JTBD taxonomy.
+- Identify the target persona(s) from the registry data.
+- Do NOT let JTBD data override the PM's stated intent — it supplements, not replaces. The PM owns the WHAT; JTBD data strengthens the WHY.
+- Do NOT reinterpret or editorialize the research data — use it as-is per governance rules.
 
 ## Step 4: Write Artifacts
 
@@ -88,6 +126,25 @@ python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
     priority=<priority> \
     size=<size> \
     status=Draft
+```
+
+**If JTBD data is available**, also set the `jtbd_mapping` field on each RFE:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
+    jtbd_mapping.jobs.0.id="<job-id>" \
+    jtbd_mapping.jobs.0.name="<job-name>" \
+    jtbd_mapping.jobs.0.opportunity_score=<score> \
+    jtbd_mapping.jobs.0.lifecycle_phase="<phase>" \
+    jtbd_mapping.personas.0="<persona-id>" \
+    jtbd_mapping.confidence="<high|medium|low>"
+```
+
+If JTBD enrichment was unavailable (bootstrap failed) or no match was found, set:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
+    jtbd_mapping.confidence="none"
 ```
 
 After all RFE files are written, rebuild the index:
