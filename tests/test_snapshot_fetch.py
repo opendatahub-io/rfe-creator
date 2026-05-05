@@ -581,3 +581,123 @@ class TestRandom:
         ids, _ = self._run_fetch(tmp_path, current, 5, monkeypatch)
 
         assert ids == sorted(ids)
+
+
+class TestUnchangedSkippedFromSelection:
+    """Verifies unchanged-processed RFEs are excluded from selection by
+    default and only included with --reprocess."""
+
+    def _setup_snapshot(self, tmp_path, prev_issues):
+        """Write a previous snapshot file under tmp_path's snapshot dir."""
+        snap_dir = tmp_path / "auto-fix-runs"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        snap_path = snap_dir / "issue-snapshot-20260501-000000.yaml"
+        with open(snap_path, "w") as f:
+            yaml.dump({
+                "query_timestamp": "2026-05-01T00:00:00Z",
+                "timestamp": "2026-05-01T00:00:01Z",
+                "issues": prev_issues,
+            }, f)
+        return str(snap_dir)
+
+    def _run_fetch(self, tmp_path, current, prev_issues, monkeypatch,
+                   reprocess=False, limit=None):
+        import argparse
+        snap_dir = self._setup_snapshot(tmp_path, prev_issues)
+        ids_file = str(tmp_path / "all-ids.txt")
+        changed_file = str(tmp_path / "changed-ids.txt")
+
+        monkeypatch.setattr("snapshot_fetch.require_env",
+                            lambda: ("http://x", "u", "t"))
+        monkeypatch.setattr("snapshot_fetch.fetch_all_issues",
+                            lambda *a, **kw: current)
+        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot",
+                            lambda data_dir=None: (
+                                str(tmp_path / "auto-fix-runs" /
+                                    "issue-snapshot-20260501-000000.yaml"),
+                                {"issues": prev_issues}))
+        monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", snap_dir)
+
+        args = argparse.Namespace(
+            reprocess=reprocess, jql="project = TEST", random=None,
+            limit=limit, data_dir=None,
+            ids_file=ids_file, changed_file=changed_file)
+        cmd_fetch(args)
+        return read_id_file(ids_file), read_id_file(changed_file)
+
+    def test_unchanged_processed_excluded_by_default(
+            self, tmp_path, monkeypatch):
+        """Unchanged-processed RFEs are NOT in the selection."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa"},  # unchanged
+            "RHAIRFE-2": {"content_hash": "bbb"},  # unchanged
+            "RHAIRFE-3": {"content_hash": "ccc-new"},  # changed
+        }
+        prev_issues = {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            "RHAIRFE-2": {"hash": "bbb", "processed": True},
+            "RHAIRFE-3": {"hash": "ccc", "processed": True},
+        }
+        ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch)
+        assert ids == ["RHAIRFE-3"]
+
+    def test_unchanged_unprocessed_still_included(
+            self, tmp_path, monkeypatch):
+        """processed: false → treated as new → selected even when unchanged."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa"},
+            "RHAIRFE-2": {"content_hash": "bbb"},
+        }
+        prev_issues = {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            "RHAIRFE-2": {"hash": "bbb", "processed": False},
+        }
+        ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch)
+        assert ids == ["RHAIRFE-2"]
+
+    def test_reprocess_includes_unchanged_processed(
+            self, tmp_path, monkeypatch):
+        """--reprocess restores the fill-with-unchanged behavior."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa"},
+            "RHAIRFE-2": {"content_hash": "bbb"},
+            "RHAIRFE-3": {"content_hash": "ccc-new"},
+        }
+        prev_issues = {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            "RHAIRFE-2": {"hash": "bbb", "processed": True},
+            "RHAIRFE-3": {"hash": "ccc", "processed": True},
+        }
+        ids, changed = self._run_fetch(
+            tmp_path, current, prev_issues, monkeypatch, reprocess=True)
+        assert sorted(ids) == ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
+        # --reprocess marks all as changed
+        assert sorted(changed) == sorted(ids)
+
+    def test_limit_caps_changed_plus_new_only(self, tmp_path, monkeypatch):
+        """--limit applies to changed+new; unchanged are not used as filler."""
+        current = {f"RHAIRFE-{i}": {"content_hash": f"new-{i}"}
+                   for i in range(1, 6)}  # all 5 changed
+        current["RHAIRFE-6"] = {"content_hash": "uchanged-hash"}  # unchanged
+        prev_issues = {f"RHAIRFE-{i}": {"hash": f"old-{i}", "processed": True}
+                       for i in range(1, 6)}
+        prev_issues["RHAIRFE-6"] = {"hash": "uchanged-hash", "processed": True}
+
+        ids, _ = self._run_fetch(
+            tmp_path, current, prev_issues, monkeypatch, limit=10)
+        # All 5 changed selected, RHAIRFE-6 (unchanged-processed) excluded
+        assert sorted(ids) == [f"RHAIRFE-{i}" for i in range(1, 6)]
+        assert "RHAIRFE-6" not in ids
+
+    def test_no_changes_empty_selection(self, tmp_path, monkeypatch):
+        """All unchanged-processed → empty selection (no work to do)."""
+        current = {
+            "RHAIRFE-1": {"content_hash": "aaa"},
+            "RHAIRFE-2": {"content_hash": "bbb"},
+        }
+        prev_issues = {
+            "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            "RHAIRFE-2": {"hash": "bbb", "processed": True},
+        }
+        ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch)
+        assert ids == []

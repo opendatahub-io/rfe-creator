@@ -153,9 +153,9 @@ class TestCmdFetchFirstRun:
 # ── cmd_fetch: Incremental Run ───────────────────────────────────────────────
 
 class TestCmdFetchIncremental:
-    def test_unchanged_included_not_changed(self, work_dirs, jira,
-                                               monkeypatch, tmp_path):
-        """Issue with same hash → in output IDs but not in changed file."""
+    def test_unchanged_processed_excluded_from_selection(
+            self, work_dirs, jira, monkeypatch, tmp_path):
+        """Issue with same hash → excluded from selection (no-op)."""
         jira.create("RHAIRFE-1", "Issue one", "Same content.")
         same_hash = compute_content_hash(_text_to_adf("Same content."))
         _seed_snapshot(work_dirs, {"RHAIRFE-1": same_hash})
@@ -164,10 +164,10 @@ class TestCmdFetchIncremental:
         args = _fetch_args(tmp_path)
         stdout = _run_fetch(args)
 
-        assert "TOTAL=1" in stdout
+        assert "TOTAL=0" in stdout
         assert "CHANGED=0" in stdout
-        assert "UNCHANGED=1" in stdout
-        assert _read_ids(args.ids_file) == ["RHAIRFE-1"]
+        assert "UNCHANGED_SKIPPED=1" in stdout
+        assert _read_ids(args.ids_file) == []
         assert _read_ids(args.changed_file) == []
 
     def test_changed_detected(self, work_dirs, jira, monkeypatch, tmp_path):
@@ -186,7 +186,7 @@ class TestCmdFetchIncremental:
         assert _read_ids(args.changed_file) == ["RHAIRFE-1"]
 
     def test_new_detected(self, work_dirs, jira, monkeypatch, tmp_path):
-        """Issue not in previous snapshot → new. Unchanged fills remaining."""
+        """New issue selected; unchanged-processed excluded from selection."""
         jira.create("RHAIRFE-1", "Issue one", "Existing.")
         jira.create("RHAIRFE-2", "Issue two", "Brand new.")
         existing_hash = compute_content_hash(_text_to_adf("Existing."))
@@ -196,12 +196,12 @@ class TestCmdFetchIncremental:
         args = _fetch_args(tmp_path)
         stdout = _run_fetch(args)
 
-        assert "TOTAL=2" in stdout
+        assert "TOTAL=1" in stdout
         assert "NEW=1" in stdout
-        assert "UNCHANGED=1" in stdout
+        assert "UNCHANGED_SKIPPED=1" in stdout
         ids = _read_ids(args.ids_file)
-        assert "RHAIRFE-2" in ids
-        assert "RHAIRFE-1" in ids
+        assert ids == ["RHAIRFE-2"]
+        assert "RHAIRFE-1" not in ids
 
     def test_limit_caps_output(self, work_dirs, jira, monkeypatch, tmp_path):
         """--limit caps the number of output IDs."""
@@ -294,7 +294,7 @@ class TestMultiRunPipeline:
 
     def test_steady_state_skips_unchanged(self, work_dirs, jira,
                                           monkeypatch, tmp_path):
-        """Run 1 processes everything. Run 2 includes all but none changed."""
+        """Run 1 processes everything. Run 2 selects nothing (all unchanged)."""
         jira.create("RHAIRFE-1", "Issue one", "Description one.")
         jira.create("RHAIRFE-2", "Issue two", "Description two.")
         _jira_env(monkeypatch, jira.url)
@@ -309,13 +309,14 @@ class TestMultiRunPipeline:
             {}, work_dirs.snapshot_dir,
             mark_processed=["RHAIRFE-1", "RHAIRFE-2"])
 
-        # Run 2: nothing changed — all unchanged, none in changed file
+        # Run 2: nothing changed — all unchanged-processed, excluded
         args2 = _fetch_args(tmp_path)
         stdout2 = _run_fetch(args2)
-        assert "TOTAL=2" in stdout2
+        assert "TOTAL=0" in stdout2
         assert "CHANGED=0" in stdout2
-        assert "UNCHANGED=2" in stdout2
+        assert "UNCHANGED_SKIPPED=2" in stdout2
         assert _read_ids(args2.changed_file) == []
+        assert _read_ids(args2.ids_file) == []
 
     def test_user_edits_after_submit(self, work_dirs, jira,
                                      monkeypatch, tmp_path):
@@ -344,11 +345,12 @@ class TestMultiRunPipeline:
                       {"fields": {"description":
                                   "User rewrote this after our fix."}})
 
-        # Run 2: detects user's edit, RHAIRFE-2 unchanged fills capacity
+        # Run 2: detects user's edit; RHAIRFE-2 unchanged-processed excluded
         args2 = _fetch_args(tmp_path)
         stdout2 = _run_fetch(args2)
-        assert "TOTAL=2" in stdout2
+        assert "TOTAL=1" in stdout2
         assert "CHANGED=1" in stdout2
+        assert "UNCHANGED_SKIPPED=1" in stdout2
         assert _read_ids(args2.changed_file) == ["RHAIRFE-1"]
 
         # Run 2: simulate pipeline completing for both
@@ -356,11 +358,12 @@ class TestMultiRunPipeline:
             {}, work_dirs.snapshot_dir,
             mark_processed=["RHAIRFE-1", "RHAIRFE-2"])
 
-        # Run 3: nothing changed — all unchanged
+        # Run 3: nothing changed — all unchanged-processed, excluded
         args3 = _fetch_args(tmp_path)
         stdout3 = _run_fetch(args3)
+        assert "TOTAL=0" in stdout3
         assert "CHANGED=0" in stdout3
-        assert "UNCHANGED=2" in stdout3
+        assert "UNCHANGED_SKIPPED=2" in stdout3
 
     def test_submit_without_user_edit(self, work_dirs, jira,
                                       monkeypatch, tmp_path):
@@ -381,12 +384,15 @@ class TestMultiRunPipeline:
         jira.request( "PUT", "/rest/api/3/issue/RHAIRFE-1",
                       {"fields": {"description": "We revised this."}})
 
-        # Run 2: our own change is in the snapshot — unchanged
+        # Run 2: our own change is in the snapshot — unchanged-processed,
+        # excluded from selection
         args2 = _fetch_args(tmp_path)
         stdout2 = _run_fetch(args2)
-        assert "TOTAL=1" in stdout2
+        assert "TOTAL=0" in stdout2
         assert "CHANGED=0" in stdout2
+        assert "UNCHANGED_SKIPPED=1" in stdout2
         assert _read_ids(args2.changed_file) == []
+        assert _read_ids(args2.ids_file) == []
 
     def test_new_issue_created_by_submit(self, work_dirs, jira,
                                          monkeypatch, tmp_path):
@@ -479,16 +485,18 @@ class TestMultiRunPipeline:
                                   "User rewrote issue two."}})
         jira.create("RHAIRFE-3", "Issue three", "Brand new issue three.")
 
-        # Run 2: RHAIRFE-2 changed, RHAIRFE-3 new, RHAIRFE-1 unchanged
+        # Run 2: RHAIRFE-2 changed, RHAIRFE-3 new, RHAIRFE-1 unchanged-processed
+        # → only the changed and new are selected; RHAIRFE-1 is excluded
         args2 = _fetch_args(tmp_path)
         stdout2 = _run_fetch(args2)
-        assert "TOTAL=3" in stdout2
+        assert "TOTAL=2" in stdout2
         assert "CHANGED=1" in stdout2
         assert "NEW=1" in stdout2
-        assert "UNCHANGED=1" in stdout2
+        assert "UNCHANGED_SKIPPED=1" in stdout2
         changed2 = _read_ids(args2.changed_file)
         assert "RHAIRFE-2" in changed2
         assert "RHAIRFE-1" not in changed2
+        assert "RHAIRFE-1" not in _read_ids(args2.ids_file)
 
         # Between runs: RHAIRFE-2 closed, nothing else changes
         transitions = jira.request(
@@ -786,15 +794,15 @@ class TestCloneThenFetch:
         args = _fetch_args(tmp_path, data_dir=clone_dest)
         stdout = _run_fetch(args)
 
-        # RHAIRFE-1: unchanged → included but not changed
-        # RHAIRFE-2: hash differs → changed
-        # RHAIRFE-3: new
-        assert "TOTAL=3" in stdout
+        # RHAIRFE-1: unchanged-processed → excluded from selection
+        # RHAIRFE-2: hash differs → changed (selected)
+        # RHAIRFE-3: new (selected)
+        assert "TOTAL=2" in stdout
         assert "CHANGED=1" in stdout
         assert "NEW=1" in stdout
-        assert "UNCHANGED=1" in stdout
+        assert "UNCHANGED_SKIPPED=1" in stdout
         ids = _read_ids(args.ids_file)
-        assert "RHAIRFE-1" in ids
+        assert "RHAIRFE-1" not in ids
         assert "RHAIRFE-2" in ids
         assert "RHAIRFE-3" in ids
         changed = _read_ids(args.changed_file)
