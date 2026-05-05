@@ -427,11 +427,12 @@ def main():
                 "skip_reason": None if remove else "rejected",
                 "task_path": task_path,
                 "attn_reason": None, "original_labels": original_labels,
-                "auto_approve": False,
+                "auto_approve": False, "jira_status": None,
             })
             continue
 
         # For existing RFEs, check for Jira conflicts
+        jira_status = None
         if is_existing and not args.dry_run:
             original_path = os.path.join(
                 args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
@@ -440,7 +441,9 @@ def main():
                     with open(original_path, encoding="utf-8") as f:
                         orig_snap = _normalize_for_compare(f.read())
                     issue = get_issue(server, user, token, rfe_id,
-                                      fields=["description"])
+                                      fields=["description", "status"])
+                    jira_status = (issue.get("fields", {})
+                                   .get("status", {}).get("name"))
                     desc_raw = issue.get("fields", {}).get("description")
                     if isinstance(desc_raw, dict):
                         jira_desc = _normalize_for_compare(
@@ -461,7 +464,7 @@ def main():
                             "task_path": task_path,
                             "attn_reason": None,
                             "original_labels": original_labels,
-                            "auto_approve": False,
+                            "auto_approve": False, "jira_status": jira_status,
                         })
                         continue
                 except Exception as e:
@@ -508,6 +511,7 @@ def main():
                         "attn_reason": attn_reason,
                         "original_labels": original_labels,
                         "auto_approve": auto_approve,
+                        "jira_status": jira_status,
                     })
                     continue
 
@@ -538,7 +542,7 @@ def main():
             "action": action, "labels": labels, "remove_labels": feas_remove,
             "skip_reason": None, "task_path": task_path,
             "attn_reason": attn_reason, "original_labels": original_labels,
-            "auto_approve": auto_approve,
+            "auto_approve": auto_approve, "jira_status": jira_status,
         })
 
     # Print summary
@@ -569,6 +573,9 @@ def main():
     def _maybe_approve(rfe_id, jira_key, entry):
         """Transition to Approved if --auto-approve and review qualifies."""
         if not args.auto_approve or not entry.get("auto_approve"):
+            return
+        if entry.get("jira_status") == "Approved":
+            print(f"  {rfe_id}: Already Approved, skipping transition")
             return
         if args.dry_run:
             print(f"  {rfe_id}: Would transition to Approved")
