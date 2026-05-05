@@ -20,8 +20,10 @@ against Jira and processing every result. Two issues:
 Instead of filtering at the JQL level and relying on labels to decide
 what to process, the snapshot system fetches **all** open issues (minus
 permanent exclusions), computes a content hash of each description, and
-diffs against the previous snapshot. Changed and new issues get priority
-ordering; unchanged issues fill remaining capacity within the limit.
+diffs against the previous snapshot. Changed and new issues are selected
+for processing; unchanged-processed issues are excluded by default
+(they are no-ops). Pass `--reprocess` to include unchanged issues as
+filler within the limit.
 
 ## Hard vs Soft Filters
 
@@ -198,9 +200,10 @@ current content hash against the previous snapshot. The `processed` flag
 determines whether a previous entry counts as "seen":
 
 - **UNCHANGED** (`processed: true` + hash matches): issue's description
-  hasn't changed since last processed. Included in output after
-  changed/new issues. When a limit is set, unchanged issues fill
-  remaining capacity.
+  hasn't changed since last processed. **Excluded from selection by
+  default** — they're no-ops for downstream processing (already submitted
+  with current content). Pass `--reprocess` to include them (e.g., to
+  re-test everything in scope).
 - **CHANGED** (`processed: true` + hash differs): issue was previously
   processed but its description has been modified since. Gets priority
   ordering and bypasses `check_resume`.
@@ -417,9 +420,9 @@ These invariants must hold and should guide future refactors:
    NEW issues (not in snapshot, or `processed: false`) go through
    normal resume check — if a passing review exists, they're skipped.
 
-5. **Without a limit, behavior is identical to the old design.** When
-   `limit = len(current)`, all issues are selected, all merged — the
-   snapshot contains everything.
+5. **Without a limit, all changed and new issues are selected.**
+   Unchanged-processed issues are still excluded (they're no-ops).
+   With `--reprocess`, all issues become eligible — including unchanged.
 
 6. **`update_snapshot_hashes` is additive.** It writes dict-format
    entries (`{hash, processed: true}`) to the latest snapshot, adding

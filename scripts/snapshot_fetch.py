@@ -13,11 +13,18 @@ never selected remain absent (staying NEW until selected).
 Usage:
     python3 scripts/snapshot_fetch.py fetch "<jql>" --ids-file tmp/autofix-all-ids.txt --changed-file tmp/autofix-changed-ids.txt [--limit 100] [--data-dir <path>]
 
+Selection: changed and new IDs are written to --ids-file. Unchanged-processed
+IDs (already submitted with current content) are EXCLUDED from selection by
+default — they are no-ops for downstream processing and would otherwise burn
+agent tokens re-reviewing already-handled work. Pass --reprocess to override
+and include unchanged IDs (e.g., to re-test everything in scope).
+
 Output (stdout):
-    TOTAL=<count>
-    CHANGED=<count>
-    NEW=<count>
-    UNCHANGED=<count>
+    TOTAL=<count selected for processing>
+    CHANGED=<count of changed in selection>
+    NEW=<count of new in selection>
+    UNCHANGED_SELECTED=<count of unchanged in selection (only with --reprocess)>
+    UNCHANGED_SKIPPED=<count of unchanged-processed not selected>
 """
 
 import argparse
@@ -359,6 +366,8 @@ def cmd_fetch(args):
     # changed and new are already ordered lists from diff_snapshots
     changed_set = set(changed)
     new_set = set(new)
+    unchanged = [k for k in current
+                 if k not in changed_set and k not in new_set]
 
     random_n = getattr(args, "random", None)
     if random_n is not None:
@@ -374,11 +383,12 @@ def cmd_fetch(args):
     else:
         limit = args.limit or len(current)
 
-        # Select up to limit: changed first, then new, then unchanged
+        # Select up to limit: changed first, then new. Unchanged-processed
+        # RFEs are no-ops (already submitted with current content) and are
+        # excluded from selection unless --reprocess is set, where the user
+        # explicitly wants to re-do everything in scope.
         all_ids = (changed + new)[:limit]
-        if len(all_ids) < limit:
-            unchanged = [k for k in current
-                         if k not in changed_set and k not in new_set]
+        if reprocess and len(all_ids) < limit:
             all_ids.extend(unchanged[:limit - len(all_ids)])
 
     # Build cumulative snapshot: previous entries + selected issues.
@@ -433,10 +443,16 @@ def cmd_fetch(args):
     changed_out = all_ids if reprocess else out_changed
     write_id_file(args.changed_file, changed_out)
 
+    # Counts: TOTAL is what's selected for processing. UNCHANGED_SKIPPED
+    # tracks unchanged-processed RFEs that were filtered out (the snapshot
+    # already records them as processed with current content).
+    unchanged_in_selection = sum(
+        1 for k in all_ids if k not in changed_set and k not in new_set)
     print(f"TOTAL={len(all_ids)}")
     print(f"CHANGED={len(changed_out)}")
     print(f"NEW={len(out_new)}")
-    print(f"UNCHANGED={len(all_ids) - len(changed_out) - len(out_new)}")
+    print(f"UNCHANGED_SELECTED={unchanged_in_selection}")
+    print(f"UNCHANGED_SKIPPED={len(unchanged) - unchanged_in_selection}")
 
 
 def main():
