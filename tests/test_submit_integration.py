@@ -1178,6 +1178,31 @@ class TestApprovedTransition:
         issue = jira.get("RHAIRFE-1234")
         assert issue["fields"]["status"]["name"] == "New"
 
+    def test_already_approved_skips_transition(self, art_dir, jira):
+        """--auto-approve + already Approved → skips transition."""
+        body = "Original."
+        jira.create("RHAIRFE-1234", "Test RFE", body)
+        # Pre-transition to Approved
+        transitions = jira.request(
+            "GET", "/rest/api/3/issue/RHAIRFE-1234/transitions")
+        approve_id = next(
+            t["id"] for t in transitions["transitions"]
+            if t["to"]["name"] == "Approved")
+        jira.request("POST", "/rest/api/3/issue/RHAIRFE-1234/transitions",
+                     {"transition": {"id": approve_id}})
+
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+               f"priority: Major\nstatus: Ready\n---\nRevised.")
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+               _review("RHAIRFE-1234", auto_revised="true"))
+
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        assert "Already Approved, skipping transition" in r.stdout
+        assert "Transitioned to Approved" not in r.stdout
+
     def test_no_flag_no_transition(self, art_dir, jira):
         """Without --auto-approve → no transition even with passing review."""
         body = "Original."
