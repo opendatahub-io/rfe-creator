@@ -131,59 +131,97 @@ The infra analyzer (test-plan-analyze-infra) extracts environment, test data, an
 
 **Test Plan Generation Readiness** is determined by combining all three analyzer assessments:
 
-| Interaction | Risks | Infra | Overall Readiness | Expected Test Plan Quality | Expected Gaps |
-|-------------|-------|-------|-------------------|---------------------------|---------------|
-| ✅ Ready | ✅ Ready | ✅ Ready | **Ready** | ≥8/10 | <5 (all explicit) |
-| ✅ Ready | ✅ Ready | ⚠️ Partial | **Ready** (with gaps) | 7-9/10 | 10-20 (pending deps) |
-| ✅ Ready | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 5-7/10 | 15-25 (mix) |
-| ⚠️ Partial | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 4-6/10 | 20-30 (many partial) |
-| ❌ Insufficient | (any) | (any) | **Not ready** | <4/10 | 30+ (unfixable) |
-| (any) | ❌ Insufficient | (any) | **Not ready** | <4/10 | 30+ (unfixable) |
-| (any) | (any) | ❌ Insufficient | **Not ready** | <4/10 | 30+ (unfixable) |
+| Interaction | Risks | Infra | Overall Readiness | Expected Quality | Expected Gap Resolvability |
+|-------------|-------|-------|-------------------|------------------|---------------------------|
+| ✅ Ready | ✅ Ready | ✅ Ready | **Ready** | ≥8/10 | **All addressable** - Can provide API specs, design docs now |
+| ✅ Ready | ✅ Ready | ⚠️ Partial | **Ready (pending deps)** | 7-9/10 | **Mixed** - Some blocked until dependencies ship |
+| ✅ Ready | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 5-7/10 | **Mixed** - Some require STRAT revision |
+| ⚠️ Partial | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 4-6/10 | **Many unfixable** - STRAT deficiencies |
+| ❌ Insufficient | (any) | (any) | **Not ready** | <4/10 | **Most unfixable** - Requires STRAT rewrite |
+| (any) | ❌ Insufficient | (any) | **Not ready** | <4/10 | **Most unfixable** |
+| (any) | (any) | ❌ Insufficient | **Not ready** | <4/10 | **Most unfixable** |
+
+**Gap Resolvability Types:**
+
+1. **Addressable** - Can be resolved by providing documentation now:
+   - API specifications (OpenAPI schemas, endpoint contracts)
+   - Design documents (implementation choices, architecture decisions)
+   - Deployment guides (environment variables, configurations)
+   - ADRs (architectural decision records)
+   - Example: "PostgreSQL migration details" → Provide design doc
+
+2. **Blocked** - Waiting for pending dependencies to ship:
+   - Dependencies with status "Needed" (RHAISTRAT-XXXX not yet implemented)
+   - Pending design work (UX review required, architecture review pending)
+   - Example: "CRD schema from RHAISTRAT-1295" → Wait for dependency to land
+
+3. **Unfixable** - Require STRAT revision:
+   - Missing from STRAT (no concrete interactions, vague criteria, unclear scope)
+   - Cannot be resolved with documentation alone
+   - Example: "No API endpoints specified" → Revise STRAT to add endpoints
+
+**Gap Count:** Expect 10-20 gaps even for "Ready" STRATs. What matters is resolvability:
+- All addressable → Can proceed with test planning and address gaps incrementally
+- Mix of addressable + blocked → Can proceed but some gaps remain until dependencies ship
+- Many unfixable → Should revise STRAT before test planning
 
 **Decision criteria:**
-- **Ready**: Proceed to `/test-plan-create`
-- **Needs improvement**: Recommend addressing gaps first, but can proceed if user accepts expected quality 4-7
-- **Not ready**: Do NOT proceed; revise STRAT to add missing details
+- **Ready**: All gaps addressable or blocked by documented dependencies → Quality ≥8/10
+- **Needs improvement**: Mix of addressable and unfixable gaps → Quality 4-7/10
+- **Not ready**: Most gaps unfixable without STRAT revision → Quality <4/10
 
 ## Decision Tree: Actions Based on Readiness
 
 ### If Readiness = "Ready" ✅
 **Meaning:** STRAT contains sufficient detail for quality test plan generation
 
+**Gap resolvability:** All gaps will be **addressable** (can provide API specs, design docs now) or **blocked** (waiting for documented dependencies)
+
 **Testability reviewer recommendation:**
 - Proceed to `/test-plan-create RHAISTRAT-XXX`
 - Expected test plan quality: ≥8/10
-- Expected gaps: <5 minor gaps
+- Expected gaps: 10-20 gaps, all with clear resolution paths
+
+**What to provide during test plan generation:**
+- API specifications (OpenAPI schemas, endpoint contracts)
+- Design documents (implementation details, tool choices)
+- Deployment configurations (environment variables, resource limits)
+- ADRs (if available)
 
 **Next steps:**
 1. Run `/test-plan-create RHAISTRAT-XXX [ADR_FILE]`
-2. Review TestPlan.md and TestPlanGaps.md
-3. If quality ≥8, proceed to test case generation
+2. Review TestPlanGaps.md - all gaps should have "Would be resolved by: ..." statements
+3. Provide available documentation to resolve addressable gaps
+4. Document blocked gaps (waiting for dependencies) with timeline
+5. If quality ≥8, proceed to test case generation
 
 ### If Readiness = "Needs Improvement" ⚠️
-**Meaning:** STRAT can support test plan generation but will have gaps
+**Meaning:** STRAT can support test plan generation but will have mix of addressable and unfixable gaps
+
+**Gap resolvability:** Mix of **addressable** (can provide docs), **blocked** (pending dependencies), and **unfixable** (require STRAT revision)
 
 **Testability reviewer recommendation:**
 Two options for the STRAT author:
 
 **Option A (Recommended) - Fix STRAT First:**
-1. Address specific gaps listed (endpoint paths, error codes, env versions, etc.)
+1. Address **unfixable gaps** listed in assessment (missing endpoints, vague criteria, unclear scope)
 2. Re-run `/strat.review` to verify improvements
-3. Once readiness = "Ready", run `/test-plan-create`
-4. Time investment: 20-40 min to improve STRAT
-5. Payoff: Quality test plan on first try (≥8/10)
+3. Once readiness improves to "Ready", run `/test-plan-create`
+4. Time investment: 30-60 min to improve STRAT
+5. Payoff: Higher quality test plan (7-9/10 instead of 4-7/10), fewer unfixable gaps
 
 **Option B - Proceed with Gaps:**
 1. Run `/test-plan-create RHAISTRAT-XXX` now
 2. Expected test plan quality: 4-7/10
-3. Expected gaps: 5-15 gaps in TestPlanGaps.md
-4. Provide ADR/API spec during test plan generation to resolve gaps
-5. May require test plan revisions
-6. Time cost: 1-2 hours of iteration
+3. Expected gaps: 15-30 gaps, some **unfixable** without STRAT revision
+4. Provide documentation for addressable gaps
+5. Some gaps will remain unfixable → require test plan revision after STRAT update
+6. Time cost: 2-3 hours (iteration on both STRAT and test plan)
 
 ### If Readiness = "Not Ready" ❌
 **Meaning:** STRAT lacks critical details; test plan generation would fail or produce quality <4/10
+
+**Gap resolvability:** Most gaps **unfixable** - require STRAT revision, not just documentation
 
 **Testability reviewer recommendation:**
 **Do NOT proceed to test-plan-create**
@@ -197,8 +235,13 @@ Two options for the STRAT author:
 3. Re-run `/strat.review` after revisions
 4. Only proceed to test plan generation once readiness ≥ "Needs improvement"
 
-**Time investment:** 30-60 min to improve STRAT
-**Time saved:** 2-3 hours avoiding failed test plan generation and full rewrite
+**Why gaps are unfixable without STRAT revision:**
+- No concrete interactions → Cannot provide in documentation, must be in STRAT
+- Vague acceptance criteria → Cannot add metrics via API spec, must fix criteria
+- Missing scope boundaries → Cannot clarify in design doc, must define in STRAT
+
+**Time investment:** 1-2 hours to fix STRAT
+**Time saved:** 3-5 hours avoiding failed test plan generation with 30+ unfixable gaps
 
 ## Integration with assess-strat Testability Scoring
 
