@@ -108,9 +108,10 @@ The risks analyzer (test-plan-analyze-risks) extracts test strategy, NFRs, and r
 
 The infra analyzer (test-plan-analyze-infra) extracts environment, test data, and infrastructure requirements. It requires:
 
-- [ ] **Environment requirements specified**
-  - ✅ Good: "Requires model-registry v1.5.0+, PostgreSQL 13+, OpenShift 4.15+"
-  - ❌ Bad: "Uses model registry", "Requires database"
+- [ ] **Environment requirements explicitly specified**
+  - ✅ PASS: Versions stated directly in this STRAT ("Requires model-registry v1.5.0+, PostgreSQL 13+, OpenShift 4.15+")
+  - ⚠️ PARTIAL: Versions exist but in referenced STRATs/docs ("See RHAISTRAT-1295 for CRD schema") - will cause TBDs
+  - ❌ FAIL: No version information ("Uses model registry", "Requires database")
 
 - [ ] **Test data format described or inferable**
   - ✅ Acceptance criteria shows example data structure ("MaaSModelRef CR with ExternalModel provider type... endpoint URL, model identifier, credential Secret reference")
@@ -130,15 +131,15 @@ The infra analyzer (test-plan-analyze-infra) extracts environment, test data, an
 
 **Test Plan Generation Readiness** is determined by combining all three analyzer assessments:
 
-| Interaction | Risks | Infra | Overall Readiness | Expected Test Plan Quality |
-|-------------|-------|-------|-------------------|---------------------------|
-| ✅ Ready | ✅ Ready | ✅ Ready | **Ready** | ≥8/10 (proceed to test-plan-create) |
-| ✅ Ready | ✅ Ready | ⚠️ Partial | **Ready** (minor gaps) | 7-9/10 (proceed, expect minor TBDs) |
-| ✅ Ready | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 5-7/10 (can proceed but expect gaps) |
-| ⚠️ Partial | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 4-6/10 (address gaps first recommended) |
-| ❌ Insufficient | (any) | (any) | **Not ready** | <4/10 (do NOT proceed) |
-| (any) | ❌ Insufficient | (any) | **Not ready** | <4/10 (do NOT proceed) |
-| (any) | (any) | ❌ Insufficient | **Not ready** | <4/10 (do NOT proceed) |
+| Interaction | Risks | Infra | Overall Readiness | Expected Test Plan Quality | Expected Gaps |
+|-------------|-------|-------|-------------------|---------------------------|---------------|
+| ✅ Ready | ✅ Ready | ✅ Ready | **Ready** | ≥8/10 | <5 (all explicit) |
+| ✅ Ready | ✅ Ready | ⚠️ Partial | **Ready** (with gaps) | 7-9/10 | 10-20 (pending deps) |
+| ✅ Ready | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 5-7/10 | 15-25 (mix) |
+| ⚠️ Partial | ⚠️ Partial | ⚠️ Partial | **Needs improvement** | 4-6/10 | 20-30 (many partial) |
+| ❌ Insufficient | (any) | (any) | **Not ready** | <4/10 | 30+ (unfixable) |
+| (any) | ❌ Insufficient | (any) | **Not ready** | <4/10 | 30+ (unfixable) |
+| (any) | (any) | ❌ Insufficient | **Not ready** | <4/10 | 30+ (unfixable) |
 
 **Decision criteria:**
 - **Ready**: Proceed to `/test-plan-create`
@@ -215,19 +216,6 @@ Two options for the STRAT author:
 | 2 (measurable criteria) | Not ready | ⚠️ Criteria good, but missing technical details for test plan |
 | 2 (measurable criteria) | Needs improvement | ✅ Proceed, expect quality 6-8 |
 | 2 (measurable criteria) | Ready | ✅ Proceed, expect quality ≥8 |
-
-## Example: RHAISTRAT-1431
-
-**STRAT:** UI for Registering Internal and External Model Endpoints in MaaS
-
-**Detailed assessment:** See [RHAISTRAT-1431-assessment.md](./RHAISTRAT-1431-assessment.md) for complete analysis with all 9 checks applied.
-
-**Summary:**
-- Interaction analyzer: ✅ Ready
-- Risks analyzer: ⚠️ Partial (limited error/edge cases)  
-- Infra analyzer: ✅ Ready
-
-**Overall:** Ready (with minor gaps) → Predicted quality 7-9/10
 
 ## Common Gaps and Fixes
 
