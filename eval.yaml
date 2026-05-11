@@ -1,0 +1,122 @@
+name: jtbd-rfe-quality
+description: >
+  Eval 1 from the JTBD integration proposal: measure whether RFEs generated
+  with JTBD research data are stronger than those generated without it.
+  Scores WHY justification, user evidence specificity, and overall quality
+  via pairwise comparison against a baseline run.
+skill: rfe.create
+
+execution:
+  mode: case
+  arguments: "--headless {prompt}"
+  timeout: 600
+
+runner:
+  type: claude-code
+
+models:
+  skill: claude-opus-4-6
+  judge: claude-opus-4-6
+  hook: claude-sonnet-4-6
+
+mlflow:
+  experiment: jtbd-rfe-quality
+
+permissions:
+  allow: []
+  deny:
+    - "mcp__atlassian__*"
+
+dataset:
+  path: eval/dataset/cases
+  schema: |
+    Each case directory contains:
+    - input.yaml: YAML file. The 'prompt' field is the original PM problem
+      statement that was used to create the RFE. Optionally 'context' with
+      additional background the PM provided.
+    - reference-rfe.md: The approved RFE from Jira — the gold standard output.
+      Contains markdown with YAML frontmatter (rfe_id, title, priority, size,
+      status). This is what the skill's output is compared against.
+    - annotations.yaml: Test metadata — known_outcome (approved/revised/rejected),
+      jira_key, and any notes for the judges.
+
+inputs:
+  tools:
+    - match: Questions asked to the user via AskUserQuestion.
+      prompt: |
+        You are acting as a PM providing input to the RFE creation skill.
+        Answer based on the test case context in input.yaml.
+        If asked about priority, say "Normal" unless the input specifies otherwise.
+        If asked to confirm, say "yes".
+        If asked clarifying questions about the problem, use the 'context' field
+        from input.yaml to provide additional detail. If no context is available,
+        give a brief, plausible answer consistent with the problem statement.
+    - match: |
+        Any interaction with Jira — via MCP tools (mcp__atlassian__*)
+        or scripts that import jira-python or call the Jira REST API.
+      prompt: |
+        Block all Jira interactions. This is an evaluation run — no reads
+        or writes to production Jira.
+
+outputs:
+  - path: artifacts/rfe-tasks
+    schema: |
+      One markdown file per case, named RFE-NNN.md (e.g., RFE-001.md).
+      Contains YAML frontmatter with rfe_id, title, priority, size, status.
+      The markdown body follows the RFE template: Summary, Problem Statement,
+      Affected Customers, Business Justification, Acceptance Criteria.
+      Skip files ending in -comments.md or -removed-context.md.
+
+traces:
+  stdout: true
+  stderr: true
+  metrics: true
+
+judges:
+  - name: has_rfe_output
+    description: |
+      Basic check that the skill produced a non-empty RFE with frontmatter.
+    check: |
+      import yaml
+      content = outputs.get("rfe-tasks_content", "")
+      if not content or len(content.strip()) < 50:
+          return False, f"No RFE output or too short ({len(content.strip())} chars)"
+      if not content.strip().startswith("---"):
+          return False, "No YAML frontmatter found"
+      try:
+          fm = yaml.safe_load(content.split("---", 2)[1])
+          required = ["rfe_id", "title", "priority", "status"]
+          missing = [f for f in required if f not in fm]
+          if missing:
+              return False, f"Missing frontmatter fields: {', '.join(missing)}"
+      except Exception as e:
+          return False, f"Invalid frontmatter: {e}"
+      return True, f"RFE produced with {len(content.strip())} chars, all required fields present"
+
+  - name: why_justification
+    description: |
+      Rate the strength of the WHY / Business Justification section (1-5).
+      This is the primary quality signal for Eval 1.
+    prompt_file: eval/prompts/why-justification-judge.md
+
+  - name: evidence_specificity
+    description: |
+      Rate the specificity of user evidence cited in the RFE (1-5).
+      Distinguishes between vague assertions and concrete research citations.
+    prompt_file: eval/prompts/evidence-specificity-judge.md
+
+  - name: pairwise
+    description: |
+      Compare two RFEs (from baseline and enriched runs) for the same
+      problem statement and pick the stronger one.
+    prompt_file: eval/prompts/pairwise-judge.md
+
+thresholds:
+  has_rfe_output:
+    min_pass_rate: 1.0
+  why_justification:
+    min_mean: 3.5
+  evidence_specificity:
+    min_mean: 3.5
+  pairwise:
+    min_win_rate: 0.6

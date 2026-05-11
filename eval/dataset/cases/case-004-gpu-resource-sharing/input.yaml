@@ -1,0 +1,25 @@
+prompt: >
+  About 20 developers across MLR, MLE, and Runtime teams share 8-10 H100/H200/B200
+  GPU servers. There is minimal scheduling, queuing, or resource management. Developers
+  SSH into machines, discover GPUs are occupied by long-running benchmark or evaluation
+  jobs (some 2+ days), and must migrate to another node. No shared persistent home
+  directory across nodes means migration requires re-cloning repos, re-installing
+  dependencies, re-downloading model weights. Different teams have conflicting GPU
+  usage patterns: Runtime developers work in short interactive cycles (edit, rebuild
+  vLLM 10+ min, test) while ML researchers run long multi-hour jobs. A runtime dev
+  steps away for 10-30 minutes and returns to find an 8-hour job occupying their
+  GPUs. Current workarounds include informal "GPU kill" policies (jobs over 30 min
+  can be terminated by anyone) and Slack-based negotiation. Agentic coding agents
+  (Claude Code) compound the problem since they cannot negotiate GPU access via Slack.
+
+context: >
+  Team composition: ~10 MLR researchers, MLE engineers, Runtime developers.
+  Hardware: 8-10 H100/H200/B200 GPU servers. Current tool: minimal chg scheduling.
+  Key pain points: contention without visibility (can't see running jobs), no job
+  time expectations, no separation of interactive vs batch workloads, environment
+  migration friction (no shared home dirs), idle resources amid scarcity, insufficient
+  total capacity. Even with perfect scheduling, ~20 users each needing 4-8 GPUs
+  exceeds pool. Single model evaluation across reasoning benchmarks takes 2+ days
+  on 8xH100. Solution should consider: Slurm (bare-metal), Slinky (Slurm on K8s),
+  Kueue (K8s-native). Need at least two partitions: shared/oversubscribed for
+  interactive dev, exclusive for benchmarks/training.

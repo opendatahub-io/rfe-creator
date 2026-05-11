@@ -1,0 +1,9 @@
+jira_key: RHAIRFE-2214
+known_outcome: approved
+priority: Normal
+notes: >
+  Eval/tooling-focused RFE that is meta — about evaluating agents, which is
+  the same domain as the eval harness itself. Good test for whether the skill
+  can handle self-referential domain concepts. Normal priority (lower than
+  other cases), tests whether the skill respects priority signals. Newest
+  RFE in the dataset (May 2026). Auto-created by rfe-creator.

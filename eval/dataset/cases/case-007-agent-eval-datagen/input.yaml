@@ -1,0 +1,24 @@
+prompt: >
+  AI teams building agents with modern agent harnesses (Claude Code, OpenClaw,
+  OpenCode) need to generate evaluation data using SDG Hub. Currently, SDG Hub
+  only supports LangFlow and LangGraph (2024-style frameworks) and is limited to
+  MCP protocol tools. As part of the AI Agent Evaluation Platform strategic
+  investment, SDG Hub must expand to support modern agent harnesses, all tool types
+  (bash, file operations, built-in tools), and produce evaluation data consumable
+  by standard evaluation frameworks (MLflow, Eval Hub, custom evaluators). Teams
+  building with modern harnesses must choose between rewriting their agents for
+  eval purposes or abandoning eval data generation entirely.
+
+context: >
+  Current workarounds: rewrite agents to use LangGraph purely for evaluation
+  (unsustainable), skip eval data generation and rely only on production traces,
+  manually transform SDG Hub output for evaluation frameworks (brittle).
+  Affected: OpenShift Lightspeed team (using LangGraph but evaluating modern
+  harnesses), AI teams across RHOAI ecosystem. Industry has moved to
+  general-purpose agent harnesses as the 2026 standard. Bill and Adel's feedback
+  (April 2026): current LangGraph-centric approach is misaligned with how agents
+  are actually built today. Success criteria: at least 3 modern harnesses with
+  working SDG Hub connectors, 80%+ coverage of all tool invocations in traces,
+  zero manual transformation steps between SDG Hub output and MLflow/Eval Hub
+  ingestion. Open question: should SDG Hub prioritize specific harnesses or
+  build a generic connector interface first?

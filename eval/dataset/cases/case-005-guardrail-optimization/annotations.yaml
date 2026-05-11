@@ -1,0 +1,9 @@
+jira_key: RHAIRFE-2072
+known_outcome: approved
+priority: Major
+notes: >
+  AI safety and compliance RFE with deep dependency chain (references 9 related
+  Jira issues). Tests the skill's ability to handle domain-specific terminology
+  (constitutions, guardrails, judge calibration, SIMBA/MemAlign) and produce
+  an RFE with clear "what this is NOT" boundaries. Has a "causal chain" section
+  showing how this RFE fits into a larger strategy.

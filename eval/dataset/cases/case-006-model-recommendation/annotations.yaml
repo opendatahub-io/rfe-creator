@@ -1,0 +1,9 @@
+jira_key: RHAIRFE-1208
+known_outcome: approved
+priority: Critical
+notes: >
+  UX/product-focused RFE proposing an agentic assistant with two distinct
+  workflows. Good test for evaluating whether the skill can produce RFEs
+  with concrete deployment configurations, measurable adoption targets,
+  and clear alternatives-considered sections. Older RFE (Jan 2026) with
+  different formatting style than rfe-creator auto-generated ones.

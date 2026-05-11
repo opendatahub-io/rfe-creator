@@ -1,0 +1,24 @@
+prompt: >
+  Red Hat needs a structured, automated ingestion pipeline that validates, scans,
+  evaluates, and registers MCP servers from all sources — ISV partners, community
+  contributors, and customer platform engineers — so that every MCP entering the
+  RHOAI platform goes through consistent governance before reaching the registry
+  and catalog. Today, onboarding MCP servers is entirely manual and inconsistent.
+  For the 3.4 Dev Preview, a single engineer manually adapted all 10 MCP server
+  containers — rebasing to UBI, adding labels, copying licenses. Each partner MCP
+  had different metadata formats and containerization approaches. CVE scanning was
+  limited to Quay image scanning with no dependency analysis. No end-to-end
+  functional testing was performed. The manual process is unsustainable as the
+  catalog grows beyond 10 MCPs.
+
+context: >
+  Two ingestion lanes need unification: (1) Partner/Community lane — ISV partners
+  like Confluent, Dynatrace, HashiCorp, Microsoft Azure, EDB provide repos or
+  containers requiring manual adaptation. Oracle, CyberArk, JFrog missed 3.4
+  cutoff due to technical gaps. (2) Customer lane — platform engineers at Citibank
+  want to create MCPs from existing APIs (OpenAPI specs) and have them governed.
+  Named customers: Citibank (actively asking about MCP creation from APIs),
+  State Farm/Dell/Prudential/Florida Blue (asking about MCP governance in production).
+  Partnership Ecosystem team (Matt Dorn, Jose Gonzalez, Serob) cannot scale the
+  current manual process. Pipeline components needed: validation, scanning,
+  evaluation, registration. Integrates with MCP Registry (MLflow) as system of record.

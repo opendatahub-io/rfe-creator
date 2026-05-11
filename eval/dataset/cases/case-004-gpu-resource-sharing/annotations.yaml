@@ -1,0 +1,9 @@
+jira_key: RHAIRFE-2141
+known_outcome: approved
+priority: Major
+notes: >
+  Internal developer-facing RFE (not customer-facing). Tests whether the skill
+  can handle internal infrastructure requests with detailed workflow descriptions,
+  specific capacity numbers, and success criteria with measurable targets
+  (e.g., "less than 15 minutes per day on GPU discovery"). Very detailed user
+  scenarios with code examples. Auto-created by rfe-creator.

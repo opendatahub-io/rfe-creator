@@ -1,0 +1,24 @@
+prompt: >
+  RHOAI cannot produce an end-to-end distributed trace for an inference request
+  today. A single user request traverses Envoy gateway, Authorino (auth),
+  Limitador (rate limiting), llm-d EPP (scheduling), KServe (serving), and vLLM
+  (inference) — but trace context breaks at nearly every boundary because most
+  components do not emit spans or propagate the W3C traceparent header. The llm-d
+  distributed tracing work covers Gateway→Scheduler→Model Worker, but the trace
+  chain still breaks outside llm-d at auth, rate limiting, guardrails, and the
+  agentic path. Customers cannot answer basic questions like "what path did my
+  request take?", "why is this call slow?", or "what tool calls did my agent make?"
+  Every RHOAI customer running inference or agentic workloads needs this for
+  production operations. Financial services customers (Goldman Sachs, BMO) need
+  it for EU AI Act compliance traceability. This is Critical priority.
+
+context: >
+  Affected components: Envoy/Istio gateway (working), Authorino (no OTel),
+  Limitador (no OTel), llm-d EPP (in progress via RHAISTRAT-1198/1368),
+  KServe (partial), vLLM (none — RHAIRFE-363 filed), fms-guardrails (unknown),
+  MCP Gateway/Kagenti (none). Related work: RHAISTRAT-1198 (DP llm-d tracing),
+  RHAISTRAT-1368 (GA llm-d tracing), RHAIRFE-2227 (telemetry contract),
+  RHAIRFE-2228 (logging pipeline sibling). Competitive pressure from AWS Bedrock
+  and Azure AI which surface request traces natively. Solution should use
+  OpenTelemetry spans via OTLP, W3C Trace Context propagation, and standard
+  span attributes (service.name, model.id, request.id, token counts).

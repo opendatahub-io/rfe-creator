@@ -1,0 +1,8 @@
+jira_key: RHAIRFE-1560
+known_outcome: approved
+priority: Major
+notes: >
+  Security-focused RFE with extensive named customer evidence from financial
+  services and manufacturing. Good test case for evaluating how the skill handles
+  compliance-driven requirements (EU AI Act) and MoSCoW-style acceptance criteria.
+  Has duplicate business justification sections in original — tests robustness.

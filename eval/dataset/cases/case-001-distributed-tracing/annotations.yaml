@@ -1,0 +1,8 @@
+jira_key: RHAIRFE-2229
+known_outcome: approved
+priority: Critical
+notes: >
+  Very detailed RFE with component-by-component status table, 7 acceptance
+  criteria, alternative approaches considered, and references to 6 related
+  Jira issues. Strong test case for evaluating whether the skill produces
+  structured, cross-cutting infrastructure RFEs with clear scope boundaries.

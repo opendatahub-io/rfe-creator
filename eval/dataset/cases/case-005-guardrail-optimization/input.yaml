@@ -1,0 +1,26 @@
+prompt: >
+  Organizations deploying guardrail systems (NeMo Guardrails, Guardrails Orchestrator)
+  and using LLM judge models for evaluation on RHOAI have no systematic way to
+  measure whether these systems actually enforce their organizational safety policies,
+  or to improve them when they fall short. Guardrail prompts are untested against
+  organizational policies — a guardrail configured to "block medical advice" may
+  over-block legitimate clinical decision support (false positives) or under-block
+  off-label drug recommendations (false negatives). Judge models reflect generic
+  standards, not organizational ones. In regulated industries where compliance
+  requirements diverge from generic standards, judge scores become unreliable.
+  Organizations need judges calibrated against their constitutional principles,
+  not just generic human-label traces.
+
+context: >
+  Depends on RHAIRFE-1412 (AI Safety Constitution definition) as input.
+  Extends RHAIRFE-1689 (LLM Judge Alignment via SIMBA/MemAlign) from generic
+  human-label calibration to constitution-driven calibration. Named customers:
+  Arrow AI Labs ("vendor-published safety scores are unreliable — why don't we
+  test that ourselves?"), Swiss Gov (needs to "evaluate guardrail models and track
+  relevant metrics"), Garanti BBVA/BBVA Spain (data protection as procurement
+  prerequisite), NTT Docomo ("current LLM guardrail systems insufficient"),
+  FSI field data (model security is #1 MaaS adoption blocker). Solution should
+  cover three capabilities: (1) Evaluate guardrail prompt effectiveness with
+  constitution compliance scorecards, (2) Optimize guardrail prompts based on
+  failure patterns, (3) Calibrate judge models against organizational constitutional
+  principles. All tracked in EvalHub with provenance.

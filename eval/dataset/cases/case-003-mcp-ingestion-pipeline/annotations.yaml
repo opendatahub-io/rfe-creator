@@ -1,0 +1,8 @@
+jira_key: RHAIRFE-2081
+known_outcome: approved
+priority: Major
+notes: >
+  Comprehensive pipeline/process RFE with two ingestion lanes, multiple named
+  customers and partners, clear in-scope/out-of-scope boundaries, and success
+  criteria. Good test for evaluating how the skill handles operational/process
+  RFEs vs. pure feature requests. Auto-created by rfe-creator itself.

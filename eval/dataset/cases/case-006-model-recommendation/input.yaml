@@ -1,0 +1,25 @@
+prompt: >
+  OpenShift AI provides a robust platform for model serving, but customers face a
+  "cold start" problem. Before they struggle with how to deploy a model, they
+  struggle to decide which model to deploy. AI Engineers and LLMOps teams at
+  enterprises like Lockheed Martin, Bank of America, and Verizon are overwhelmed
+  by the rapid proliferation of open-weights models (Llama 3, Mistral, Granite,
+  etc.) and lack a unified interface to answer two questions: (1) Which model is
+  best suited for my specific use case given my compliance and accuracy needs?
+  (2) Once selected, what is the optimal hardware profile and runtime configuration
+  to balance cost vs. performance? Currently this requires manual correlation of
+  Hugging Face leaderboards, benchmark papers, and hardware spec sheets — leading
+  to suboptimal model choices and wasted GPU spend.
+
+context: >
+  Proposed solution: "Project Navigator" — an agentic orchestration layer with two
+  workflows. Workflow 1 (Model Recommendation): natural language intent capture,
+  registry + benchmark lookup, hardware-aware filtering against cluster capacity
+  (e.g., "Do we have enough A100s for a 70B model?"), and justified recommendations
+  with benchmark highlights. Workflow 2 (Deployment Optimization): generate 3
+  deployment pipeline candidates (Performance/Cost/Balanced configs with different
+  tensor parallelism, quantization, autoscaling), automated benchmarking with
+  llm-perf or similar, and metric-driven recommendation (TTFT, P95, tokens/sec,
+  GPU utilization). Target: 30-50% of new projects starting via Navigator within
+  12 months. Time-to-value: reduce "user intent" to "running endpoint" from days
+  to minutes. Primary audience: Banking, Telco enterprises with "analysis paralysis."

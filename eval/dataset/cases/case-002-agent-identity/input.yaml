@@ -1,0 +1,25 @@
+prompt: >
+  Deployed agents on RHOAI currently inherit the deploying user's credentials and
+  have no independent identity. This means agents cannot be individually audited,
+  access-controlled, or isolated from each other. Enterprise customers in regulated
+  industries need each agent to have scoped permissions and traceable actions.
+  Multiple named customers confirm this is a prerequisite for production deployment:
+  Volvo needs delegation semantics, BofA needs workload isolation in air-gapped
+  environments, Goldman Sachs has already implemented SPIFFE, BMO wants scoped
+  ephemeral agent identities with token exchange. EU AI Act Article 14 requires
+  full traceability of agent decisions. Without platform-provided agent identity,
+  every customer must build custom SPIFFE/token-exchange integrations. This is
+  Major priority.
+
+context: >
+  Named customer evidence: Volvo (delegation semantics, SPIFFE/SPIRE), BBVA
+  (Kagenti sidecar injection for identity), BofA (validated/secure MCP servers,
+  air-gapped proxying, enterprise auth), Phoenix Technologies (sandboxed containers
+  for agentic), NTT Data (ABE technology, zero trust for agents), BMO (SPIFFE/Kagenti
+  pattern, scoped ephemeral identities), Goldman Sachs (SPIFFE implemented,
+  EU AI Act Article 14 traceability), Garanti BBVA (identity propagation from
+  mobile app through agent to data sources), Fix/Siemens (super-scoping tokens
+  for agent-to-tool communication). Must-have: per-agent service identity,
+  identity delegation, ingress/egress policies (L4/L7), TLS enforcement.
+  Should-have: mTLS for agent client identities. Could-have: external IdP
+  integration (SPIFFE/SPIRE, OAuth token exchange).
