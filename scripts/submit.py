@@ -36,6 +36,7 @@ from jira_utils import (
     update_issue,
     add_labels,
     remove_labels,
+    swap_labels,
     add_comment,
     get_issue,
     transition_issue,
@@ -622,13 +623,14 @@ def main():
                         print(f"  {rfe_id}: Would add labels: "
                               f"{', '.join(labels)}")
                 else:
-                    if remove:
-                        remove_labels(server, user, token, rfe_id, remove)
-                        print(f"  {rfe_id}: Removed labels: "
-                              f"{', '.join(remove)}")
-                    if labels:
-                        add_labels(server, user, token, rfe_id, labels)
-                        print(f"  {rfe_id}: Labels: {', '.join(labels)}")
+                    if remove or labels:
+                        swap_labels(server, user, token, rfe_id,
+                                    labels, remove)
+                        if remove:
+                            print(f"  {rfe_id}: Removed labels: "
+                                  f"{', '.join(remove)}")
+                        if labels:
+                            print(f"  {rfe_id}: Labels: {', '.join(labels)}")
                     update_frontmatter(entry["task_path"],
                                        {"status": "Submitted"},
                                        "rfe-task")
@@ -660,12 +662,13 @@ def main():
                     update_issue(server, user, token, rfe_id, title,
                                  description_adf)
                     print(f"  {rfe_id}: Updated")
-                    if remove:
-                        remove_labels(server, user, token, rfe_id, remove)
-                        print(f"           Removed: {', '.join(remove)}")
-                    if labels:
-                        add_labels(server, user, token, rfe_id, labels)
-                        print(f"           Labels: {', '.join(labels)}")
+                    if remove or labels:
+                        swap_labels(server, user, token, rfe_id,
+                                    labels, remove)
+                        if remove:
+                            print(f"           Removed: {', '.join(remove)}")
+                        if labels:
+                            print(f"           Labels: {', '.join(labels)}")
                     submitted_hashes[rfe_id] = compute_content_hash(
                         description_adf)
                     update_frontmatter(entry["task_path"],
