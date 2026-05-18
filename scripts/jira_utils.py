@@ -179,6 +179,18 @@ def remove_labels(server, user, token, issue_key, labels):
     api_call_with_retry(server, path, user, token, body=body, method="PUT")
 
 
+def swap_labels(server, user, token, issue_key, add, remove):
+    """Atomically add and remove labels in a single PUT to avoid race conditions."""
+    ops = [{"add": label} for label in add] + [{"remove": label} for label in remove]
+    body = {
+        "update": {
+            "labels": ops
+        }
+    }
+    path = f"/issue/{issue_key}"
+    api_call_with_retry(server, path, user, token, body=body, method="PUT")
+
+
 def create_issue_link(server, user, token, type_name, inward_key, outward_key):
     """POST /rest/api/3/issueLink"""
     body = {
