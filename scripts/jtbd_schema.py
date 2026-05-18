@@ -42,6 +42,17 @@ JTBD_TASK_FIELDS = {
                             "required": False,
                             "enum": ["build", "deploy", "production"],
                         },
+                        "alignment_rank": {
+                            "type": "integer",
+                            "required": False,
+                            "min": 1,
+                            "max": 4,
+                        },
+                        "alignment_strength": {
+                            "type": "string",
+                            "required": False,
+                            "enum": ["strong", "moderate", "weak"],
+                        },
                     },
                 },
             },

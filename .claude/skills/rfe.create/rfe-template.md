@@ -46,17 +46,20 @@ Scale the output to match the size of the RFE. Use the appropriate section set b
 <Evidence-based: revenue impact, customer commitments, strategic investments, competitive positioning. Not assertions — data or named sources.>
 
 ## JTBD Evidence (if available)
-<If JTBD data was retrieved from the knowledge registry, include it here. Omit this section entirely if no JTBD data is available — do NOT fabricate evidence.>
+<If JTBD data was retrieved from the knowledge registry, include it here. Omit this section entirely if no JTBD data is available — do NOT fabricate evidence. List up to 4 matched jobs, ordered by alignment strength (primary job first).>
 
+### Primary job (strongest alignment)
 - **Job:** <Job name> (<job-id>)
 - **Lifecycle phase:** <build | deploy | production>
 - **Opportunity score:** <score> (importance: <X>, satisfaction: <Y>)
 - **Target persona(s):** <persona name(s)>
 - **Key pain points:**
   - <Pain point from registry relevant to this RFE>
-  - <Pain point from registry relevant to this RFE>
 - **User evidence:**
   > "<Verbatim user quote from registry>"
+
+### Supporting jobs (if applicable)
+<Repeat for additional matched jobs (up to 3 more), with briefer bullets — pain points and scores most relevant to this RFE's scope.>
 
 ## Acceptance Criteria
 - [ ] <User-perspective criterion>
@@ -92,8 +95,9 @@ Scale the output to match the size of the RFE. Use the appropriate section set b
 - Market data or analyst input
 
 ## JTBD Evidence (if available)
-<If JTBD data was retrieved from the knowledge registry, include it here. Omit this section entirely if no JTBD data is available — do NOT fabricate evidence.>
+<If JTBD data was retrieved from the knowledge registry, include it here. Omit this section entirely if no JTBD data is available — do NOT fabricate evidence. List up to 4 matched jobs, ordered by alignment strength (primary job first).>
 
+### Primary job (strongest alignment)
 - **Job:** <Job name> (<job-id>)
 - **Lifecycle phase:** <build | deploy | production>
 - **Opportunity score:** <score> (importance: <X>, satisfaction: <Y>)
@@ -103,9 +107,11 @@ Scale the output to match the size of the RFE. Use the appropriate section set b
   - <Pain point from registry relevant to this RFE>
 - **User evidence:**
   > "<Verbatim user quote from registry>"
-  > "<Additional quote if available>"
 - **Job steps affected:**
   - <Specific sub-job/step this RFE addresses>
+
+### Supporting jobs (if applicable)
+<Repeat for additional matched jobs (up to 3 more) — opportunity score, key pain points, and how each relates to the RFE scope.>
 
 ## User Scenarios
 <Describe 2-3 concrete scenarios from the user's perspective:>

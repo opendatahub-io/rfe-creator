@@ -14,21 +14,22 @@ Follow this sequence — same protocol as the JTBD review agent:
 
 1. Read `.context/jtbd-registry/governance.yaml` — internalize constraints
 2. Read `.context/jtbd-registry/index.yaml` — scan 18 jobs
-3. Identify the job(s) flagged in the JTBD review findings
-4. Read the full job file(s) for those jobs (max 3)
+3. Identify the job(s) flagged in the JTBD review findings (up to 4, prioritized by alignment strength)
+4. Read the full job file(s) for those jobs (max 4, strongest alignment first)
 
 ## Revision Actions by Dimension
 
 ### If Job Mapping scored 0:
 
-- Scan the index for the correct job match based on the RFE's WHAT section
-- If a match exists, update the `jtbd_mapping` frontmatter with the correct job ID
+- Scan the index for the correct job match(es) based on the RFE's WHAT section — identify up to 4, ranked by alignment strength
+- If match(es) exist, update the `jtbd_mapping` frontmatter with job ID(s), `alignment_rank`, and `alignment_strength`
 - If no match exists, note this explicitly — do NOT force a mapping
 
 ### If Job Mapping scored 1:
 
-- If the mapping is tangential, check whether a more central job exists
-- If the RFE spans multiple jobs, add acknowledgment of the overlap in the WHY section
+- If the mapping is tangential, check whether a more central job exists and should be `alignment_rank: 1`
+- If the RFE spans multiple jobs, add acknowledgment in the WHY section with clear primary vs. supporting jobs
+- If multiple jobs are cited but unordered, add `alignment_rank` and prioritize by fit in frontmatter and prose
 
 ### If Evidence Utilization scored 0:
 

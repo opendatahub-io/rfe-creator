@@ -25,7 +25,8 @@ The RFE Creator integrates with the Red Hat AI Jobs-to-be-Done (JTBD) knowledge 
                     │                                     │
                     │  Reads: governance.yaml (rules)      │
                     │  Reads: index.yaml (18 jobs, ~500t)  │
-                    │  Matches: problem → 1-3 jobs         │
+                    │  Matches: problem → up to 4 jobs   │
+                    │  (ranked by alignment strength)    │
                     │  Reads: jobs/<id>.yaml (detail)      │
                     │  Returns: structured match data      │
                     └──────────────┬──────────────────────┘
@@ -53,14 +54,14 @@ Progressive disclosure is a pattern for managing context window cost when an age
 | L0 | `index.yaml` | ~500 | Always — every RFE creation/review |
 | L1 | `governance.yaml` | ~200 | Always — loaded before any data files |
 | L2 | `personas/*.yaml` | ~300 each | Only when persona context helps disambiguate |
-| L3 | `jobs/<id>.yaml` | ~800–1500 each | Only for matched jobs (1–3 max) |
+| L3 | `jobs/<id>.yaml` | ~800–1500 each | Only for matched jobs (up to 4 max) |
 
-**Typical cost:** ~1,500–3,000 tokens per RFE (index + governance + 1–2 job files).
-**Worst case:** ~6,100 tokens (index + governance + all 3 personas + 3 full job files).
+**Typical cost:** ~2,000–4,000 tokens per RFE (index + governance + 2–3 job files).
+**Worst case:** ~7,500 tokens (index + governance + all 3 personas + 4 full job files).
 
 ### Why the agent reads index.yaml first
 
-The index contains all 18 jobs with their opportunity scores, names, lifecycle phases, and file pointers. This gives the agent enough context to determine which jobs are relevant to the current RFE without reading any job detail. The matching happens against ~500 tokens of summary data, and only then does the agent drill into the 1–3 relevant job files for full detail.
+The index contains all 18 jobs with their opportunity scores, names, lifecycle phases, and file pointers. This gives the agent enough context to determine which jobs are relevant to the current RFE without reading any job detail. The matching happens against ~500 tokens of summary data; the agent then selects **up to 4 jobs ranked by alignment strength** (JTBD SMEs typically identify 4–5 per RFE) and drills into those job files for full detail.
 
 This is enforced by the JTBD agent prompts, which explicitly order the navigation steps and prohibit reading all job files.
 
@@ -120,15 +121,23 @@ The `jtbd_alignment` score is a **parallel signal** — it does NOT affect the e
 
 ```yaml
 jtbd_mapping:
-  jobs:
-    - id: "prod.continuously_monitor"    # lifecycle.job_name format
+  jobs:                                     # up to 4, ordered by alignment_rank
+    - id: "prod.continuously_monitor"       # lifecycle.job_name format
       name: "Continuously Monitor Model Health"
       opportunity_score: 12.3
       lifecycle_phase: "production"
+      alignment_rank: 1                     # 1 = strongest fit
+      alignment_strength: "strong"          # strong | moderate | weak
+    - id: "deploy.configure_serving"
+      name: "Configure Model Serving"
+      opportunity_score: 10.1
+      lifecycle_phase: "deploy"
+      alignment_rank: 2
+      alignment_strength: "moderate"
   personas:
     - "maldi"
     - "alex"
-  confidence: "high"                      # high | medium | low | none
+  confidence: "high"                        # high | medium | low | none
 ```
 
 ### `rfe-review` frontmatter — `jtbd_alignment` score

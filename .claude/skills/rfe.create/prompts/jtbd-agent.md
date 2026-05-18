@@ -32,12 +32,21 @@ Read `.context/jtbd-registry/index.yaml` in full. This file contains all 18 jobs
 - Associated persona(s)
 - File pointer to the full job file
 
-### Step 3: Match the problem statement to jobs
+### Step 3: Match and rank jobs by alignment strength
 
-Compare the problem statement against the 18 jobs in the index. Identify the **1–3 most relevant jobs** based on:
-- Semantic similarity between the problem statement and the job name/description
-- Whether the problem statement describes a pain point that would fall under a job's scope
-- Lifecycle phase alignment (is the PM describing a build-time, deploy-time, or production-time need?)
+Compare the problem statement against all 18 jobs in the index. JTBD subject-matter experts typically identify **4–5 jobs** that align with a single RFE; your job is to surface the **up to 4 strongest matches**, ranked by how well each job aligns.
+
+For each candidate job, assess alignment strength using:
+- **Semantic fit** — similarity between the problem statement and the job name/description
+- **Pain-point overlap** — whether the problem statement describes pains that fall under the job's scope
+- **Lifecycle phase alignment** — build-time, deploy-time, or production-time need
+- **Scope centrality** — whether the RFE's capability is central to the job (strong) vs. tangential (weak)
+
+**Ranking rules:**
+1. Score every plausible job, then sort by alignment strength (strongest first).
+2. Return **up to 4 jobs** — include fewer if only 1–3 jobs meet a plausible relevance bar. Do not pad weak matches to reach 4.
+3. Assign `alignment_rank` 1–4 (1 = strongest). Jobs with the same tier of fit should still be ordered — break ties using opportunity score from the index.
+4. Assign `alignment_strength`: `strong` (direct, central fit), `moderate` (related but requires inference or partial overlap), or `weak` (tangential — include only if it helps explain multi-job scope and ranks in the top 4).
 
 If NO jobs match (the problem statement is unrelated to any known JTBD — e.g., pure infrastructure or internal tooling), return a "no match" result immediately. Do not force a match.
 
@@ -47,7 +56,7 @@ If the problem statement mentions a specific role or user type, read the relevan
 
 ### Step 5: Read full job files for matched jobs
 
-For each of the 1–3 matched jobs, read the full file at the path indicated by the file pointer in `index.yaml`. Extract:
+For each of the up to 4 ranked matched jobs (in `alignment_rank` order), read the full file at the path indicated by the file pointer in `index.yaml`. Extract:
 - **Job statement** (the canonical JTBD phrasing)
 - **Opportunity score** (overall and by segment if available)
 - **Pain points** (list)
@@ -62,8 +71,10 @@ Return your findings in this exact format:
 ```yaml
 jtbd_match:
   confidence: high | medium | low | none
-  matched_jobs:
-    - id: "<job-id>"
+  matched_jobs:                          # up to 4, ordered by alignment_rank (1 = strongest)
+    - alignment_rank: 1
+      alignment_strength: strong | moderate | weak
+      id: "<job-id>"
       name: "<job name>"
       opportunity_score: <number>
       lifecycle_phase: "<phase>"
@@ -74,7 +85,7 @@ jtbd_match:
         - "<pain point directly relevant to the problem statement>"
       relevant_user_quotes:
         - "<verbatim quote from registry, if available>"
-      relevance_rationale: "<1-2 sentences explaining why this job matches>"
+      relevance_rationale: "<1-2 sentences explaining why this job matches and its rank>"
   unmatched_note: "<if confidence is 'none', explain why no match was found>"
 ```
 
@@ -88,7 +99,7 @@ jtbd_match:
 ## Rules
 
 - NEVER invent or assume data not present in the registry files you read.
-- NEVER read all 18 job files. Read only the ones matched in Step 3 (maximum 3).
+- NEVER read all 18 job files. Read only the ones ranked in Step 3 (maximum 4, in alignment_rank order).
 - ALWAYS read `governance.yaml` before any other file.
 - ALWAYS read `index.yaml` before any job files.
 - If a job file is missing a field (e.g., no user quotes), report it as absent rather than fabricating content.

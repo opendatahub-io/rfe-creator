@@ -7,8 +7,8 @@ This rubric is used by the JTBD review agent to score how well an RFE is grounde
 | Score | Label | Job Mapping | Evidence Utilization | Persona-Task Coherence | Opportunity Justification |
 |-------|-------|-------------|---------------------|----------------------|--------------------------|
 | **0** | No meaningful alignment | No mapping exists, OR mapping is clearly wrong (cited job is unrelated to the RFE's purpose) | No research evidence cited — WHY relies on assertion, anecdote, or assumed need | No persona identified, OR persona contradicts the JTBD mapping (e.g., AI engineer job but ops workflow) | No opportunity data cited, OR data actively contradicts stated priority (e.g., Critical on a job scoring <7) |
-| **1** | Partial alignment | Maps to a plausible job but fit is loose — scope is tangential to the job's core definition, OR spans multiple jobs without acknowledging overlap | Some evidence cited but incomplete — opportunity score without pain points, OR quotes disconnected from argument, OR evidence used generically without tying to the specific capability | Persona identified and plausible but underdeveloped — named without explaining which workflow step is affected, OR targets a secondary persona rather than the job's primary user | Opportunity data referenced but connection to priority is implicit — reader must infer why the score justifies investment, OR moderate-opportunity job (8–10) cited without acknowledging it's not highest-need tier |
-| **2** | Strong alignment | Maps to the correct job(s) — stated capability directly addresses the job statement; if multiple jobs cited, relationship is coherent | Evidence well-integrated — pain points, scores, and/or quotes cited in direct support of the need; makes a clear case for why *this specific capability* matters | Persona identified, job maps to a validated part of their workflow, capability fits naturally into how they work or explicitly addresses a documented workflow gap | Priority earned by data — high-opportunity (≥11) backs Critical/Major; moderate backs Normal with rationale; investment ask is proportional to research signal |
+| **1** | Partial alignment | Maps to a plausible job but fit is loose — scope tangential to the primary job, OR multiple jobs (up to 4) cited without rank/priority or coherent relationship | Some evidence cited but incomplete — opportunity score without pain points, OR quotes disconnected from argument, OR evidence used generically without tying to the specific capability | Persona identified and plausible but underdeveloped — named without explaining which workflow step is affected, OR targets a secondary persona rather than the job's primary user | Opportunity data referenced but connection to priority is implicit — reader must infer why the score justifies investment, OR moderate-opportunity job (8–10) cited without acknowledging it's not highest-need tier |
+| **2** | Strong alignment | Maps to the correct job(s) — primary job is clear; capability addresses the job statement; multiple jobs (up to 4) are ranked and coherent | Evidence well-integrated — pain points, scores, and/or quotes cited in direct support of the need; makes a clear case for why *this specific capability* matters | Persona identified, job maps to a validated part of their workflow, capability fits naturally into how they work or explicitly addresses a documented workflow gap | Priority earned by data — high-opportunity (≥11) backs Critical/Major; moderate backs Normal with rationale; investment ask is proportional to research signal |
 
 ## Composite Scoring Rule
 
@@ -48,7 +48,9 @@ The review file includes a JTBD Alignment section:
 | Persona-Task Coherence | <0-2> | <1 sentence> |
 | Opportunity Justification | <0-2> | <1 sentence> |
 
-**Matched JTBD:** <job name> (<job-id>, opportunity: <score>)
+**Matched JTBD (ranked):**
+1. <job name> (<job-id>, opportunity: <score>, <strong|moderate|weak>)
+2. <additional jobs up to 4 total, if applicable>
 **Target persona:** <persona name(s)>
 
 ### Recommendations (if score < 2)

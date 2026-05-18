@@ -42,10 +42,11 @@ If the RFE has no `jtbd_mapping` field, proceed to Step 4 to attempt your own ma
 
 Regardless of whether a mapping already exists, evaluate:
 - Which job(s) in the registry best match the RFE's stated capability?
-- Is the RFE's scope tangential to the job or central to it?
-- If the RFE spans multiple jobs, is that acknowledged and coherent?
+- Rank up to **4 jobs** by alignment strength (same criteria as creation: semantic fit, pain-point overlap, lifecycle phase, scope centrality).
+- Is the RFE's scope tangential to the primary job or central to it?
+- If the RFE spans multiple jobs (common — SMEs often identify 4–5), is that acknowledged and coherent? Are jobs prioritized so the primary mapping is clear?
 
-Read the full job file(s) for the 1–3 most relevant jobs (via file pointers in the index) to access pain points, user quotes, and opportunity scores by segment.
+Read the full job file(s) for the up to 4 most relevant jobs (via file pointers in the index), in alignment-rank order, to access pain points, user quotes, and opportunity scores by segment.
 
 ### Step 5: Score using the rubric
 
@@ -56,8 +57,8 @@ Evaluate the RFE across four dimensions and assign a single composite score (0�
 | Score | Criteria |
 |-------|----------|
 | **0** | No mapping exists, OR mapping is clearly wrong (cited job unrelated to RFE's purpose) |
-| **1** | Maps to a plausible job but fit is loose — scope tangential, OR spans multiple jobs without acknowledging overlap |
-| **2** | Maps to correct job(s) — stated capability directly addresses the job statement; multiple-job citations are coherent |
+| **1** | Maps to a plausible job but fit is loose — scope tangential to the primary job, OR multiple jobs cited without rank/priority or coherent relationship |
+| **2** | Maps to correct job(s) — primary job is clear; stated capability addresses the job statement; multiple-job citations (up to 4) are ranked and coherent |
 
 #### Dimension B: Evidence Utilization
 
@@ -105,8 +106,10 @@ jtbd_review:
     persona_task_coherence: <0 | 1 | 2>
     opportunity_justification: <0 | 1 | 2>
   existing_mapping_valid: <true | false | no_mapping_present>
-  matched_jobs:
-    - id: "<job-id>"
+  matched_jobs:                          # up to 4, ordered by alignment_rank
+    - alignment_rank: 1
+      alignment_strength: strong | moderate | weak
+      id: "<job-id>"
       name: "<job name>"
       opportunity_score: <number>
       match_quality: "<correct | plausible | wrong>"
@@ -121,7 +124,7 @@ jtbd_review:
 ## Rules
 
 - NEVER invent or assume data not in the registry.
-- NEVER read all 18 job files — read only matched jobs (max 3).
+- NEVER read all 18 job files — read only matched jobs (max 4, in alignment-rank order).
 - ALWAYS read `governance.yaml` then `index.yaml` before anything else.
 - If the RFE has a `jtbd_mapping` with `confidence: none`, still attempt your own mapping — the creation step may have failed to find a match that exists.
 - Quote registry data exactly — do not paraphrase scores or user verbatim.

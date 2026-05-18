@@ -48,9 +48,9 @@ Read .claude/skills/rfe.create/prompts/jtbd-agent.md and follow all instructions
 The JTBD agent navigates the registry using progressive disclosure:
 1. Reads `governance.yaml` first (behavioral constraints)
 2. Reads `index.yaml` (18 jobs ranked by opportunity score, ~500 tokens)
-3. Matches the problem statement to 1–3 relevant jobs
+3. Matches the problem statement to **up to 4 relevant jobs**, ranked by alignment strength (strongest first)
 4. Reads only the matched job files for full detail (pain points, scores, user quotes)
-5. Returns structured match data with confidence level
+5. Returns structured match data with confidence level and per-job alignment rank
 
 Store the agent's output for use in Steps 2 and 3.
 
@@ -72,10 +72,11 @@ If the rubric is loaded, adapt your questions to cover any rubric criteria the P
 - If the rubric penalizes task-framing, ensure the PM describes a need, not an activity.
 
 **If JTBD data is available from Step 1.5**, incorporate it into your questions:
-- Reference the matched job by name: "This sounds related to [job name] (opportunity score: [X]) — is that the user need you're addressing?"
-- Surface specific pain points from the registry: "Users report difficulty with [pain point]. Is that what's motivating this request?"
+- Lead with the highest-ranked job (`alignment_rank: 1`): "This sounds most related to [job name] (opportunity score: [X]) — is that the primary user need you're addressing?"
+- When multiple jobs matched, briefly name the top 2–3 by rank and ask which are in scope: "Research also links this to [job B] and [job C]. Does your RFE span those needs, or focus on [job A]?"
+- Surface specific pain points from the strongest-matched job(s): "Users report difficulty with [pain point]. Is that what's motivating this request?"
 - Ask about persona scope: "This appears to primarily affect [persona]. Are there other roles impacted?"
-- If the match confidence is `medium` or `low`, ask a question to confirm the mapping: "Does this relate to [job name], or is it addressing a different need?"
+- If overall match confidence is `medium` or `low`, or lower-ranked jobs are `moderate`/`weak`, ask to confirm: "Does this relate to [job name], or is it addressing a different need?"
 
 Do NOT ask about implementation approach, architecture, technology choices, or API design. Those belong in the strategy phase.
 
@@ -92,10 +93,10 @@ Key rules:
 - **Platform vocabulary is allowed in describing the problem domain** — terms like KServe, ModelMesh, RHOAI, Operator are fine for describing what area the RFE touches. But do not prescribe that specific technologies must be used in the solution.
 
 **If JTBD data is available from Step 1.5**, enrich the generated RFEs:
-- In the Business Justification / WHY section, cite the matched JTBD opportunity score and relevant pain points as evidence for the investment ask.
-- Include 1–2 relevant user quotes from the registry as verbatim supporting evidence (do NOT paraphrase — cite exactly as written in the registry).
-- Reference the job name and lifecycle phase to frame the user need in the shared JTBD taxonomy.
-- Identify the target persona(s) from the registry data.
+- In the Business Justification / WHY section, cite opportunity scores and pain points from matched jobs — prioritize the strongest-aligned job (`alignment_rank: 1`), then supporting jobs as scope warrants.
+- Include 1–2 relevant user quotes from the registry as verbatim supporting evidence (do NOT paraphrase — cite exactly as written in the registry). Prefer quotes from higher-ranked jobs.
+- Reference matched job names and lifecycle phases to frame the user need in the shared JTBD taxonomy. When multiple jobs apply, explain how they relate (e.g., primary vs. supporting jobs).
+- Identify the target persona(s) from the registry data across all matched jobs.
 - Do NOT let JTBD data override the PM's stated intent — it supplements, not replaces. The PM owns the WHAT; JTBD data strengthens the WHY.
 - Do NOT reinterpret or editorialize the research data — use it as-is per governance rules.
 
@@ -130,15 +131,21 @@ python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
 
 **If JTBD data is available**, also set the `jtbd_mapping` field on each RFE:
 
+Set `jtbd_mapping.jobs` for each matched job (up to 4), in alignment-rank order — use indexed keys `jobs.0`, `jobs.1`, etc.:
+
 ```bash
 python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
     jtbd_mapping.jobs.0.id="<job-id>" \
     jtbd_mapping.jobs.0.name="<job-name>" \
     jtbd_mapping.jobs.0.opportunity_score=<score> \
     jtbd_mapping.jobs.0.lifecycle_phase="<phase>" \
+    jtbd_mapping.jobs.0.alignment_rank=1 \
+    jtbd_mapping.jobs.0.alignment_strength="<strong|moderate|weak>" \
     jtbd_mapping.personas.0="<persona-id>" \
     jtbd_mapping.confidence="<high|medium|low>"
 ```
+
+Repeat `jobs.1`, `jobs.2`, `jobs.3` for additional matched jobs when present.
 
 If JTBD enrichment was unavailable (bootstrap failed) or no match was found, set:
 
