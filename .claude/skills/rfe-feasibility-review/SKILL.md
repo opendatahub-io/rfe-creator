@@ -24,6 +24,26 @@ Check for architecture context in `.context/architecture-context/architecture/`.
 
 If no architecture context is available (directory missing or empty), assess feasibility based on the RFE content alone and note that architecture context was not available.
 
+## Architecture Context Overlays
+
+Check for overlay files in `.context/architecture-context/overlays/`. If the directory exists, read all `*.md` files (excluding `README.md`) with `status: active` in their frontmatter. These are human-authored corrections to the generated architecture docs — version bumps, maturity changes, dependency shifts.
+
+Filter for relevant overlays:
+1. **Status**: `status` must be `active` (ignore `superseded`)
+2. **Release**: `release` list must contain the target RHOAI release or `"all"`
+3. **Component match**: `affects` list must intersect with the components the RFE touches. Overlays with `affects: [platform]` match all RFEs.
+
+For each matched overlay, read its `## Fact` and `## Impact on Strategies` sections. Use these to correct or supplement the architecture docs when assessing feasibility. Overlays take precedence over the generated architecture docs when they conflict.
+
+When overlays are applied, print which ones were used:
+
+```
+Overlays applied:
+- 0001: KFP SDK updated to 2.16 in RHOAI 3.4
+```
+
+If no overlays directory exists or no overlays match, proceed without them.
+
 ## Prior Review
 
 If `artifacts/rfe-review-report.md` exists, read it. This is a re-review after revisions. For each RFE:
