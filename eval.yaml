@@ -1,0 +1,273 @@
+name: rfe-creator-eval
+description: Evaluate the rfe.create skill (JTBD branch) — turns problem statements into JTBD-enriched RFEs
+skill: rfe.create
+
+execution:
+  mode: case
+  arguments: "{prompt} --headless"
+  timeout: 600
+  max_budget_usd: 5.0
+  parallelism: 2
+
+runner:
+  type: claude-code
+
+models:
+  skill: claude-opus-4-6
+  judge: claude-opus-4-6
+
+permissions:
+  allow:
+    - "Read"
+    - "Write(artifacts/**)"
+    - "Edit(artifacts/**)"
+    - "Write(.context/**)"
+    - "Bash(python3 scripts/*)"
+    - "Bash(mkdir -p artifacts*)"
+    - "Bash(mkdir -p .context*)"
+    - "Bash(bash scripts/bootstrap-assess-rfe.sh)"
+    - "Bash(bash scripts/bootstrap-jtbd-registry.sh)"
+    - "Bash(ls *)"
+    - "Bash(cat *)"
+  deny:
+    - "mcp__*"
+
+mlflow:
+  experiment: rfe-creator-eval
+
+dataset:
+  path: eval/cases
+  schema: |
+    Each case directory contains:
+    - input.yaml: YAML file with fields:
+      - 'prompt' (string): the problem statement, idea, or business need
+        that the PM wants to turn into RFEs. Can range from a single
+        sentence to a detailed multi-paragraph description. Should map
+        to known JTBD jobs in the registry for JTBD enrichment testing.
+    - annotations.yaml (optional): expected outcomes for scoring:
+      - 'expected_rfe_count' (int): how many RFEs should be generated
+      - 'expected_size' (string): expected size category (S/M/L/XL)
+      - 'expected_jtbd_jobs' (list of ints): job IDs from the JTBD registry
+        that should be matched (e.g., [16, 15] for troubleshooting)
+      - 'expected_jtbd_confidence' (string): expected confidence level
+        (high/medium/low/none)
+      - 'must_mention' (list of strings): key topics the RFE must address
+      - 'must_not_mention' (list of strings): implementation details that
+        should NOT appear (architecture, technology prescriptions)
+
+outputs:
+  - path: artifacts
+    schema: |
+      The skill writes RFE artifacts to artifacts/rfe-tasks/:
+      - RFE-NNN.md: one file per RFE, with YAML frontmatter
+        (rfe_id, title, priority, size, status, jtbd_mapping) and markdown
+        body containing sections: Summary, Problem Statement (for M+),
+        Affected Customers, Business Justification, JTBD Evidence (if
+        JTBD data available), Acceptance Criteria, and optionally User
+        Scenarios, Success Criteria, Scope (for L/XL).
+      - The jtbd_mapping frontmatter contains: confidence (high/medium/low/none),
+        jobs (list of {id, name, opportunity_score, lifecycle_phase,
+        alignment_rank, alignment_strength}), and personas (list of IDs).
+      Additionally:
+      - artifacts/rfes.md: rebuilt index of all RFE files.
+
+traces:
+  stdout: true
+  stderr: true
+  events: true
+  metrics: true
+
+judges:
+  - name: rfe_files_created
+    description: |
+      Verifies that at least one RFE file was created in
+      artifacts/rfe-tasks/ with the expected RFE-NNN.md naming pattern.
+    check: |
+      files = outputs.get("files", {})
+      import re
+      rfes = [k for k in files if re.search(r'rfe-tasks/RFE-\d+\.md$', k)]
+      if not rfes:
+          return (False, "No RFE files found in artifacts/rfe-tasks/")
+      return (True, f"{len(rfes)} RFE file(s) created: {', '.join(sorted(rfes))}")
+
+  - name: valid_frontmatter
+    description: |
+      Checks that each RFE file has valid YAML frontmatter with the
+      required fields (rfe_id, title, priority, size, status) and that
+      priority and status use allowed enum values.
+    check: |
+      import yaml, re
+      files = outputs.get("files", {})
+      rfes = {k: v for k, v in files.items() if re.search(r'rfe-tasks/RFE-\d+\.md$', k)}
+      if not rfes:
+          return (False, "No RFE files to validate")
+      valid_priorities = {"Blocker", "Critical", "Major", "Normal", "Minor"}
+      valid_statuses = {"Draft", "Ready", "Submitted", "Archived"}
+      for fname, content in rfes.items():
+          parts = content.split('---', 2)
+          if len(parts) < 3:
+              return (False, f"{fname}: missing YAML frontmatter")
+          fm = yaml.safe_load(parts[1])
+          for field in ['rfe_id', 'title', 'priority', 'size', 'status']:
+              if field not in fm:
+                  return (False, f"{fname}: missing '{field}' in frontmatter")
+          if fm['priority'] not in valid_priorities:
+              return (False, f"{fname}: invalid priority '{fm['priority']}'")
+          if fm['status'] not in valid_statuses:
+              return (False, f"{fname}: invalid status '{fm['status']}'")
+      return (True, f"{len(rfes)} RFE(s) with valid frontmatter")
+
+  - name: jtbd_mapping_present
+    description: |
+      Checks that each RFE has jtbd_mapping in its frontmatter with a
+      confidence field. When annotations specify expected_jtbd_confidence
+      != 'none', also verifies that jobs are listed with required fields.
+    check: |
+      import yaml, re
+      files = outputs.get("files", {})
+      annotations = outputs.get("annotations", {})
+      rfes = {k: v for k, v in files.items() if re.search(r'rfe-tasks/RFE-\d+\.md$', k)}
+      if not rfes:
+          return (False, "No RFE files to check")
+      for fname, content in rfes.items():
+          parts = content.split('---', 2)
+          if len(parts) < 3:
+              return (False, f"{fname}: missing frontmatter")
+          fm = yaml.safe_load(parts[1])
+          jtbd = fm.get('jtbd_mapping', {})
+          if not jtbd or 'confidence' not in jtbd:
+              return (False, f"{fname}: missing jtbd_mapping.confidence")
+          conf = jtbd['confidence']
+          expected_conf = annotations.get('expected_jtbd_confidence', None)
+          if expected_conf and expected_conf != 'none' and conf == 'none':
+              return (False, f"{fname}: expected JTBD match but got confidence=none")
+          if conf != 'none':
+              jobs = jtbd.get('jobs', [])
+              if not jobs:
+                  return (False, f"{fname}: confidence={conf} but no jobs listed")
+              for j in jobs:
+                  for field in ['id', 'name', 'opportunity_score', 'alignment_rank']:
+                      if field not in j:
+                          return (False, f"{fname}: job missing '{field}'")
+      return (True, f"{len(rfes)} RFE(s) with valid jtbd_mapping")
+
+  - name: jtbd_evidence_section
+    description: |
+      Checks that the RFE body contains a JTBD Evidence section when
+      JTBD data was matched (confidence != none). The section should
+      reference job names, opportunity scores, and include user quotes.
+    check: |
+      import yaml, re
+      files = outputs.get("files", {})
+      rfes = {k: v for k, v in files.items() if re.search(r'rfe-tasks/RFE-\d+\.md$', k)}
+      if not rfes:
+          return (False, "No RFE files to check")
+      for fname, content in rfes.items():
+          parts = content.split('---', 2)
+          if len(parts) < 3:
+              continue
+          fm = yaml.safe_load(parts[1])
+          body = parts[2]
+          conf = fm.get('jtbd_mapping', {}).get('confidence', 'none')
+          if conf != 'none':
+              if 'JTBD Evidence' not in body:
+                  return (False, f"{fname}: confidence={conf} but no JTBD Evidence section")
+              if 'Opportunity score' not in body and 'opportunity score' not in body.lower():
+                  return (False, f"{fname}: JTBD Evidence missing opportunity score")
+      return (True, "JTBD Evidence sections present where expected")
+
+  - name: no_implementation_details
+    description: |
+      Checks that RFE content does not prescribe implementation details —
+      architecture, technology choices, or API design. RFEs should describe
+      WHAT and WHY, never HOW.
+    check: |
+      import re
+      files = outputs.get("files", {})
+      rfes = {k: v for k, v in files.items() if re.search(r'rfe-tasks/RFE-\d+\.md$', k)}
+      if not rfes:
+          return (False, "No RFE files to check")
+      red_flags = [
+          r'\bAPI\s+endpoint',
+          r'\bREST\s+API',
+          r'\bmicroservice',
+          r'\bdatabase\s+schema',
+          r'\bimplementation\s+plan',
+          r'\btechnical\s+design',
+          r'\barchitecture\s+diagram',
+      ]
+      issues = []
+      for fname, content in rfes.items():
+          parts = content.split('---', 2)
+          body = parts[2] if len(parts) >= 3 else content
+          for pattern in red_flags:
+              matches = re.findall(pattern, body, re.IGNORECASE)
+              if matches:
+                  issues.append(f"{fname}: found '{matches[0]}'")
+      if issues:
+          return (False, "Implementation details detected: " + "; ".join(issues))
+      return (True, "No implementation language detected")
+
+  - name: rfe_quality
+    description: |
+      LLM judge assessing overall RFE quality including JTBD enrichment:
+      business need clarity, JTBD evidence usage, acceptance criteria,
+      appropriate sizing, and completeness.
+    prompt: |
+      You are evaluating RFEs (Requests for Enhancement) produced by a
+      skill that converts problem statements into structured business need
+      documents, enriched with Jobs-to-be-Done (JTBD) research data.
+
+      ## Skill Output
+
+      {{ outputs }}
+
+      ## Annotations (expected outcomes)
+
+      {{ annotations }}
+
+      ## Evaluation Criteria
+
+      Score on a 1-5 scale based on these criteria:
+
+      1. **Business Need Clarity**: Does the Summary clearly articulate
+         WHAT the user needs and WHY?
+      2. **WHAT/WHY Focus**: Does the RFE describe business needs without
+         prescribing implementation?
+      3. **JTBD Enrichment**: Is the JTBD Evidence section present and
+         well-integrated? Does it cite real opportunity scores, pain
+         points, and verbatim user quotes from the registry? Are the
+         matched jobs relevant to the problem statement? Does the JTBD
+         data supplement (not override) the PM's stated intent?
+      4. **Acceptance Criteria**: User-perspective, specific, testable?
+      5. **Completeness & Right-Sizing**: All required sections present?
+         Properly scoped to distinct business needs?
+
+      ## Scoring
+
+      Score 1: Missing most sections, no JTBD evidence, prescribes implementation
+      Score 2: Basic structure but major gaps — no JTBD section despite
+               available data, vague criteria, implementation leaks
+      Score 3: Adequate structure with JTBD section present but shallow —
+               scores cited but no pain points or quotes, or poor job match
+      Score 4: Well-structured with good JTBD integration — relevant jobs
+               matched, scores and pain points cited, minor gaps only
+      Score 5: Excellent — clear need, strong JTBD evidence with verbatim
+               quotes and accurate scores, properly scoped, user-perspective
+               criteria throughout
+
+      Provide your score and a brief rationale.
+
+thresholds:
+  rfe_files_created:
+    min_pass_rate: 1.0
+  valid_frontmatter:
+    min_pass_rate: 1.0
+  jtbd_mapping_present:
+    min_pass_rate: 1.0
+  jtbd_evidence_section:
+    min_pass_rate: 0.8
+  no_implementation_details:
+    min_pass_rate: 0.8
+  rfe_quality:
+    min_mean: 3.5

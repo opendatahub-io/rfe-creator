@@ -1,0 +1,11 @@
+expected_rfe_count: 1
+expected_size: S
+expected_jtbd_jobs: [16]
+expected_jtbd_confidence: high
+must_mention:
+  - troubleshoot
+  - inference
+  - production
+must_not_mention:
+  - architecture diagram
+  - technical design

@@ -1,0 +1,256 @@
+judges:
+  jtbd_evidence_section:
+    mean: 1.0
+    pass_rate: 1.0
+  jtbd_mapping_present:
+    mean: 1.0
+    pass_rate: 1.0
+  no_implementation_details:
+    mean: 1.0
+    pass_rate: 1.0
+  rfe_files_created:
+    mean: 1.0
+    pass_rate: 1.0
+  rfe_quality:
+    mean: 4.8
+    pass_rate: null
+  valid_frontmatter:
+    mean: 1.0
+    pass_rate: 1.0
+per_case:
+  case-001-simple-focused-need:
+    jtbd_evidence_section:
+      rationale: JTBD Evidence sections present where expected
+      value: true
+    jtbd_mapping_present:
+      rationale: 1 RFE(s) with valid jtbd_mapping
+      value: true
+    no_implementation_details:
+      rationale: No implementation language detected
+      value: true
+    rfe_files_created:
+      rationale: '1 RFE file(s) created: artifacts/rfe-tasks/RFE-001.md'
+      value: true
+    rfe_quality:
+      rationale: 'This RFE is excellent across all evaluation criteria.\n\n**Business
+        Need Clarity:** The Summary and Problem Statement clearly articulate WHAT
+        (export trained models as ONNX from the dashboard) and WHY (eliminates manual
+        SSH-based workaround, blocks a $400K renewal, reduces time-to-production).
+        The problem is concrete and well-motivated.\n\n**WHAT/WHY Focus:** The RFE
+        describes the business need without prescribing implementation. It specifies
+        user-facing behavior (export from the dashboard, feedback on progress, error
+        notifications) without mandating internal architecture, conversion libraries,
+        or pipeline design. No mentions of REST APIs, microservices, or database schemas
+        as required by the annotations.\n\n**JTBD Enrichment:** The JTBD Evidence
+        section is thorough and well-integrated. Three relevant jobs are mapped with
+        opportunity scores, importance/satisfaction breakdowns, lifecycle phases,
+        and alignment strengths. Pain points are specific and relevant to the problem
+        statement. Verbatim user quotes are included and feel authentic (e.g., the
+        SSH frustration quote, the ''janky conversion script'' quote). The jobs are
+        well-chosen — JTBD-010 (deploy to production) is the primary job and maps
+        directly; JTBD-007 (package/version) and JTBD-009 (validate before deployment)
+        are sensible supporting jobs. The JTBD data supplements the PM''s business
+        case rather than overriding it.\n\n**Acceptance Criteria:** All four criteria
+        are written from the user''s perspective, are specific, and are testable.
+        They cover the core export action, the entry point (model detail view), progress
+        feedback, and error handling — covering both happy and unhappy paths.\n\n**Completeness
+        & Right-Sizing:** All required sections are present (Summary, Problem Statement,
+        Affected Customers, Business Justification, JTBD Evidence, Acceptance Criteria,
+        Success Criteria). The RFE is properly scoped to a single business need (ONNX
+        export from dashboard). The annotations confirm expected outputs: mentions
+        ONNX, export, data scientists; avoids REST API, microservice, database schema;
+        high JTBD confidence; single RFE; medium size — all satisfied. The success
+        criteria are measurable and tied back to the named customers.'
+      value: 5
+    valid_frontmatter:
+      rationale: 1 RFE(s) with valid frontmatter
+      value: true
+  case-002-complex-multi-need:
+    jtbd_evidence_section:
+      rationale: JTBD Evidence sections present where expected
+      value: true
+    jtbd_mapping_present:
+      rationale: 3 RFE(s) with valid jtbd_mapping
+      value: true
+    no_implementation_details:
+      rationale: No implementation language detected
+      value: true
+    rfe_files_created:
+      rationale: '3 RFE file(s) created: artifacts/rfe-tasks/RFE-001.md, artifacts/rfe-tasks/RFE-002.md,
+        artifacts/rfe-tasks/RFE-003.md'
+      value: true
+    rfe_quality:
+      rationale: 'All three RFEs are excellent across every evaluation dimension.\n\n**Business
+        Need Clarity:** Each RFE has a clear Summary and Problem Statement that articulates
+        WHAT the user needs (drift alerts, cross-version comparison, audit trail)
+        and WHY (revenue impact, compliance requirements, manual workflow pain). The
+        problem statements are specific and grounded in real customer pain.\n\n**WHAT/WHY
+        Focus:** None of the RFEs prescribe implementation. They describe observable
+        outcomes and user-facing capabilities without mentioning specific technologies
+        like Prometheus, Grafana, database schemas, or API endpoint designs. The acceptance
+        criteria are written from the user''s perspective (e.g., ''Users can define
+        performance metric thresholds,'' ''Users can select two or more model versions'').
+        This is textbook WHAT-focused writing.\n\n**JTBD Enrichment:** This is where
+        the output truly excels. Each RFE has a rich JTBD Evidence section with:\n-
+        Correctly matched primary and supporting jobs with accurate opportunity scores\n-
+        Relevant pain points mapped to each job\n- Verbatim user quotes from the research
+        (e.g., P5 on drift detection gaps, P3 on production data format issues, P1
+        on governance at scale)\n- Appropriate confidence levels (high for RFE-001
+        and RFE-002, medium for RFE-003 with an honest note about coverage gaps)\n-
+        Clear source citations\n- The JTBD data supplements the PM''s business case
+        rather than overriding it\n\n**Acceptance Criteria:** All criteria are user-perspective,
+        specific, and testable. They describe what users can do, not how the system
+        implements it. They are appropriately scoped — neither too granular (implementation
+        tasks) nor too vague.\n\n**Completeness & Right-Sizing:** All required sections
+        are present (Summary, Problem Statement, Affected Customers, Business Justification,
+        JTBD Evidence, Acceptance Criteria, Success Criteria). The three RFEs are
+        properly decomposed into distinct business needs: drift monitoring, version
+        comparison, and compliance audit trails. Each could independently map to ~1
+        strategy feature. Named customers (NovaPharma, DataBridge) with specific revenue
+        impact ($600K) are cited. The must_mention items (drift, alerts, version comparison,
+        audit trail, NovaPharma) are all present, and the must_not_mention items (Prometheus,
+        Grafana, database schema, API endpoint) are correctly absent.'
+      value: 5
+    valid_frontmatter:
+      rationale: 3 RFE(s) with valid frontmatter
+      value: true
+  case-003-edge-minimal-input:
+    jtbd_evidence_section:
+      rationale: JTBD Evidence sections present where expected
+      value: true
+    jtbd_mapping_present:
+      rationale: 1 RFE(s) with valid jtbd_mapping
+      value: true
+    no_implementation_details:
+      rationale: No implementation language detected
+      value: true
+    rfe_files_created:
+      rationale: '1 RFE file(s) created: artifacts/rfe-tasks/RFE-001.md'
+      value: true
+    rfe_quality:
+      rationale: 'This RFE is excellent across all evaluation criteria. **Business
+        Need Clarity:** The Summary and Problem Statement clearly articulate WHAT
+        (ability to diagnose why production model inference returns unexpected results)
+        and WHY (prolonged outages, manual guesswork, eroded trust). The problem is
+        specific and well-framed. **WHAT/WHY Focus:** The RFE describes the business
+        need without prescribing implementation — no architecture mandates, no specific
+        tools dictated, no design docs linked. It describes observable outcomes (identify
+        root cause category, inspect inputs, view correlated metrics, trace provenance)
+        rather than techniques. **JTBD Enrichment:** This is the strongest aspect.
+        The JTBD Evidence section is thorough and well-integrated: Job 16 (Troubleshoot)
+        at 13.40 opportunity score is clearly the primary alignment and highly relevant.
+        Supporting jobs (Continuously Monitor, Sustain & Maintain) are logically connected
+        and properly ranked. Verbatim user quotes are included (P4 on stress/ambiguity,
+        P5 on non-reproducible issues and payload logging). Pain points are specific
+        and directly map to the acceptance criteria. The JTBD data supplements the
+        problem statement rather than overriding it. **Acceptance Criteria:** All
+        four criteria are written from the user''s perspective, are specific and testable,
+        and describe observable outcomes without prescribing implementation. **Completeness
+        & Right-Sizing:** All required sections are present. The RFE is well-scoped
+        — the deliverables (root cause identification, payload inspection, correlated
+        metrics, data provenance tracing) are interdependent parts of a single debugging
+        experience that cannot function independently. The annotation expected size
+        of S vs. the RFE''s M is a minor discrepancy, but the content quality and
+        scope are appropriate. The only very minor nit is that the Affected Customers
+        section uses generic segments rather than named accounts, keeping WHY evidence
+        at the generic level, but the JTBD evidence with direct user quotes substantially
+        strengthens the justification.'
+      value: 5
+    valid_frontmatter:
+      rationale: 1 RFE(s) with valid frontmatter
+      value: true
+  case-004-technical-domain:
+    jtbd_evidence_section:
+      rationale: JTBD Evidence sections present where expected
+      value: true
+    jtbd_mapping_present:
+      rationale: 1 RFE(s) with valid jtbd_mapping
+      value: true
+    no_implementation_details:
+      rationale: No implementation language detected
+      value: true
+    rfe_files_created:
+      rationale: '1 RFE file(s) created: artifacts/rfe-tasks/RFE-001.md'
+      value: true
+    rfe_quality:
+      rationale: 'This is an excellent RFE that hits all the criteria strongly.\n\n**Business
+        Need Clarity (WHAT/WHY):** The summary and problem statement clearly articulate
+        the customer need — running model training in air-gapped environments without
+        outbound network calls. The WHY is exceptionally well-supported with a named
+        customer (FinanceFirst) with specific revenue impact ($1.2M ARR at risk),
+        VP-level escalation, and three additional named accounts. This is textbook
+        Y=2 justification.\n\n**WHAT/WHY Focus (no HOW prescription):** The RFE describes
+        the need without prescribing architecture. It mentions ''pre-staging dependencies''
+        and ''local/internal registries'' which are customer-facing operational concepts,
+        not internal architecture mandates. Engineering retains full freedom to determine
+        how to implement disconnected dependency resolution. No design docs, no specific
+        tools mandated, no internal architecture prescribed.\n\n**JTBD Enrichment:**
+        The JTBD section is well-integrated with Job 11 (Secure the Platform, opportunity
+        score 11.28) as the primary alignment — an excellent match for air-gapped/security
+        requirements. It includes a verbatim user quote about internal security scanning,
+        cites specific pain points about mirroring packages and workarounds, and provides
+        two supporting jobs with clear rationale for their alignment strength. The
+        confidence rating of ''high'' is appropriate. One minor note: the annotations
+        expected Job 3 but the RFE matched Job 4 (Iterative Model Customization) —
+        however, Job 4 is arguably a better match since training customization is
+        what''s directly blocked, making this a defensible choice.\n\n**Acceptance
+        Criteria:** All five criteria are user-perspective, specific, and testable.
+        They cover the positive case (training works offline), the setup requirement
+        (pre-staging), the constraint (no outbound calls), error handling (clear feedback
+        on missing dependencies), and backward compatibility (connected clusters unaffected).
+        These are well-crafted.\n\n**Completeness & Right-Sizing:** All required sections
+        are present and well-populated. The RFE is properly scoped to a single coherent
+        need — disconnected training support. The size is marked as M (annotations
+        expected L), which is a minor discrepancy but doesn''t materially affect quality.
+        The must_mention items (air-gapped, offline, training, FinanceFirst) are all
+        present, and must_not_mention items (implementation plan, technical design,
+        REST API, microservice) are correctly absent.'
+      value: 5
+    valid_frontmatter:
+      rationale: 1 RFE(s) with valid frontmatter
+      value: true
+  case-005-large-initiative:
+    jtbd_evidence_section:
+      rationale: JTBD Evidence sections present where expected
+      value: true
+    jtbd_mapping_present:
+      rationale: 3 RFE(s) with valid jtbd_mapping
+      value: true
+    no_implementation_details:
+      rationale: No implementation language detected
+      value: true
+    rfe_files_created:
+      rationale: '3 RFE file(s) created: artifacts/rfe-tasks/RFE-001.md, artifacts/rfe-tasks/RFE-002.md,
+        artifacts/rfe-tasks/RFE-003.md'
+      value: true
+    rfe_quality:
+      rationale: 'The RFEs are well-structured with clear business need articulation,
+        named customers with quantified impact (TelcoGiant''s 200 engineer-hours/month,
+        RetailMax CTO escalation), and strong WHAT/WHY focus without prescribing implementation.
+        JTBD integration is good — opportunity scores, lifecycle phases, pain points,
+        and verbatim quotes are cited from the registry, and the matched jobs (Production
+        Handoff & Packaging, Continuously Integrate Changes, Interact & Navigate)
+        are relevant to the model sharing problem. Acceptance criteria are user-perspective
+        and testable throughout. The three-RFE split is reasonable (core marketplace,
+        access controls, analytics serve different concerns), though the annotations
+        expected only 2 RFEs, suggesting RFE-003 (usage analytics) might have been
+        better kept in scope with RFE-001 or RFE-002. Minor gaps: (1) The JTBD quote
+        used for RFE-001 and RFE-002 about API robustness (''throttling, request dropouts'')
+        is tangential to model sharing — it''s about production API reliability, not
+        model handoff/discovery, weakening the evidence connection. (2) Job 17 was
+        expected in annotations but Job 9 was matched instead — this may indicate
+        a miss in job matching. (3) RFE-002 and RFE-003 reuse similar JTBD evidence
+        with weaker alignment (weak/moderate), and the quotes feel stretched to fit.
+        (4) The JTBD confidence for RFE-002 and RFE-003 drops to medium, which is
+        appropriate but means the enrichment is thinner on the supporting RFEs. Overall
+        strong work with minor JTBD quote relevance issues preventing a 5.'
+      value: 4
+    valid_frontmatter:
+      rationale: 3 RFE(s) with valid frontmatter
+      value: true
+run_id: 2026-05-19-opus-jtbd-v2
+run_metrics:
+  cache_hit_rate: 0.875416
+  cost_per_mtok_usd: 1.5742
+  cost_per_turn_usd: 0.067126
+  output_tokens_per_turn: 649.93

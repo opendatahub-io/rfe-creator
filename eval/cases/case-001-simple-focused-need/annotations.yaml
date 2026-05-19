@@ -1,0 +1,12 @@
+expected_rfe_count: 1
+expected_size: M
+expected_jtbd_jobs: [6]
+expected_jtbd_confidence: high
+must_mention:
+  - ONNX
+  - export
+  - data scientists
+must_not_mention:
+  - REST API
+  - microservice
+  - database schema

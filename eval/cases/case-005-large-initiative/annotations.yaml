@@ -1,0 +1,15 @@
+expected_rfe_count: 2
+expected_size: L
+expected_jtbd_jobs: [6, 9, 17]
+expected_jtbd_confidence: high
+must_mention:
+  - marketplace
+  - model sharing
+  - access controls
+  - TelcoGiant
+  - RetailMax
+must_not_mention:
+  - REST API
+  - microservice
+  - database schema
+  - architecture diagram

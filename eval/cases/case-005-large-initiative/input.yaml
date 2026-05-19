@@ -1,0 +1,17 @@
+prompt: >
+  Multiple enterprise customers (TelcoGiant, RetailMax, AutoDrive AI, and
+  SmartGrid Corp) have requested a self-service model marketplace within
+  RHOAI where teams can publish trained models with documentation, usage
+  examples, and performance benchmarks, and other teams can discover and
+  deploy them without filing IT tickets. Today, model sharing across teams
+  requires manual coordination — the producing team exports a model archive,
+  emails it or uploads to a shared drive, and the consuming team imports it
+  manually. This process takes 2-3 days per model and leads to version
+  confusion. TelcoGiant alone has 40+ ML teams and estimates they waste
+  200 engineer-hours per month on model sharing. RetailMax's CTO raised
+  this at the executive sponsor meeting as their top platform gap. The
+  marketplace should support access controls so teams can restrict who can
+  see and deploy their models, and it needs usage analytics so model
+  producers can see adoption metrics. This is a major strategic initiative
+  that aligns with our platform consolidation thesis and directly competes
+  with Databricks Unity Catalog's model sharing features.
