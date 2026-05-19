@@ -24,6 +24,19 @@ If architecture context is not available, skip this review and output:
 Architecture review skipped — no architecture context available.
 ```
 
+## Architecture Context Overlays
+
+Check for overlay files in `.context/architecture-context/overlays/`. If the directory exists, read all `*.md` files (excluding `README.md`) with `status: active` in their frontmatter. These are human-authored corrections to the generated architecture docs — version bumps, maturity changes, dependency shifts.
+
+When reviewing a strategy's architecture claims, check whether any active overlay corrects or updates the information the strategy references. If a strategy uses outdated information that an overlay corrects (e.g., references KFP SDK 2.15 when an overlay says 2.16), flag it as a finding. Overlays take precedence over the generated architecture docs when they conflict.
+
+When overlays are applied, print which ones were used:
+
+```
+Overlays applied:
+- 0001: KFP SDK updated to 2.16 in RHOAI 3.4
+```
+
 ## What to Assess
 
 For each strategy:
