@@ -26,12 +26,6 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 /rfe.auto-fix --jql "project = RHAIRFE AND ..."         # Batch review from JQL query
 /rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678                 # Batch review explicit IDs
 
-# Strategy Pipeline (after RFE approval)
-/strat.create      # Clone approved RFEs to RHAISTRAT in Jira
-/strat.refine      # Feature refinement — the HOW
-/strat.review      # Adversarial review (4 independent reviewers)
-/strat.prioritize  # Place in existing backlog
-
 # Maintenance
 /rfe-creator.update-deps   # Force update vendored dependencies
 ```
@@ -83,11 +77,9 @@ Review a batch of existing Jira RFEs:
 
 Auto-fix processes in batches (default 5), handles review, revision, splitting, retry, and report generation.
 
-### Strategy (after RFE approval)
+### Strategy Pipeline
 
-```
-/strat.create → /strat.refine → /strat.review → /strat.prioritize
-```
+The strategy skills have moved to a dedicated repo: [ederign/strat-creator](https://github.com/ederign/strat-creator).
 
 ## Pipeline Steps
 
@@ -97,10 +89,6 @@ Auto-fix processes in batches (default 5), handles review, revision, splitting, 
 4. **Auto-fix**: Batch pipeline that orchestrates review + revision + split + retry across many RFEs. Accepts explicit IDs or a `--jql` query. Processes in configurable batches (`--batch-size N`, default 5). Generates run reports and HTML review reports.
 5. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira.
 6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--announce-complete` for completion signaling, `--dry-run` to skip Jira writes, and `--batch-size N`.
-7. **Strat Create**: Clone approved RFEs to RHAISTRAT in Jira.
-8. **Strat Refine**: Add the HOW — technical approach, dependencies, components, non-functionals.
-9. **Strat Review**: Four independent forked reviewers (feasibility, testability, scope, architecture).
-10. **Strat Prioritize**: Place new strategies in the existing backlog ordering.
 
 ## Editing Between Steps
 

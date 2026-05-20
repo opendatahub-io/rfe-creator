@@ -25,13 +25,6 @@ artifacts/
     RHAIRFE-1595-review.md
     RFE-001-review.md
 
-  strat-tasks/              # Individual strategy files with YAML frontmatter
-    RHAISTRAT-400.md
-  strat-reviews/            # Per-strategy review files with YAML frontmatter
-    RHAISTRAT-400-review.md
-
-  strat-tickets.md          # RHAISTRAT ticket mapping after cloning
-  strat-prioritization.md   # Prioritization decisions and rationale
 ```
 
 ### Frontmatter
@@ -42,8 +35,6 @@ All task and review files use YAML frontmatter for structured metadata. Skills m
 # Get schema for a file type
 python3 scripts/frontmatter.py schema rfe-task
 python3 scripts/frontmatter.py schema rfe-review
-python3 scripts/frontmatter.py schema strat-task
-python3 scripts/frontmatter.py schema strat-review
 
 # Set/update frontmatter on a file
 python3 scripts/frontmatter.py set <path> field=value field=value ...
@@ -100,7 +91,7 @@ To create an API token: https://id.atlassian.com/manage-profile/security/api-tok
 
 Read operations support two modes:
 
-1. **Atlassian MCP server** (preferred when available) — used by `/rfe.review`, `/rfe.split`, and `/strat.create` when fetching issues from Jira
+1. **Atlassian MCP server** (preferred when available) — used by `/rfe.review` and `/rfe.split` when fetching issues from Jira
 2. **REST API fallback** — if the MCP server is unavailable, skills fall back to `python3 scripts/fetch_issue.py` using the same `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` env vars
 
 Skills that only work with local artifacts (`/rfe.create`) do not require Jira access.
@@ -112,13 +103,6 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 - **Issue Type**: `Feature Request`
 - **Priority values** (use these exactly): Blocker, Critical, Major, Normal, Minor, Undefined
 - **Status on creation**: `New`
-
-### RHAISTRAT Project (for reference — used by strat skills)
-- **Project**: `RHAISTRAT`
-- **Issue Type**: `Feature`
-- **Clone link type**: `Cloners` (outward: "clones", inward: "is cloned by")
-- **Related link type**: `Related`
-- **Informs link type**: `Informs`
 
 ## Snapshot System
 
@@ -140,8 +124,6 @@ When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 
 `/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.
 
-Architecture context is used during:
-- `/rfe.review` (technical feasibility fork)
-- Strategy skills (Phase 2)
+Architecture context is used during `/rfe.review` (technical feasibility fork).
 
 Architecture context is NOT used during `/rfe.create` — RFEs describe business needs, not implementation.

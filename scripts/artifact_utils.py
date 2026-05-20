@@ -1,7 +1,7 @@
 """Artifact schema definitions, frontmatter read/write/validate, and index rebuilding.
 
-Owns all structured metadata for RFE and strategy artifacts. Scripts and skills
-use this module instead of regex-parsing markdown prose.
+Owns all structured metadata for RFE artifacts. Scripts and skills use this
+module instead of regex-parsing markdown prose.
 
 Frontmatter is stored as YAML between --- delimiters at the top of markdown files.
 """
@@ -137,77 +137,6 @@ SCHEMAS = {
             },
         },
     },
-    "strat-task": {
-        "strat_id": {
-            "type": "string",
-            "required": True,
-            "pattern": r"^(STRAT-\d+|RHAISTRAT-\d+)$",
-        },
-        "title": {
-            "type": "string",
-            "required": True,
-        },
-        "source_rfe": {
-            "type": "string",
-            "required": True,
-            "pattern": r"^(RFE-\d+|RHAIRFE-\d+)$",
-        },
-        "jira_key": {
-            "type": "string",
-            "required": False,
-            "pattern": r"^RHAISTRAT-\d+$",
-            "default": None,
-        },
-        "priority": {
-            "type": "string",
-            "required": True,
-            "enum": ["Blocker", "Critical", "Major", "Normal", "Minor",
-                     "Undefined"],
-        },
-        "status": {
-            "type": "string",
-            "required": True,
-            "enum": ["Draft", "Ready", "Refined", "Reviewed"],
-        },
-    },
-    "strat-review": {
-        "strat_id": {
-            "type": "string",
-            "required": True,
-            "pattern": r"^(STRAT-\d+|RHAISTRAT-\d+)$",
-        },
-        "recommendation": {
-            "type": "string",
-            "required": True,
-            "enum": ["approve", "revise", "split", "reject"],
-        },
-        "reviewers": {
-            "type": "dict",
-            "required": True,
-            "fields": {
-                "feasibility": {
-                    "type": "string",
-                    "required": True,
-                    "enum": ["approve", "revise", "reject"],
-                },
-                "testability": {
-                    "type": "string",
-                    "required": True,
-                    "enum": ["approve", "revise", "reject"],
-                },
-                "scope": {
-                    "type": "string",
-                    "required": True,
-                    "enum": ["approve", "revise", "reject"],
-                },
-                "architecture": {
-                    "type": "string",
-                    "required": True,
-                    "enum": ["approve", "revise", "reject"],
-                },
-            },
-        },
-    },
 }
 
 
@@ -280,7 +209,7 @@ def validate(data, schema_type):
 
     Args:
         data: dict of frontmatter fields
-        schema_type: one of "rfe-task", "rfe-review", "strat-review"
+        schema_type: one of "rfe-task", "rfe-review"
 
     Returns:
         list of error strings (empty if valid)
@@ -441,7 +370,7 @@ def write_frontmatter(path, data, schema_type):
     Args:
         path: file path
         data: dict of frontmatter fields
-        schema_type: one of "rfe-task", "rfe-review", "strat-review"
+        schema_type: one of "rfe-task", "rfe-review"
 
     Raises:
         ValidationError: if data fails schema validation
