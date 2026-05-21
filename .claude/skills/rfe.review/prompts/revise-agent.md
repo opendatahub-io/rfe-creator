@@ -33,6 +33,7 @@ For each criterion the assessor flagged:
 - **WHY**: Strengthen with available evidence; if gaps remain, set `needs_attention=true` in Step 3 so the author is notified
 - **Right-sized**: Report only — do not split or remove scope
 - **WHAT / Not a task**: Follow assessor guidance if provided
+- **Title Quality (advisory)**: If `scores.title_quality` is 0 or 1 in the review frontmatter, rewrite the task file's `title` frontmatter field. The new title must be: self-contained (understandable from a dashboard without clicking through), customer-need oriented (not a work order), and not implementation-prescriptive. Derive the customer need from the RFE body content. If `scores.title_quality` is 2 or null, do not modify the title.
 
 ## Step 3: Update Frontmatter
 
@@ -42,7 +43,15 @@ For each criterion the assessor flagged:
 python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md auto_revised=true needs_attention=<true/false> needs_attention_reason="<reason or null>"
 ```
 
-Set `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide). When true, set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`. This is the most important step — do not skip it.
+If the title was rewritten (title_quality was 0 or 1), also update the task file title and flag for human review:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/rfe-tasks/{ID}.md title="<new title>"
+```
+
+For `needs_attention_reason`, append "title rewritten by automation" with a semicolon separator if a reason already exists (e.g., "missing customer evidence; title rewritten by automation"). If no other reason exists, set it to "title rewritten by automation".
+
+Set `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide, or title was rewritten). When true, set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`. This is the most important step — do not skip it.
 
 ## Step 4: Content Preservation
 

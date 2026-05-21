@@ -107,6 +107,7 @@ SCHEMAS = {
                 "open_to_how": {"type": "int", "required": True},
                 "not_a_task": {"type": "int", "required": True},
                 "right_sized": {"type": "int", "required": True},
+                "title_quality": {"type": "int", "required": False, "default": None},
             },
         },
         "error": {
@@ -134,6 +135,7 @@ SCHEMAS = {
                 "open_to_how": {"type": "int", "required": True},
                 "not_a_task": {"type": "int", "required": True},
                 "right_sized": {"type": "int", "required": True},
+                "title_quality": {"type": "int", "required": False, "default": None},
             },
         },
     },

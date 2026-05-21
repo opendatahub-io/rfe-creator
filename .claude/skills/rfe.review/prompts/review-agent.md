@@ -49,15 +49,19 @@ python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
     rfe_id={ID} score=<total> pass=<true/false> recommendation=<rec> \
     feasibility=<feasible/infeasible/indeterminate> needs_attention=<true/false> \
     needs_attention_reason="<reason or null>" \
-    scores.what=<n> scores.why=<n> scores.open_to_how=<n> scores.not_a_task=<n> scores.right_sized=<n>
+    scores.what=<n> scores.why=<n> scores.open_to_how=<n> scores.not_a_task=<n> scores.right_sized=<n> \
+    scores.title_quality=<n or null>
 ```
+
+**Title Quality score**: Extract from any row whose name starts with `Title Quality` in the assessment result table (e.g., `Title Quality`, `Title Quality *(advisory)*`). This score is advisory only and is NOT included in the total score or pass/fail calculation (the total remains /10 from the 5 core criteria). If no `Title Quality` row is present in the assessment output (e.g., older assess-rfe version), set `scores.title_quality=null`.
 
 If first pass ({FIRST_PASS}=true), also set before_score and before_scores.* with the same values:
 
 ```bash
 python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
     before_score=<total> \
-    before_scores.what=<n> before_scores.why=<n> before_scores.open_to_how=<n> before_scores.not_a_task=<n> before_scores.right_sized=<n>
+    before_scores.what=<n> before_scores.why=<n> before_scores.open_to_how=<n> before_scores.not_a_task=<n> before_scores.right_sized=<n> \
+    before_scores.title_quality=<n or null>
 ```
 
 If NOT first pass ({FIRST_PASS}=false), do NOT set before_score or before_scores — the orchestrator handles preserving these.
