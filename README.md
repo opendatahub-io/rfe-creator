@@ -99,7 +99,7 @@ All artifacts are written to `artifacts/`. You can edit any file between steps:
 
 ## assess-rfe Integration
 
-Skills automatically bootstrap the [assess-rfe](https://github.com/n1hility/assess-rfe) plugin from GitHub on first use:
+Skills automatically bootstrap the [assess-rfe](https://github.com/opendatahub-io/assess-rfe) plugin from GitHub on first use:
 
 - **During creation**: The rubric is exported to `artifacts/rfe-rubric.md` and used to guide clarifying questions.
 - **During review**: `/rfe.review` invokes assess-rfe for rubric scoring.
