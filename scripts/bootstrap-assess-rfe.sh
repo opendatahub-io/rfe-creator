@@ -11,7 +11,7 @@ CONTEXT_DIR=".context/assess-rfe"
 RUBRIC_FILE="$CONTEXT_DIR/scripts/agent_prompt.md"
 
 if [ ! -d "$CONTEXT_DIR" ]; then
-  git clone https://github.com/n1hility/assess-rfe "$CONTEXT_DIR" 2>&1
+  git clone https://github.com/opendatahub-io/assess-rfe "$CONTEXT_DIR" 2>&1
 else
   git -C "$CONTEXT_DIR" pull --ff-only 2>&1 || echo "WARN: assess-rfe pull failed, using cached version" >&2
 fi
