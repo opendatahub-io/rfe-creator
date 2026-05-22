@@ -12,7 +12,6 @@ import sys
 
 import yaml
 
-
 # ─── Schema Definitions ────────────────────────────────────────────────────────
 
 # Each schema is a dict of field_name -> field_spec.
@@ -38,8 +37,7 @@ SCHEMAS = {
         "priority": {
             "type": "string",
             "required": True,
-            "enum": ["Blocker", "Critical", "Major", "Normal", "Minor",
-                     "Undefined"],
+            "enum": ["Blocker", "Critical", "Major", "Normal", "Minor", "Undefined"],
         },
         "size": {
             "type": "string",
@@ -142,8 +140,10 @@ SCHEMAS = {
 
 # ─── Validation ─────────────────────────────────────────────────────────────────
 
+
 class ValidationError(Exception):
     """Raised when frontmatter fails schema validation."""
+
     pass
 
 
@@ -161,35 +161,28 @@ def _validate_field(name, value, spec, path=""):
 
     if expected_type == "string":
         if not isinstance(value, str):
-            errors.append(
-                f"{full_name}: expected string, got {type(value).__name__}")
+            errors.append(f"{full_name}: expected string, got {type(value).__name__}")
             return errors
         if "enum" in spec and value not in spec["enum"]:
-            errors.append(
-                f"{full_name}: '{value}' not in {spec['enum']}")
+            errors.append(f"{full_name}: '{value}' not in {spec['enum']}")
         if "pattern" in spec and not re.match(spec["pattern"], value):
-            errors.append(
-                f"{full_name}: '{value}' does not match {spec['pattern']}")
+            errors.append(f"{full_name}: '{value}' does not match {spec['pattern']}")
 
     elif expected_type == "int":
         if not isinstance(value, int) or isinstance(value, bool):
-            errors.append(
-                f"{full_name}: expected int, got {type(value).__name__}")
+            errors.append(f"{full_name}: expected int, got {type(value).__name__}")
 
     elif expected_type == "bool":
         if not isinstance(value, bool):
-            errors.append(
-                f"{full_name}: expected bool, got {type(value).__name__}")
+            errors.append(f"{full_name}: expected bool, got {type(value).__name__}")
 
     elif expected_type == "list":
         if not isinstance(value, list):
-            errors.append(
-                f"{full_name}: expected list, got {type(value).__name__}")
+            errors.append(f"{full_name}: expected list, got {type(value).__name__}")
 
     elif expected_type == "dict":
         if not isinstance(value, dict):
-            errors.append(
-                f"{full_name}: expected dict, got {type(value).__name__}")
+            errors.append(f"{full_name}: expected dict, got {type(value).__name__}")
             return errors
         nested_schema = spec.get("fields", {})
         # Check for unknown fields in nested dict
@@ -198,8 +191,7 @@ def _validate_field(name, value, spec, path=""):
                 errors.append(f"{full_name}: unknown field '{key}'")
         # Validate nested fields
         for field_name, field_spec in nested_schema.items():
-            errors.extend(_validate_field(
-                field_name, value.get(field_name), field_spec, full_name))
+            errors.extend(_validate_field(field_name, value.get(field_name), field_spec, full_name))
 
     return errors
 
@@ -218,9 +210,7 @@ def validate(data, schema_type):
         ValueError: if schema_type is unknown
     """
     if schema_type not in SCHEMAS:
-        raise ValueError(
-            f"Unknown schema type: {schema_type}. "
-            f"Valid types: {list(SCHEMAS.keys())}")
+        raise ValueError(f"Unknown schema type: {schema_type}. Valid types: {list(SCHEMAS.keys())}")
 
     schema = SCHEMAS[schema_type]
     errors = []
@@ -232,8 +222,7 @@ def validate(data, schema_type):
 
     # Validate each defined field
     for field_name, field_spec in schema.items():
-        errors.extend(_validate_field(
-            field_name, data.get(field_name), field_spec))
+        errors.extend(_validate_field(field_name, data.get(field_name), field_spec))
 
     return errors
 
@@ -250,10 +239,8 @@ def apply_defaults(data, schema_type):
         if field_spec.get("type") == "dict" and field_name in data:
             nested = data[field_name]
             if isinstance(nested, dict):
-                for nested_name, nested_spec in \
-                        field_spec.get("fields", {}).items():
-                    if nested_name not in nested and \
-                            "default" in nested_spec:
+                for nested_name, nested_spec in field_spec.get("fields", {}).items():
+                    if nested_name not in nested and "default" in nested_spec:
                         nested[nested_name] = nested_spec["default"]
     return data
 
@@ -261,9 +248,7 @@ def apply_defaults(data, schema_type):
 def get_schema_yaml(schema_type):
     """Return the schema definition as a YAML string for display."""
     if schema_type not in SCHEMAS:
-        raise ValueError(
-            f"Unknown schema type: {schema_type}. "
-            f"Valid types: {list(SCHEMAS.keys())}")
+        raise ValueError(f"Unknown schema type: {schema_type}. Valid types: {list(SCHEMAS.keys())}")
 
     schema = SCHEMAS[schema_type]
     output = {"required": {}, "optional": {}}
@@ -294,8 +279,7 @@ def get_schema_yaml(schema_type):
 
 # ─── Frontmatter Read/Write ────────────────────────────────────────────────────
 
-_FRONTMATTER_RE = re.compile(
-    r'^---\s*\n(.*?\n)---\s*\n', re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?\n)---\s*\n", re.DOTALL)
 
 
 def read_frontmatter(path):
@@ -313,7 +297,7 @@ def read_frontmatter(path):
         return {}, content
 
     yaml_str = match.group(1)
-    body = content[match.end():]
+    body = content[match.end() :]
 
     data = yaml.safe_load(yaml_str)
     if not isinstance(data, dict):
@@ -354,8 +338,8 @@ def read_frontmatter_validated(path, schema_type):
     errors = validate(data, schema_type)
     if errors:
         raise ValidationError(
-            f"Frontmatter validation failed in {path}:\n"
-            + "\n".join(f"  - {e}" for e in errors))
+            f"Frontmatter validation failed in {path}:\n" + "\n".join(f"  - {e}" for e in errors)
+        )
 
     return data, body
 
@@ -380,16 +364,15 @@ def write_frontmatter(path, data, schema_type):
     errors = validate(data, schema_type)
     if errors:
         raise ValidationError(
-            f"Frontmatter validation failed:\n"
-            + "\n".join(f"  - {e}" for e in errors))
+            "Frontmatter validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        )
 
     # Read existing body if file exists
     body = ""
     if os.path.exists(path):
         _, body = read_frontmatter(path)
 
-    yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False,
-                         allow_unicode=True)
+    yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
     content = f"---\n{yaml_str}---\n{body}"
 
     parent = os.path.dirname(path)
@@ -427,10 +410,10 @@ def update_frontmatter(path, updates, schema_type):
     if errors:
         raise ValidationError(
             f"Frontmatter validation failed after update in {path}:\n"
-            + "\n".join(f"  - {e}" for e in errors))
+            + "\n".join(f"  - {e}" for e in errors)
+        )
 
-    yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False,
-                         allow_unicode=True)
+    yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
     content = f"---\n{yaml_str}---\n{body}"
 
     with open(path, "w", encoding="utf-8") as f:
@@ -439,10 +422,12 @@ def update_frontmatter(path, updates, schema_type):
 
 # ─── Artifact File Discovery ───────────────────────────────────────────────────
 
+
 def _is_companion_file(filename):
     """Check if a filename is a companion file (comments, removed-context)."""
-    return (filename.endswith(("-comments.md", "-removed-context.md"))
-            or filename.endswith("-removed-context.yaml"))
+    return filename.endswith(("-comments.md", "-removed-context.md")) or filename.endswith(
+        "-removed-context.yaml"
+    )
 
 
 def find_artifact_file(artifacts_dir, identifier):
@@ -484,8 +469,7 @@ def find_artifact_file(artifacts_dir, identifier):
 
         # Match by local RFE ID (exact: RFE-001.md, legacy: RFE-001-slug.md)
         if identifier.startswith("RFE-"):
-            if filename == f"{identifier}.md" or \
-                    filename.startswith(identifier + "-"):
+            if filename == f"{identifier}.md" or filename.startswith(identifier + "-"):
                 path = os.path.join(tasks_dir, filename)
                 data, _ = read_frontmatter(path)
                 if data.get("status") == "Archived":
@@ -512,8 +496,7 @@ def find_artifact_file_including_archived(artifacts_dir, identifier):
                 return os.path.join(tasks_dir, filename)
 
         if identifier.startswith("RFE-"):
-            if filename == f"{identifier}.md" or \
-                    filename.startswith(identifier + "-"):
+            if filename == f"{identifier}.md" or filename.startswith(identifier + "-"):
                 return os.path.join(tasks_dir, filename)
 
     return None
@@ -641,6 +624,7 @@ def scan_review_files(artifacts_dir):
 
 # ─── File Renaming (post-submit) ───────────────────────────────────────────────
 
+
 def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
     """Rename RFE-NNN.md files to RHAIRFE-NNNN.md after submission.
 
@@ -658,8 +642,7 @@ def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
     # Rename task file and companions
     if os.path.isdir(tasks_dir):
         for filename in list(os.listdir(tasks_dir)):
-            if not (filename == f"{rfe_id}.md" or
-                    filename.startswith(rfe_id + "-")):
+            if not (filename == f"{rfe_id}.md" or filename.startswith(rfe_id + "-")):
                 continue
             if not (filename.endswith(".md") or filename.endswith(".yaml")):
                 continue
@@ -680,29 +663,25 @@ def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
 
             # Update frontmatter on main task file
             if new_name == f"{jira_key}.md":
-                update_frontmatter(new_path,
-                                   {"rfe_id": jira_key,
-                                    "status": "Submitted"},
-                                   "rfe-task")
+                update_frontmatter(
+                    new_path, {"rfe_id": jira_key, "status": "Submitted"}, "rfe-task"
+                )
 
     # Rename review file
     if os.path.isdir(reviews_dir):
         for filename in list(os.listdir(reviews_dir)):
-            if filename.startswith(rfe_id + "-") and \
-                    filename.endswith("-review.md"):
+            if filename.startswith(rfe_id + "-") and filename.endswith("-review.md"):
                 old_path = os.path.join(reviews_dir, filename)
-                new_path = os.path.join(reviews_dir,
-                                        f"{jira_key}-review.md")
+                new_path = os.path.join(reviews_dir, f"{jira_key}-review.md")
                 os.rename(old_path, new_path)
 
                 # Update frontmatter
-                update_frontmatter(new_path,
-                                   {"rfe_id": jira_key},
-                                   "rfe-review")
+                update_frontmatter(new_path, {"rfe_id": jira_key}, "rfe-review")
                 break
 
 
 # ─── Index Rebuilding ───────────────────────────────────────────────────────────
+
 
 def rebuild_index(artifacts_dir):
     """Rebuild artifacts/rfes.md from frontmatter across task and review files.
@@ -752,9 +731,7 @@ def rebuild_index(artifacts_dir):
             )
         else:
             lines.append(
-                f"| {rfe_id} | {title} "
-                f"| {priority} | {size} | {score} "
-                f"| {rec} | {status} |"
+                f"| {rfe_id} | {title} | {priority} | {size} | {score} | {rec} | {status} |"
             )
 
     content = "\n".join(lines) + "\n"
@@ -767,6 +744,7 @@ def rebuild_index(artifacts_dir):
 
 
 # ─── Legacy Compatibility ──────────────────────────────────────────────────────
+
 
 def parse_child_artifact(path):
     """Parse a child RFE markdown file.
@@ -788,17 +766,14 @@ def parse_child_artifact(path):
     if data.get("title"):
         title = data["title"]
     else:
-        title_match = re.match(r'^#\s+RFE-\d+:\s+(.+)$', content,
-                               re.MULTILINE)
+        title_match = re.match(r"^#\s+RFE-\d+:\s+(.+)$", content, re.MULTILINE)
         title = title_match.group(1).strip() if title_match else "Untitled"
 
     if data.get("priority"):
         priority = data["priority"]
     else:
-        priority_match = re.search(r'^\*\*Priority\*\*:\s*(.+)$', content,
-                                   re.MULTILINE)
-        priority = priority_match.group(1).strip() \
-            if priority_match else "Normal"
+        priority_match = re.search(r"^\*\*Priority\*\*:\s*(.+)$", content, re.MULTILINE)
+        priority = priority_match.group(1).strip() if priority_match else "Normal"
 
     cleaned = strip_metadata(content)
     return title, priority, content, cleaned

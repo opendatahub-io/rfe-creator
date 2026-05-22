@@ -6,7 +6,9 @@ Atlassian MCP server is unavailable. Outputs JSON to stdout for the
 calling skill to parse.
 
 Usage:
-    python3 scripts/fetch_issue.py RHAIRFE-1234 [--fields summary,description,comment,priority,labels,status] [--markdown]
+    python3 scripts/fetch_issue.py RHAIRFE-1234 \\
+        [--fields summary,description,comment,priority,labels,status] \\
+        [--markdown]
 
     # Fetch everything and write all artifact files at once
     python3 scripts/fetch_issue.py RHAIRFE-1234 --fetch-all artifacts
@@ -29,7 +31,7 @@ import shutil
 import subprocess
 import sys
 
-from jira_utils import require_env, get_issue, get_comments, adf_to_markdown
+from jira_utils import adf_to_markdown, get_comments, get_issue, require_env
 
 
 def _desc_to_markdown(desc_raw):
@@ -61,9 +63,13 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
 
     # Fetch issue fields
     try:
-        issue = get_issue(server, user, token, issue_key,
-                          fields=["summary", "description", "priority",
-                                  "labels", "status"])
+        issue = get_issue(
+            server,
+            user,
+            token,
+            issue_key,
+            fields=["summary", "description", "priority", "labels", "status"],
+        )
     except Exception as e:
         print(f"Error fetching issue {issue_key}: {e}", file=sys.stderr)
         return 1
@@ -74,8 +80,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     # Extract field values
     summary = fields.get("summary", "")
     priority_obj = fields.get("priority")
-    priority = priority_obj.get("name", "Major") if isinstance(
-        priority_obj, dict) else "Major"
+    priority = priority_obj.get("name", "Major") if isinstance(priority_obj, dict) else "Major"
     labels = fields.get("labels", [])
     labels_str = ",".join(labels) if labels else "null"
 
@@ -86,7 +91,10 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
 
     # Set frontmatter via frontmatter.py
     fm_args = [
-        sys.executable, "scripts/frontmatter.py", "set", task_path,
+        sys.executable,
+        "scripts/frontmatter.py",
+        "set",
+        task_path,
         f"rfe_id={issue_key}",
         f"title={summary}",
         f"priority={priority}",
@@ -95,8 +103,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     ]
     result = subprocess.run(fm_args, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Error setting frontmatter: {result.stderr.strip()}",
-              file=sys.stderr)
+        print(f"Error setting frontmatter: {result.stderr.strip()}", file=sys.stderr)
         return 1
 
     # Write original description (deterministic baseline for conflict
@@ -109,8 +116,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     try:
         comments = get_comments(server, user, token, issue_key)
     except Exception as e:
-        print(f"Error fetching comments for {issue_key}: {e}",
-              file=sys.stderr)
+        print(f"Error fetching comments for {issue_key}: {e}", file=sys.stderr)
         return 1
 
     comments_path = os.path.join(tasks_dir, f"{issue_key}-comments.md")
@@ -137,33 +143,42 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("issue_key",
-                        help="Jira issue key (e.g. RHAIRFE-1234)")
+    parser.add_argument("issue_key", help="Jira issue key (e.g. RHAIRFE-1234)")
 
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument("--fields", default=None,
-                            help="Comma-separated list of fields to fetch "
-                                 "(default: summary,description,priority,"
-                                 "labels,status). "
-                                 "Use 'comment' to also fetch comments.")
-    mode_group.add_argument("--fetch-all", metavar="ARTIFACTS_DIR",
-                            help="Fetch issue and write all artifact files "
-                                 "(rfe-tasks, rfe-originals, comments) to "
-                                 "the given directory.")
+    mode_group.add_argument(
+        "--fields",
+        default=None,
+        help="Comma-separated list of fields to fetch "
+        "(default: summary,description,priority,"
+        "labels,status). "
+        "Use 'comment' to also fetch comments.",
+    )
+    mode_group.add_argument(
+        "--fetch-all",
+        metavar="ARTIFACTS_DIR",
+        help="Fetch issue and write all artifact files "
+        "(rfe-tasks, rfe-originals, comments) to "
+        "the given directory.",
+    )
 
-    parser.add_argument("--markdown", action="store_true",
-                        help="Convert ADF fields (description, comments) "
-                             "to markdown strings in the output")
-    parser.add_argument("--write-original", metavar="DIR",
-                        help="Write the description as markdown to "
-                             "DIR/<issue_key>.md. If JIRA creds are "
-                             "available, refetches via REST API and uses "
-                             "adf_to_markdown for deterministic output. "
-                             "If not, copies DIR/<issue_key>.input.md "
-                             "as a fallback.")
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Convert ADF fields (description, comments) to markdown strings in the output",
+    )
+    parser.add_argument(
+        "--write-original",
+        metavar="DIR",
+        help="Write the description as markdown to "
+        "DIR/<issue_key>.md. If JIRA creds are "
+        "available, refetches via REST API and uses "
+        "adf_to_markdown for deterministic output. "
+        "If not, copies DIR/<issue_key>.input.md "
+        "as a fallback.",
+    )
     args = parser.parse_args()
 
     server, user, token = require_env()
@@ -171,8 +186,11 @@ def main():
     # --fetch-all mode: script does everything
     if args.fetch_all:
         if not all([server, user, token]):
-            print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
-                  "required for --fetch-all mode.", file=sys.stderr)
+            print(
+                "Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
+                "required for --fetch-all mode.",
+                file=sys.stderr,
+            )
             sys.exit(2)
         rc = _fetch_all(args.issue_key, args.fetch_all, server, user, token)
         sys.exit(rc)
@@ -181,15 +199,12 @@ def main():
     # the original description snapshot written to disk.
     if args.write_original and not args.fields:
         os.makedirs(args.write_original, exist_ok=True)
-        orig_path = os.path.join(args.write_original,
-                                 f"{args.issue_key}.md")
+        orig_path = os.path.join(args.write_original, f"{args.issue_key}.md")
         base, ext = os.path.splitext(orig_path)
         input_path = base + ".input" + ext
         if all([server, user, token]):
-            issue = get_issue(server, user, token, args.issue_key,
-                              fields=["description"])
-            desc_md = _desc_to_markdown(
-                issue.get("fields", {}).get("description"))
+            issue = get_issue(server, user, token, args.issue_key, fields=["description"])
+            desc_md = _desc_to_markdown(issue.get("fields", {}).get("description"))
             with open(orig_path, "w", encoding="utf-8") as f:
                 f.write(desc_md + "\n")
             if os.path.exists(input_path):
@@ -198,8 +213,10 @@ def main():
             shutil.copy2(input_path, orig_path)
             os.remove(input_path)
         else:
-            print(f"Warning: no JIRA creds and no {input_path}, "
-                  "skipping --write-original", file=sys.stderr)
+            print(
+                f"Warning: no JIRA creds and no {input_path}, skipping --write-original",
+                file=sys.stderr,
+            )
         return
 
     # Default fields when not in write-original-only mode
@@ -207,8 +224,7 @@ def main():
         args.fields = "summary,description,priority,labels,status"
 
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
-              "required.", file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)
         sys.exit(1)
 
     requested = [f.strip() for f in args.fields.split(",")]
@@ -216,8 +232,9 @@ def main():
     api_fields = [f for f in requested if f != "comment"]
 
     # Fetch the issue
-    issue = get_issue(server, user, token, args.issue_key,
-                      fields=api_fields if api_fields else None)
+    issue = get_issue(
+        server, user, token, args.issue_key, fields=api_fields if api_fields else None
+    )
 
     # Build output
     fields = issue.get("fields", {})
@@ -229,8 +246,7 @@ def main():
     for field_name in api_fields:
         value = fields.get(field_name)
         # Convert ADF description to markdown if requested
-        if args.markdown and field_name == "description" and \
-                isinstance(value, dict):
+        if args.markdown and field_name == "description" and isinstance(value, dict):
             value = adf_to_markdown(value).strip()
         output["fields"][field_name] = value
 
@@ -242,18 +258,19 @@ def main():
             body = c.get("body", {})
             if args.markdown and isinstance(body, dict):
                 body = adf_to_markdown(body).strip()
-            output["comments"].append({
-                "author": c.get("author", {}).get("displayName", "Unknown"),
-                "created": c.get("created", ""),
-                "body": body,
-            })
+            output["comments"].append(
+                {
+                    "author": c.get("author", {}).get("displayName", "Unknown"),
+                    "created": c.get("created", ""),
+                    "body": body,
+                }
+            )
 
     # Write original description snapshot for conflict detection
     if args.write_original:
         desc_md = _desc_to_markdown(fields.get("description"))
         os.makedirs(args.write_original, exist_ok=True)
-        orig_path = os.path.join(args.write_original,
-                                 f"{args.issue_key}.md")
+        orig_path = os.path.join(args.write_original, f"{args.issue_key}.md")
         with open(orig_path, "w", encoding="utf-8") as f:
             f.write(desc_md + "\n")
 

@@ -35,13 +35,13 @@ import sys
 
 from artifact_utils import (
     SCHEMAS,
+    ValidationError,
     get_schema_yaml,
     read_frontmatter,
     read_frontmatter_validated,
-    write_frontmatter,
-    update_frontmatter,
     rebuild_index,
-    ValidationError,
+    update_frontmatter,
+    write_frontmatter,
 )
 
 
@@ -109,8 +109,7 @@ def cmd_read(args):
     else:
         data, _ = read_frontmatter(args.file)
         if not data:
-            print(f"Error: no frontmatter found in {args.file}",
-                  file=sys.stderr)
+            print(f"Error: no frontmatter found in {args.file}", file=sys.stderr)
             sys.exit(1)
 
     # Output as JSON for easy parsing by callers
@@ -122,8 +121,7 @@ def cmd_set(args):
     """Set/update frontmatter fields on a file."""
     schema_type = args.schema_type or _detect_schema_type(args.file)
     if not schema_type:
-        print("Error: cannot detect schema type from path. "
-              "Use --schema-type.", file=sys.stderr)
+        print("Error: cannot detect schema type from path. Use --schema-type.", file=sys.stderr)
         sys.exit(1)
 
     schema = SCHEMAS[schema_type]
@@ -132,8 +130,7 @@ def cmd_set(args):
     data = {}
     for field_value in args.fields:
         if "=" not in field_value:
-            print(f"Error: expected field=value, got '{field_value}'",
-                  file=sys.stderr)
+            print(f"Error: expected field=value, got '{field_value}'", file=sys.stderr)
             sys.exit(1)
 
         field_name, value_str = field_value.split("=", 1)
@@ -143,18 +140,15 @@ def cmd_set(args):
             parts = field_name.split(".", 1)
             parent_name, child_name = parts
             if parent_name not in schema:
-                print(f"Error: unknown field '{parent_name}'",
-                      file=sys.stderr)
+                print(f"Error: unknown field '{parent_name}'", file=sys.stderr)
                 sys.exit(1)
             parent_spec = schema[parent_name]
             if parent_spec.get("type") != "dict":
-                print(f"Error: '{parent_name}' is not a dict field",
-                      file=sys.stderr)
+                print(f"Error: '{parent_name}' is not a dict field", file=sys.stderr)
                 sys.exit(1)
             nested_fields = parent_spec.get("fields", {})
             if child_name not in nested_fields:
-                print(f"Error: unknown field '{field_name}'",
-                      file=sys.stderr)
+                print(f"Error: unknown field '{field_name}'", file=sys.stderr)
                 sys.exit(1)
             coerced = _coerce_value(value_str, nested_fields[child_name])
             if parent_name not in data:
@@ -162,8 +156,10 @@ def cmd_set(args):
             data[parent_name][child_name] = coerced
         else:
             if field_name not in schema:
-                print(f"Error: unknown field '{field_name}' for schema "
-                      f"'{schema_type}'", file=sys.stderr)
+                print(
+                    f"Error: unknown field '{field_name}' for schema '{schema_type}'",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
             data[field_name] = _coerce_value(value_str, schema[field_name])
 
@@ -213,7 +209,7 @@ def cmd_batch_read(args):
 
 def cmd_rebuild_index(args):
     """Rebuild rfes.md index from frontmatter."""
-    content = rebuild_index(args.artifacts_dir)
+    rebuild_index(args.artifacts_dir)
     print(f"Rebuilt {args.artifacts_dir}/rfes.md")
 
 
@@ -225,46 +221,50 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # schema
-    p_schema = subparsers.add_parser("schema",
-                                     help="Show schema for a file type")
-    p_schema.add_argument("schema_type",
-                          choices=list(SCHEMAS.keys()),
-                          help="Schema type to display")
+    p_schema = subparsers.add_parser("schema", help="Show schema for a file type")
+    p_schema.add_argument(
+        "schema_type", choices=list(SCHEMAS.keys()), help="Schema type to display"
+    )
     p_schema.set_defaults(func=cmd_schema)
 
     # read
-    p_read = subparsers.add_parser("read",
-                                   help="Read frontmatter from a file")
+    p_read = subparsers.add_parser("read", help="Read frontmatter from a file")
     p_read.add_argument("file", help="Path to the markdown file")
-    p_read.add_argument("--schema-type", dest="schema_type",
-                        choices=list(SCHEMAS.keys()),
-                        help="Schema type (auto-detected from path if omitted)")
+    p_read.add_argument(
+        "--schema-type",
+        dest="schema_type",
+        choices=list(SCHEMAS.keys()),
+        help="Schema type (auto-detected from path if omitted)",
+    )
     p_read.set_defaults(func=cmd_read)
 
     # set
-    p_set = subparsers.add_parser(
-        "set", help="Set/update frontmatter fields")
+    p_set = subparsers.add_parser("set", help="Set/update frontmatter fields")
     p_set.add_argument("file", help="Path to the markdown file")
-    p_set.add_argument("fields", nargs="+",
-                       help="Fields as field=value pairs. Use dot notation "
-                            "for nested fields (e.g., scores.what=2)")
-    p_set.add_argument("--schema-type", dest="schema_type",
-                       choices=list(SCHEMAS.keys()),
-                       help="Schema type (auto-detected from path if omitted)")
+    p_set.add_argument(
+        "fields",
+        nargs="+",
+        help="Fields as field=value pairs. Use dot notation "
+        "for nested fields (e.g., scores.what=2)",
+    )
+    p_set.add_argument(
+        "--schema-type",
+        dest="schema_type",
+        choices=list(SCHEMAS.keys()),
+        help="Schema type (auto-detected from path if omitted)",
+    )
     p_set.set_defaults(func=cmd_set)
 
     # batch-read
-    p_batch = subparsers.add_parser("batch-read",
-                                    help="Read frontmatter from multiple files")
-    p_batch.add_argument("files", nargs="+",
-                         help="Paths to markdown files")
+    p_batch = subparsers.add_parser("batch-read", help="Read frontmatter from multiple files")
+    p_batch.add_argument("files", nargs="+", help="Paths to markdown files")
     p_batch.set_defaults(func=cmd_batch_read)
 
     # rebuild-index
-    p_rebuild = subparsers.add_parser("rebuild-index",
-                                     help="Rebuild rfes.md index")
-    p_rebuild.add_argument("--artifacts-dir", default="artifacts",
-                           help="Artifacts directory (default: artifacts)")
+    p_rebuild = subparsers.add_parser("rebuild-index", help="Rebuild rfes.md index")
+    p_rebuild.add_argument(
+        "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
     p_rebuild.set_defaults(func=cmd_rebuild_index)
 
     args = parser.parse_args()

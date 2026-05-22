@@ -26,6 +26,7 @@ Usage:
     # Clean tmp/ directory
     python3 scripts/state.py clean
 """
+
 import os
 import sys
 
@@ -144,12 +145,14 @@ def cmd_read_ids(args):
 def cmd_timestamp(args):
     """Print current UTC timestamp in ISO 8601 format."""
     from datetime import datetime, timezone
+
     print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 def cmd_clean(args):
     """Remove and recreate tmp/. Only call from top-level entry points."""
     import shutil
+
     if os.path.exists("tmp"):
         shutil.rmtree("tmp")
     os.makedirs("tmp", exist_ok=True)

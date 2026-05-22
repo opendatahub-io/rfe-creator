@@ -23,12 +23,12 @@ from artifact_utils import find_review_file, read_frontmatter, update_frontmatte
 
 def strip_frontmatter(text):
     """Remove YAML frontmatter (--- delimited) from text."""
-    lines = text.split('\n')
-    if not lines or lines[0].strip() != '---':
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
         return text
     for i, line in enumerate(lines[1:], 1):
-        if line.strip() == '---':
-            return '\n'.join(lines[i + 1:])
+        if line.strip() == "---":
+            return "\n".join(lines[i + 1 :])
     return text
 
 
@@ -51,9 +51,7 @@ def batch_mode(ids, artifacts_dir="artifacts"):
 
     # If no IDs given, discover from originals dir
     if not ids:
-        ids = [os.path.splitext(f)[0]
-               for f in os.listdir(originals_dir)
-               if f.endswith(".md")]
+        ids = [os.path.splitext(f)[0] for f in os.listdir(originals_dir) if f.endswith(".md")]
 
     changed = 0
     for rfe_id in sorted(ids):

@@ -1,6 +1,6 @@
 """Tests for label operations in jira_utils — add, remove, swap."""
-import json
-from unittest.mock import patch, MagicMock
+
+from unittest.mock import patch
 
 from scripts.jira_utils import add_labels, remove_labels, swap_labels
 
@@ -22,11 +22,7 @@ class TestAddLabels:
     def test_body_structure(self):
         call = _capture_body(add_labels, ["alpha", "beta"])
         body = call.kwargs.get("body") or call[0][4]
-        assert body == {
-            "update": {
-                "labels": [{"add": "alpha"}, {"add": "beta"}]
-            }
-        }
+        assert body == {"update": {"labels": [{"add": "alpha"}, {"add": "beta"}]}}
 
     def test_uses_put(self):
         call = _capture_body(add_labels, ["x"])
@@ -38,11 +34,7 @@ class TestRemoveLabels:
     def test_body_structure(self):
         call = _capture_body(remove_labels, ["old"])
         body = call.kwargs.get("body") or call[0][4]
-        assert body == {
-            "update": {
-                "labels": [{"remove": "old"}]
-            }
-        }
+        assert body == {"update": {"labels": [{"remove": "old"}]}}
 
 
 class TestSwapLabels:

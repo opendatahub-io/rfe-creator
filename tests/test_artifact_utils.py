@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for scripts/artifact_utils.py — schema validation, frontmatter I/O, migration."""
+
 import os
 import sys
 
@@ -18,7 +19,6 @@ from artifact_utils import (
     validate,
     write_frontmatter,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -184,11 +184,18 @@ class TestReadFrontmatter:
 
 class TestReadFrontmatterValidated:
     def test_valid_file(self, tmp_dir):
-        fm = "\n".join(f"{k}: {v}" for k, v in [
-            ("rfe_id", "RHAIRFE-1234"), ("score", 8), ("pass", "true"),
-            ("recommendation", "submit"), ("feasibility", "feasible"),
-            ("auto_revised", "false"), ("needs_attention", "false"),
-        ])
+        fm = "\n".join(
+            f"{k}: {v}"
+            for k, v in [
+                ("rfe_id", "RHAIRFE-1234"),
+                ("score", 8),
+                ("pass", "true"),
+                ("recommendation", "submit"),
+                ("feasibility", "feasible"),
+                ("auto_revised", "false"),
+                ("needs_attention", "false"),
+            ]
+        )
         scores = "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n  not_a_task: 2\n  right_sized: 2"
         _write("review.md", f"---\n{fm}\n{scores}\n---\nBody.\n")
         data, body = read_frontmatter_validated("review.md", "rfe-review")
@@ -196,11 +203,18 @@ class TestReadFrontmatterValidated:
         assert "Body." in body
 
     def test_migrates_old_revised(self, tmp_dir):
-        fm = "\n".join(f"{k}: {v}" for k, v in [
-            ("rfe_id", "RHAIRFE-1234"), ("score", 8), ("pass", "true"),
-            ("recommendation", "submit"), ("feasibility", "feasible"),
-            ("revised", "true"), ("needs_attention", "false"),
-        ])
+        fm = "\n".join(
+            f"{k}: {v}"
+            for k, v in [
+                ("rfe_id", "RHAIRFE-1234"),
+                ("score", 8),
+                ("pass", "true"),
+                ("recommendation", "submit"),
+                ("feasibility", "feasible"),
+                ("revised", "true"),
+                ("needs_attention", "false"),
+            ]
+        )
         scores = "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n  not_a_task: 2\n  right_sized: 2"
         _write("review.md", f"---\n{fm}\n{scores}\n---\nBody.\n")
         data, _ = read_frontmatter_validated("review.md", "rfe-review")
@@ -266,11 +280,14 @@ class TestUpdateFrontmatter:
 
     def test_migrates_old_field_in_existing_file(self, tmp_dir):
         # Simulate an old-format file on disk
-        _write("review.md", "---\nrfe_id: RHAIRFE-1234\nscore: 8\npass: true\n"
-               "recommendation: submit\nfeasibility: feasible\n"
-               "revised: false\nneeds_attention: false\n"
-               "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n"
-               "  not_a_task: 2\n  right_sized: 2\n---\nBody.\n")
+        _write(
+            "review.md",
+            "---\nrfe_id: RHAIRFE-1234\nscore: 8\npass: true\n"
+            "recommendation: submit\nfeasibility: feasible\n"
+            "revised: false\nneeds_attention: false\n"
+            "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n"
+            "  not_a_task: 2\n  right_sized: 2\n---\nBody.\n",
+        )
         # Setting a new field should not fail due to old 'revised' key
         update_frontmatter("review.md", {"needs_attention": True}, "rfe-review")
         data, _ = read_frontmatter("review.md")
@@ -281,5 +298,4 @@ class TestUpdateFrontmatter:
     def test_rejects_invalid_update(self, tmp_dir):
         write_frontmatter("review.md", VALID_REVIEW_FM.copy(), "rfe-review")
         with pytest.raises(ValidationError):
-            update_frontmatter("review.md",
-                               {"recommendation": "invalid"}, "rfe-review")
+            update_frontmatter("review.md", {"recommendation": "invalid"}, "rfe-review")

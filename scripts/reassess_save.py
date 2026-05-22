@@ -31,9 +31,7 @@ def main():
         return
 
     # Step 1: Save review state
-    subprocess.run(
-        ["python3", "scripts/preserve_review_state.py", "save"] + ids,
-        check=True)
+    subprocess.run(["python3", "scripts/preserve_review_state.py", "save"] + ids, check=True)
 
     # Step 2: Delete stale files
     deleted = 0

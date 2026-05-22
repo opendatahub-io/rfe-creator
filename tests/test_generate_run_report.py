@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for scripts/generate_run_report.py — run report generation."""
+
 import os
 import sys
 
@@ -7,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from generate_run_report import build_report, _parse_run_id
+from generate_run_report import _parse_run_id, build_report
 
 TASK_TEMPLATE = """\
 ---
@@ -56,8 +57,8 @@ def art_dir(tmp_path, monkeypatch):
     for d in ["rfe-tasks", "rfe-reviews"]:
         os.makedirs(tmp_path / "artifacts" / d)
     import generate_run_report
-    monkeypatch.setattr(generate_run_report, "DEFAULT_ARTIFACTS_DIR",
-                        str(tmp_path / "artifacts"))
+
+    monkeypatch.setattr(generate_run_report, "DEFAULT_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     return str(tmp_path / "artifacts")
 
 
@@ -65,31 +66,44 @@ class TestSplitChildrenIncluded:
     def test_children_get_own_entries(self, art_dir):
         """Split children should appear as their own per_rfe entries."""
         # Parent task — was split
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=6,
-                                      pass_val="false", recommendation="split",
-                                      right_sized=0))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=6,
+                pass_val="false",
+                recommendation="split",
+                right_sized=0,
+            ),
+        )
         # Child tasks with parent_key
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_TEMPLATE.format(rfe_id="RFE-001",
-                                    extra="parent_key: RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RFE-001", score=9,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
-        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
-               TASK_TEMPLATE.format(rfe_id="RFE-002",
-                                    extra="parent_key: RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RFE-002", score=8,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=1))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+            ),
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-002.md",
+            TASK_TEMPLATE.format(rfe_id="RFE-002", extra="parent_key: RHAIRFE-1234"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-002-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RFE-002", score=8, pass_val="true", recommendation="submit", right_sized=1
+            ),
+        )
 
         # Only pass parent ID — children should be auto-discovered
-        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5,
-                              [], [])
+        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5, [], [])
 
         ids_in_report = [e["id"] for e in report["per_rfe"]]
         assert "RHAIRFE-1234" in ids_in_report
@@ -99,22 +113,32 @@ class TestSplitChildrenIncluded:
 
     def test_children_not_duplicated_if_already_passed(self, art_dir):
         """If caller already includes child IDs, don't duplicate them."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=6,
-                                      pass_val="false", recommendation="split",
-                                      right_sized=0))
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_TEMPLATE.format(rfe_id="RFE-001",
-                                    extra="parent_key: RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RFE-001", score=9,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=6,
+                pass_val="false",
+                recommendation="split",
+                right_sized=0,
+            ),
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+            ),
+        )
 
-        report = build_report(["RHAIRFE-1234", "RFE-001"],
-                              "2026-04-01T22:50:53Z", 5, [], [])
+        report = build_report(["RHAIRFE-1234", "RFE-001"], "2026-04-01T22:50:53Z", 5, [], [])
 
         ids_in_report = [e["id"] for e in report["per_rfe"]]
         assert ids_in_report.count("RFE-001") == 1
@@ -122,37 +146,54 @@ class TestSplitChildrenIncluded:
 
     def test_input_count_reflects_original_ids(self, art_dir):
         """input_count should only count caller-supplied IDs, not children."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=6,
-                                      pass_val="false", recommendation="split",
-                                      right_sized=0))
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_TEMPLATE.format(rfe_id="RFE-001",
-                                    extra="parent_key: RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RFE-001", score=9,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=6,
+                pass_val="false",
+                recommendation="split",
+                right_sized=0,
+            ),
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+            ),
+        )
 
-        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5,
-                              [], [])
+        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5, [], [])
 
         assert report["input_count"] == 1
         assert len(report["per_rfe"]) == 2
 
     def test_no_children_no_change(self, art_dir):
         """When no splits occurred, behavior is unchanged."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=9,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=9,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=2,
+            ),
+        )
 
-        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5,
-                              [], [])
+        report = build_report(["RHAIRFE-1234"], "2026-04-01T22:50:53Z", 5, [], [])
 
         assert len(report["per_rfe"]) == 1
         assert report["per_rfe"][0]["id"] == "RHAIRFE-1234"
@@ -175,15 +216,22 @@ class TestParseRunId:
 class TestScanReviewFiles:
     def test_build_report_with_artifacts_dir(self, art_dir):
         """build_report accepts artifacts_dir parameter."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", score=9,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=9,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=2,
+            ),
+        )
 
-        report = build_report(["RHAIRFE-1234"], "20260404-170041", 5,
-                              [], [], artifacts_dir=art_dir)
+        report = build_report(["RHAIRFE-1234"], "20260404-170041", 5, [], [], artifacts_dir=art_dir)
 
         assert report["run_id"] == "20260404-170041"
         assert len(report["per_rfe"]) == 1
@@ -193,30 +241,51 @@ class TestScanReviewFiles:
         art = str(tmp_path / "artifacts")
         for d in ["rfe-tasks", "rfe-reviews"]:
             os.makedirs(os.path.join(art, d))
-        _write(f"{art}/rfe-tasks/RHAIRFE-100.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-100", extra=""))
-        _write(f"{art}/rfe-reviews/RHAIRFE-100-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-100", score=8,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
-        _write(f"{art}/rfe-tasks/RHAIRFE-200.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-200", extra=""))
-        _write(f"{art}/rfe-reviews/RHAIRFE-200-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-200", score=7,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=1))
+        _write(
+            f"{art}/rfe-tasks/RHAIRFE-100.md", TASK_TEMPLATE.format(rfe_id="RHAIRFE-100", extra="")
+        )
+        _write(
+            f"{art}/rfe-reviews/RHAIRFE-100-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-100",
+                score=8,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=2,
+            ),
+        )
+        _write(
+            f"{art}/rfe-tasks/RHAIRFE-200.md", TASK_TEMPLATE.format(rfe_id="RHAIRFE-200", extra="")
+        )
+        _write(
+            f"{art}/rfe-reviews/RHAIRFE-200-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-200",
+                score=7,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=1,
+            ),
+        )
 
         import subprocess
+
         result = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(__file__),
-             "..", "scripts", "generate_run_report.py"),
-             "--start-time", "20260404-170041",
-             "--artifacts-dir", art],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_run_report.py"),
+                "--start-time",
+                "20260404-170041",
+                "--artifacts-dir",
+                art,
+            ],
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         # Should have found both review files
         import yaml
+
         out_path = result.stdout.strip()
         with open(out_path) as f:
             report = yaml.safe_load(f)
@@ -231,21 +300,34 @@ class TestGenerateReviewPdfArtifactsDir:
         art = str(tmp_path / "custom-artifacts")
         for d in ["rfe-tasks", "rfe-reviews", "rfe-originals"]:
             os.makedirs(os.path.join(art, d))
-        _write(f"{art}/rfe-tasks/RHAIRFE-500.md",
-               TASK_TEMPLATE.format(rfe_id="RHAIRFE-500", extra=""))
-        _write(f"{art}/rfe-reviews/RHAIRFE-500-review.md",
-               REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-500", score=8,
-                                      pass_val="true", recommendation="submit",
-                                      right_sized=2))
+        _write(
+            f"{art}/rfe-tasks/RHAIRFE-500.md", TASK_TEMPLATE.format(rfe_id="RHAIRFE-500", extra="")
+        )
+        _write(
+            f"{art}/rfe-reviews/RHAIRFE-500-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-500",
+                score=8,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=2,
+            ),
+        )
 
         out_file = str(tmp_path / "report.html")
         import subprocess
+
         result = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(__file__),
-             "..", "scripts", "generate_review_pdf.py"),
-             "--artifacts-dir", art,
-             "--output", out_file],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_review_pdf.py"),
+                "--artifacts-dir",
+                art,
+                "--output",
+                out_file,
+            ],
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0, result.stderr
         assert os.path.exists(out_file)

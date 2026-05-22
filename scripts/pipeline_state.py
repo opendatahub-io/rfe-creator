@@ -36,15 +36,16 @@ MAX_NEXT_ACTION_ITERATIONS = 50
 
 # ---------- YAML block-scalar dumper (scoped) ----------
 
+
 def _str_representer(dumper, data):
-    if '\n' in data:
-        return dumper.represent_scalar(
-            'tag:yaml.org,2002:str', data, style='|')
-    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
 
 class _BlockDumper(yaml.Dumper):
     """Dumper that uses | for multi-line strings. Scoped to next-action."""
+
     pass
 
 
@@ -53,16 +54,37 @@ _BlockDumper.add_representer(str, _str_representer)
 # ---------- Phase enum ----------
 
 PHASES = [
-    "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP",
-    "REASSESS_CHECK", "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
-    "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
-    "COLLECT", "SPLIT", "SPLIT_COLLECT",
-    "SPLIT_PIPELINE_START", "SPLIT_ASSESS", "SPLIT_REVIEW",
-    "SPLIT_REVISE", "SPLIT_FIXUP",
-    "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE",
+    "BATCH_START",
+    "FETCH",
+    "SETUP",
+    "ASSESS",
+    "REVIEW",
+    "REVISE",
+    "FIXUP",
+    "REASSESS_CHECK",
+    "REASSESS_SAVE",
+    "REASSESS_ASSESS",
+    "REASSESS_REVIEW",
+    "REASSESS_RESTORE",
+    "REASSESS_REVISE",
+    "REASSESS_FIXUP",
+    "COLLECT",
+    "SPLIT",
+    "SPLIT_COLLECT",
+    "SPLIT_PIPELINE_START",
+    "SPLIT_ASSESS",
+    "SPLIT_REVIEW",
+    "SPLIT_REVISE",
+    "SPLIT_FIXUP",
+    "SPLIT_SAVE",
+    "SPLIT_REASSESS",
+    "SPLIT_RE_REVIEW",
+    "SPLIT_RESTORE",
     "SPLIT_CORRECTION_CHECK",
-    "BATCH_DONE", "ERROR_COLLECT",
-    "REPORT", "DONE",
+    "BATCH_DONE",
+    "ERROR_COLLECT",
+    "REPORT",
+    "DONE",
 ]
 
 # ---------- Phase config ----------
@@ -75,13 +97,15 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "fetch",
         "post_verify": "python3 scripts/verify_phase.py --phase fetch"
-                       " --ids-file tmp/pipeline-active-ids.txt",
+        " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {"KEY": "{ID}"},
     },
     "SETUP": {
         "type": "script",
-        "command": ("bash scripts/bootstrap-assess-rfe.sh &"
-                    " bash scripts/fetch-architecture-context.sh & wait"),
+        "command": (
+            "bash scripts/bootstrap-assess-rfe.sh &"
+            " bash scripts/fetch-architecture-context.sh & wait"
+        ),
     },
     "ASSESS": {
         "type": "agent",
@@ -90,13 +114,15 @@ PHASE_CONFIG = {
         "subagent_type": "rfe-scorer",
         "poll_phase": "assess",
         "parallel": [
-            {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
-             "poll_phase": "feasibility",
-             "vars": {"ID": "{ID}"}},
+            {
+                "prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
+                "poll_phase": "feasibility",
+                "vars": {"ID": "{ID}"},
+            },
         ],
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
-                       " --ids-file tmp/pipeline-active-ids.txt",
+        " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -109,13 +135,12 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
-                       " --ids-file tmp/pipeline-active-ids.txt",
+        " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
             "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
-            "FEASIBILITY_PATH":
-                "artifacts/rfe-reviews/{ID}-feasibility.md",
+            "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
     "REVISE": {
@@ -123,7 +148,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
-
         "vars": {"ID": "{ID}"},
     },
     "FIXUP": {
@@ -131,7 +155,6 @@ PHASE_CONFIG = {
         "command": "python3 scripts/check_revised.py --batch",
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
-
     # --- Reassess loop ---
     "REASSESS_CHECK": {"type": "noop"},
     "REASSESS_SAVE": {
@@ -148,7 +171,7 @@ PHASE_CONFIG = {
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         # NO "parallel" — feasibility NOT re-checked (invariant 4.2/5.4)
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
-                       " --ids-file tmp/pipeline-reassess-ids.txt",
+        " --ids-file tmp/pipeline-reassess-ids.txt",
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -161,13 +184,12 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-reassess-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
-                       " --ids-file tmp/pipeline-reassess-ids.txt",
+        " --ids-file tmp/pipeline-reassess-ids.txt",
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
             "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
-            "FEASIBILITY_PATH":
-                "artifacts/rfe-reviews/{ID}-feasibility.md",
+            "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
     "REASSESS_RESTORE": {
@@ -180,7 +202,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
-
         "vars": {"ID": "{ID}"},
     },
     "REASSESS_FIXUP": {
@@ -188,7 +209,6 @@ PHASE_CONFIG = {
         "command": "python3 scripts/check_revised.py --batch",
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
-
     # --- Collect + Split ---
     "COLLECT": {"type": "noop"},
     "SPLIT": {
@@ -216,12 +236,14 @@ PHASE_CONFIG = {
         "poll_phase": "assess",
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "parallel": [
-            {"prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
-             "poll_phase": "feasibility",
-             "vars": {"ID": "{ID}"}},
+            {
+                "prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
+                "poll_phase": "feasibility",
+                "vars": {"ID": "{ID}"},
+            },
         ],
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
-                       " --ids-file tmp/pipeline-split-children-ids.txt",
+        " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -234,13 +256,12 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-split-children-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
-                       " --ids-file tmp/pipeline-split-children-ids.txt",
+        " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
             "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
-            "FEASIBILITY_PATH":
-                "artifacts/rfe-reviews/{ID}-feasibility.md",
+            "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
     "SPLIT_REVISE": {
@@ -248,7 +269,6 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/revise-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "revise",
-
         "vars": {"ID": "{ID}"},
     },
     "SPLIT_FIXUP": {
@@ -269,7 +289,7 @@ PHASE_CONFIG = {
         "poll_phase": "assess",
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
-                       " --ids-file tmp/pipeline-revise-ids.txt",
+        " --ids-file tmp/pipeline-revise-ids.txt",
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
@@ -282,13 +302,12 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "review",
         "post_verify": "python3 scripts/verify_phase.py --phase review"
-                       " --ids-file tmp/pipeline-revise-ids.txt",
+        " --ids-file tmp/pipeline-revise-ids.txt",
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
             "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
-            "FEASIBILITY_PATH":
-                "artifacts/rfe-reviews/{ID}-feasibility.md",
+            "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
     "SPLIT_RESTORE": {
@@ -297,20 +316,20 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},
-
     # --- Batch control + retry ---
     "BATCH_DONE": {"type": "noop"},
     "ERROR_COLLECT": {
         "type": "script",
         "command": "python3 scripts/error_collect.py",
     },
-
     # --- Terminal ---
     "REPORT": {
         "type": "script",
-        "command": ("python3 scripts/generate_run_report.py"
-                    " --start-time {start_time}"
-                    " --batch-size {batch_size}"),
+        "command": (
+            "python3 scripts/generate_run_report.py"
+            " --start-time {start_time}"
+            " --batch-size {batch_size}"
+        ),
     },
 }
 
@@ -357,11 +376,9 @@ def _copy_ids(src, dst):
 
 def _run_script(cmd):
     """Run a script and return stdout lines."""
-    result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True)
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
-        print("Script failed (exit code "
-              f"{result.returncode})", file=sys.stderr)
+        print(f"Script failed (exit code {result.returncode})", file=sys.stderr)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         sys.exit(1)
@@ -383,13 +400,23 @@ def _parse_line_ids(output, prefix):
 
 MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
 REASSESS_SEQUENCE = [
-    "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
-    "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
+    "REASSESS_SAVE",
+    "REASSESS_ASSESS",
+    "REASSESS_REVIEW",
+    "REASSESS_RESTORE",
+    "REASSESS_REVISE",
+    "REASSESS_FIXUP",
 ]
 SPLIT_SEQUENCE = [
-    "SPLIT_PIPELINE_START", "SPLIT_ASSESS", "SPLIT_REVIEW",
-    "SPLIT_REVISE", "SPLIT_FIXUP",
-    "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE",
+    "SPLIT_PIPELINE_START",
+    "SPLIT_ASSESS",
+    "SPLIT_REVIEW",
+    "SPLIT_REVISE",
+    "SPLIT_FIXUP",
+    "SPLIT_SAVE",
+    "SPLIT_REASSESS",
+    "SPLIT_RE_REVIEW",
+    "SPLIT_RESTORE",
     "SPLIT_CORRECTION_CHECK",
 ]
 
@@ -416,9 +443,7 @@ def advance(state, dry_run=False):
     if phase == "REVIEW":
         if not dry_run:
             active_ids = _read_ids("tmp/pipeline-active-ids.txt")
-            out = _run_script(
-                f"python3 scripts/filter_for_revision.py"
-                f" {' '.join(active_ids)}")
+            out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(active_ids)}")
             revise_ids = out.split() if out else []
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REVISE", "REVIEW → REVISE"
@@ -432,8 +457,8 @@ def advance(state, dry_run=False):
             else:
                 reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
                 out = _run_script(
-                    f"python3 scripts/filter_for_revision.py"
-                    f" {' '.join(reassess_ids)}")
+                    f"python3 scripts/filter_for_revision.py {' '.join(reassess_ids)}"
+                )
                 revise_ids = out.split() if out else []
                 _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REASSESS_REVISE", "REASSESS_RESTORE → REASSESS_REVISE"
@@ -441,9 +466,7 @@ def advance(state, dry_run=False):
     if phase == "SPLIT_REVIEW":
         if not dry_run:
             child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
-            out = _run_script(
-                f"python3 scripts/filter_for_revision.py"
-                f" {' '.join(child_ids)}")
+            out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(child_ids)}")
             revise_ids = out.split() if out else []
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "SPLIT_REVISE", "SPLIT_REVIEW → SPLIT_REVISE"
@@ -462,17 +485,18 @@ def advance(state, dry_run=False):
     if phase == "REASSESS_CHECK":
         active_ids = _read_ids("tmp/pipeline-active-ids.txt")
         out = _run_script(
-            f"python3 scripts/collect_recommendations.py --reassess"
-            f" {' '.join(active_ids)}")
+            f"python3 scripts/collect_recommendations.py --reassess {' '.join(active_ids)}"
+        )
         reassess_ids = _parse_line_ids(out, "REASSESS")
         cycle = state.get("reassess_cycle", 0)
         if reassess_ids and cycle < 2:
             if not dry_run:
                 state["reassess_cycle"] = cycle + 1
                 _write_ids("tmp/pipeline-reassess-ids.txt", reassess_ids)
-            return ("REASSESS_SAVE",
-                    f"REASSESS_CHECK → REASSESS_SAVE:"
-                    f" reassess={len(reassess_ids)} cycle={cycle + 1}/2")
+            return (
+                "REASSESS_SAVE",
+                f"REASSESS_CHECK → REASSESS_SAVE: reassess={len(reassess_ids)} cycle={cycle + 1}/2",
+            )
         return "COLLECT", "REASSESS_CHECK → COLLECT: no reassess needed"
 
     # --- REASSESS_FIXUP loops back ---
@@ -482,9 +506,7 @@ def advance(state, dry_run=False):
     # --- COLLECT decision ---
     if phase == "COLLECT":
         active_ids = _read_ids("tmp/pipeline-active-ids.txt")
-        out = _run_script(
-            f"python3 scripts/collect_recommendations.py"
-            f" {' '.join(active_ids)}")
+        out = _run_script(f"python3 scripts/collect_recommendations.py {' '.join(active_ids)}")
         split_ids = _parse_line_ids(out, "SPLIT")
         # Build summary counts from collect output
         counts = {}
@@ -495,8 +517,7 @@ def advance(state, dry_run=False):
         if split_ids:
             if not dry_run:
                 _write_ids("tmp/pipeline-split-ids.txt", split_ids)
-            return ("SPLIT",
-                    f"COLLECT complete: {stats}\nCOLLECT → SPLIT")
+            return ("SPLIT", f"COLLECT complete: {stats}\nCOLLECT → SPLIT")
         return "BATCH_DONE", f"COLLECT complete: {stats}\nCOLLECT → BATCH_DONE"
 
     # --- SPLIT → SPLIT_COLLECT ---
@@ -507,21 +528,18 @@ def advance(state, dry_run=False):
     if phase == "SPLIT_COLLECT":
         child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
         if child_ids:
-            return ("SPLIT_PIPELINE_START",
-                    f"SPLIT_COLLECT → SPLIT_PIPELINE_START:"
-                    f" children={len(child_ids)}")
-        return ("BATCH_DONE",
-                "SPLIT_COLLECT → BATCH_DONE: no children")
+            return (
+                "SPLIT_PIPELINE_START",
+                f"SPLIT_COLLECT → SPLIT_PIPELINE_START: children={len(child_ids)}",
+            )
+        return ("BATCH_DONE", "SPLIT_COLLECT → BATCH_DONE: no children")
 
     # --- SPLIT_CORRECTION_CHECK ---
     if phase == "SPLIT_CORRECTION_CHECK":
         child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
         if child_ids:
-            out = _run_script(
-                f"python3 scripts/check_right_sized.py"
-                f" {' '.join(child_ids)}")
-            undersized = out.split("RESPLIT=")[1].split() \
-                if "RESPLIT=" in out else []
+            out = _run_script(f"python3 scripts/check_right_sized.py {' '.join(child_ids)}")
+            undersized = out.split("RESPLIT=")[1].split() if "RESPLIT=" in out else []
         else:
             undersized = []
         cycle = state.get("correction_cycle", 0)
@@ -529,9 +547,11 @@ def advance(state, dry_run=False):
             if not dry_run:
                 state["correction_cycle"] = cycle + 1
                 _write_ids("tmp/pipeline-split-ids.txt", undersized)
-            return ("SPLIT",
-                    f"SPLIT_CORRECTION_CHECK → SPLIT:"
-                    f" undersized={len(undersized)} correction={cycle + 1}/1")
+            return (
+                "SPLIT",
+                f"SPLIT_CORRECTION_CHECK → SPLIT:"
+                f" undersized={len(undersized)} correction={cycle + 1}/1",
+            )
         return "BATCH_DONE", "SPLIT_CORRECTION_CHECK → BATCH_DONE"
 
     # --- BATCH_DONE decision ---
@@ -545,27 +565,27 @@ def advance(state, dry_run=False):
         if active_ids:
             try:
                 out = _run_script(
-                    f"python3 scripts/batch_summary.py --counts-only"
-                    f" {' '.join(active_ids)}")
+                    f"python3 scripts/batch_summary.py --counts-only {' '.join(active_ids)}"
+                )
                 batch_stats = out.strip()
             except Exception:
                 pass
         prefix = "Retry batch" if retry > 0 else "Batch"
         summary = f"{prefix} {batch}/{total} complete: {batch_stats}"
         if batch < total:
-            return ("BATCH_START",
-                    f"{summary}\nBATCH_DONE → BATCH_START")
+            return ("BATCH_START", f"{summary}\nBATCH_DONE → BATCH_START")
         if retry < 1:
             all_ids = _read_ids("tmp/pipeline-all-ids.txt")
             if all_ids:
                 out = _run_script(
-                    f"python3 scripts/collect_recommendations.py --errors"
-                    f" {' '.join(all_ids)}")
+                    f"python3 scripts/collect_recommendations.py --errors {' '.join(all_ids)}"
+                )
                 error_ids = _parse_line_ids(out, "ERRORS")
                 if error_ids:
-                    return ("ERROR_COLLECT",
-                            f"{summary}\nBATCH_DONE → ERROR_COLLECT:"
-                            f" errors={len(error_ids)}")
+                    return (
+                        "ERROR_COLLECT",
+                        f"{summary}\nBATCH_DONE → ERROR_COLLECT: errors={len(error_ids)}",
+                    )
         return "REPORT", f"{summary}\nBATCH_DONE → REPORT"
 
     # --- ERROR_COLLECT → BATCH_START ---
@@ -573,9 +593,10 @@ def advance(state, dry_run=False):
         retry_ids = _read_ids("tmp/pipeline-retry-ids.txt")
         n = len(retry_ids)
         batch = state.get("total_batches", 0)
-        return ("BATCH_START",
-                f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\n"
-                f"ERROR_COLLECT → BATCH_START")
+        return (
+            "BATCH_START",
+            f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\nERROR_COLLECT → BATCH_START",
+        )
 
     # --- REPORT → DONE (with optional announce) ---
     if phase == "REPORT":
@@ -610,8 +631,7 @@ def cmd_init(args):
         "headless": opts.headless,
         "announce_complete": opts.announce_complete,
         "batch_size": opts.batch_size,
-        "start_time": datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"),
+        "start_time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "reassess_cycle": 0,
         "correction_cycle": 0,
         "retry_cycle": 0,
@@ -627,8 +647,7 @@ def cmd_get_phase(args):
 
 def cmd_set_phase(args):
     if not args or args[0] not in PHASES:
-        print(f"Usage: set-phase <PHASE>\nValid phases: {', '.join(PHASES)}",
-              file=sys.stderr)
+        print(f"Usage: set-phase <PHASE>\nValid phases: {', '.join(PHASES)}", file=sys.stderr)
         sys.exit(1)
     state = _load_state()
     state["phase"] = args[0]
@@ -650,8 +669,7 @@ def cmd_get_phase_config(args):
         max_concurrent = int(state.get("batch_size", 50))
         n_parallel = len(config.get("parallel", []))
         config["wave_size"] = max(1, max_concurrent // (1 + n_parallel))
-    print(yaml.dump(config, default_flow_style=False, sort_keys=False),
-          end="")
+    print(yaml.dump(config, default_flow_style=False, sort_keys=False), end="")
 
 
 def cmd_run_phase(args):
@@ -666,8 +684,7 @@ def cmd_run_phase(args):
     config = PHASE_CONFIG.get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
     if phase_type != "script":
-        print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'",
-              file=sys.stderr)
+        print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'", file=sys.stderr)
         sys.exit(1)
     cmd = config["command"].format_map(state)
     if config.get("ids_file"):
@@ -715,14 +732,22 @@ def cmd_next_action(args):
     phase = state["phase"]
 
     if phase == "DONE":
-        print(yaml.dump({"action": "done", "message": "Pipeline complete"},
-                        default_flow_style=False, sort_keys=False), end="")
+        print(
+            yaml.dump(
+                {"action": "done", "message": "Pipeline complete"},
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+            end="",
+        )
         return
 
     if phase not in PHASES:
-        print(f"next-action: phase '{phase}' is not dispatchable."
-              " Run init and set-phase BATCH_START first.",
-              file=sys.stderr)
+        print(
+            f"next-action: phase '{phase}' is not dispatchable."
+            " Run init and set-phase BATCH_START first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     for _ in range(MAX_NEXT_ACTION_ITERATIONS):
@@ -732,9 +757,14 @@ def cmd_next_action(args):
 
         # --- DONE ---
         if phase == "DONE":
-            print(yaml.dump(
-                {"action": "done", "message": "Pipeline complete"},
-                default_flow_style=False, sort_keys=False), end="")
+            print(
+                yaml.dump(
+                    {"action": "done", "message": "Pipeline complete"},
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                end="",
+            )
             return
 
         # --- Noop: advance and loop ---
@@ -762,10 +792,14 @@ def cmd_next_action(args):
                     # Stale marker from a different phase — remove it
                     os.remove(DISPATCH_MARKER)
             # No marker (or stale removed) — tell LLM to run the script
-            print(yaml.dump(
-                {"action": "run_script", "phase": phase,
-                 "message": f"{phase}: run-phase"},
-                default_flow_style=False, sort_keys=False), end="")
+            print(
+                yaml.dump(
+                    {"action": "run_script", "phase": phase, "message": f"{phase}: run-phase"},
+                    default_flow_style=False,
+                    sort_keys=False,
+                ),
+                end="",
+            )
             return
 
         # --- Agent: compute next wave ---
@@ -827,8 +861,7 @@ def cmd_next_action(args):
                 # Build vars string
                 var_lines = []
                 for k, v in config.get("vars", {}).items():
-                    var_lines.append(
-                        f"{k}={v.replace('{ID}', rfe_id)}")
+                    var_lines.append(f"{k}={v.replace('{ID}', rfe_id)}")
                 entry["vars"] = "\n".join(var_lines) + "\n"
                 agents.append(entry)
 
@@ -840,27 +873,28 @@ def cmd_next_action(args):
                     pentry["prompt_file"] = par["prompt"]
                     pvar_lines = []
                     for k, v in par.get("vars", {}).items():
-                        pvar_lines.append(
-                            f"{k}={v.replace('{ID}', rfe_id)}")
+                        pvar_lines.append(f"{k}={v.replace('{ID}', rfe_id)}")
                     pentry["vars"] = "\n".join(pvar_lines) + "\n"
                     agents.append(pentry)
 
-            msg = (f"{phase}: wave {wave_num}/{total_waves}"
-                   f" ({len(wave_ids)} IDs)")
+            msg = f"{phase}: wave {wave_num}/{total_waves} ({len(wave_ids)} IDs)"
             output = {
                 "action": "launch_wave",
                 "phase": phase,
                 "message": msg,
                 "agents": agents,
             }
-            print(yaml.dump(output, Dumper=_BlockDumper,
-                            default_flow_style=False, sort_keys=False),
-                  end="")
+            print(
+                yaml.dump(output, Dumper=_BlockDumper, default_flow_style=False, sort_keys=False),
+                end="",
+            )
             return
 
     # Safety: should never reach here
-    print(f"next-action: exceeded {MAX_NEXT_ACTION_ITERATIONS} iterations"
-          f" at phase {state['phase']}", file=sys.stderr)
+    print(
+        f"next-action: exceeded {MAX_NEXT_ACTION_ITERATIONS} iterations at phase {state['phase']}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -872,16 +906,18 @@ def cmd_wait_for_wave(args):
     and delegates. Exits 0 (done) or 3 (pending).
     """
     if not os.path.exists(WAVE_IDS_FILE):
-        print("wait-for-wave: no wave file found"
-              f" ({WAVE_IDS_FILE}). Run next-action first.",
-              file=sys.stderr)
+        print(
+            f"wait-for-wave: no wave file found ({WAVE_IDS_FILE}). Run next-action first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     wave_ids = _read_ids(WAVE_IDS_FILE)
     if not wave_ids:
-        print("wait-for-wave: wave file is empty."
-              " All agents may already be complete.",
-              file=sys.stderr)
+        print(
+            "wait-for-wave: wave file is empty. All agents may already be complete.",
+            file=sys.stderr,
+        )
         # Empty wave = nothing to wait for
         return
 
@@ -891,18 +927,18 @@ def cmd_wait_for_wave(args):
 
     poll_phase = config.get("poll_phase")
     if not poll_phase:
-        print(f"wait-for-wave: phase {phase} has no poll_phase",
-              file=sys.stderr)
+        print(f"wait-for-wave: phase {phase} has no poll_phase", file=sys.stderr)
         sys.exit(1)
 
     # Build check_review_progress.py command
     cmd_parts = [
         sys.executable,
-        os.path.join(os.path.dirname(__file__),
-                     "check_review_progress.py"),
+        os.path.join(os.path.dirname(__file__), "check_review_progress.py"),
         "--wait",
-        "--max-wait", "90",
-        "--phase", poll_phase,
+        "--max-wait",
+        "90",
+        "--phase",
+        poll_phase,
     ]
     for p in config.get("parallel", []):
         if p.get("poll_phase"):
@@ -918,8 +954,10 @@ def cmd_wait_for_wave(args):
         print("Re-run: python3 scripts/pipeline_state.py wait-for-wave")
         sys.exit(3)
     # Unexpected exit code
-    print(f"wait-for-wave: check_review_progress.py exited with"
-          f" code {result.returncode}", file=sys.stderr)
+    print(
+        f"wait-for-wave: check_review_progress.py exited with code {result.returncode}",
+        file=sys.stderr,
+    )
     sys.exit(result.returncode)
 
 
@@ -933,6 +971,7 @@ def _check_agent_phase_complete(config):
     if not ids:
         return True
     from check_review_progress import check_id
+
     phases_to_check = [poll_phase]
     for p in config.get("parallel", []):
         if p.get("poll_phase"):
@@ -953,30 +992,36 @@ def cmd_advance(args):
     # Guard: script phases must be dispatched via run-phase first
     if phase_type == "script" and not dry_run:
         if not os.path.exists(DISPATCH_MARKER):
-            print(f"advance: script phase {phase} was not dispatched."
-                  " Run: python3 scripts/pipeline_state.py next-action",
-                  file=sys.stderr)
+            print(
+                f"advance: script phase {phase} was not dispatched."
+                " Run: python3 scripts/pipeline_state.py next-action",
+                file=sys.stderr,
+            )
             sys.exit(1)
         with open(DISPATCH_MARKER) as f:
             marker_phase = f.read().strip()
         os.remove(DISPATCH_MARKER)
         if marker_phase != phase:
-            print(f"advance: dispatch marker is for {marker_phase},"
-                  f" not current phase {phase}", file=sys.stderr)
+            print(
+                f"advance: dispatch marker is for {marker_phase}, not current phase {phase}",
+                file=sys.stderr,
+            )
             sys.exit(1)
     # Guard: agent phases must have all agents complete before advancing
     if phase_type == "agent" and not dry_run:
         if not _check_agent_phase_complete(config):
-            poll_phase = config.get("poll_phase", "")
-            ids_file = config.get("ids_file", "")
+            config.get("poll_phase", "")
+            config.get("ids_file", "")
             also = ""
             for p in config.get("parallel", []):
                 if p.get("poll_phase"):
                     also += f" --also-phase {p['poll_phase']}"
-            print(f"advance: agent phase {phase} has pending agents."
-                  f" Run: python3 scripts/pipeline_state.py"
-                  f" wait-for-wave",
-                  file=sys.stderr)
+            print(
+                f"advance: agent phase {phase} has pending agents."
+                f" Run: python3 scripts/pipeline_state.py"
+                f" wait-for-wave",
+                file=sys.stderr,
+            )
             sys.exit(1)
     next_phase, summary = advance(state, dry_run=dry_run)
     if not dry_run:
@@ -1017,8 +1062,7 @@ def cmd_get(args):
 
 def cmd_status(args):
     state = _load_state()
-    print(yaml.dump(state, default_flow_style=False, sort_keys=False),
-          end="")
+    print(yaml.dump(state, default_flow_style=False, sort_keys=False), end="")
 
 
 def cmd_diagnose(args):
@@ -1069,6 +1113,7 @@ def cmd_diagnose(args):
             if os.path.exists(review):
                 try:
                     from artifact_utils import read_frontmatter
+
                     data, _ = read_frontmatter(review)
                     if data.get("error"):
                         error_ids.append(rfe_id)
@@ -1091,8 +1136,11 @@ Resume the dispatch loop:
   2. If action == done: exit loop, run teardown
   3. If action == run_script: python3 scripts/pipeline_state.py run-phase, then go to 1
   4. If action == launch_wave:
-     a. For each agent in agents: launch background Agent(prompt=vars + "\\n\\nRead " + prompt_file + " and follow all instructions exactly.", subagent_type if present)
-     b. python3 scripts/pipeline_state.py wait-for-wave (re-run on exit 3), then go to 1"""
+     a. For each agent in agents: launch background Agent(prompt=vars \
++ "\\n\\nRead " + prompt_file + " and follow all instructions exactly.", \
+subagent_type if present)
+     b. python3 scripts/pipeline_state.py wait-for-wave \
+(re-run on exit 3), then go to 1"""
 
 
 def cmd_dispatch_context(args):
@@ -1104,9 +1152,11 @@ def cmd_dispatch_context(args):
     # INIT is a setup marker, not a dispatchable phase
     if phase not in PHASES:
         print(f"[PIPELINE STATE RECOVERY] Setup in progress (phase: {phase})")
-        print("Setup is not yet complete. Re-read SKILL.md"
-              " (.claude/skills/rfe.auto-fix/SKILL.md) and resume"
-              " the setup steps from where you left off.")
+        print(
+            "Setup is not yet complete. Re-read SKILL.md"
+            " (.claude/skills/rfe.auto-fix/SKILL.md) and resume"
+            " the setup steps from where you left off."
+        )
         return
     # DONE is terminal — nothing to dispatch
     if phase == "DONE":
@@ -1114,8 +1164,7 @@ def cmd_dispatch_context(args):
         return
     config = PHASE_CONFIG.get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
-    print(f"[PIPELINE STATE RECOVERY] Current phase: {phase}"
-          f" (type: {phase_type})")
+    print(f"[PIPELINE STATE RECOVERY] Current phase: {phase} (type: {phase_type})")
     print(f"Batch: {state.get('batch', 0)}/{state.get('total_batches', 0)}")
     print()
     print(DISPATCH_LOOP)

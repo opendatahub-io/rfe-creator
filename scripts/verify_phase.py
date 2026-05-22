@@ -61,18 +61,30 @@ def verify(phase, ids_file):
             review_path = f"artifacts/rfe-reviews/{rfe_id}-review.md"
             error_msg = f"{phase}_failed"
             try:
-                subprocess.run([
-                    "python3", "scripts/frontmatter.py", "set", review_path,
-                    f"rfe_id={rfe_id}",
-                    f"error={error_msg}",
-                    "score=0", "pass=false", "recommendation=revise",
-                    "feasibility=feasible", "auto_revised=false",
-                    "needs_attention=true",
-                    f"needs_attention_reason=Agent failed: {error_msg}",
-                    "scores.what=0", "scores.why=0",
-                    "scores.open_to_how=0", "scores.not_a_task=0",
-                    "scores.right_sized=0",
-                ], check=True, capture_output=True)
+                subprocess.run(
+                    [
+                        "python3",
+                        "scripts/frontmatter.py",
+                        "set",
+                        review_path,
+                        f"rfe_id={rfe_id}",
+                        f"error={error_msg}",
+                        "score=0",
+                        "pass=false",
+                        "recommendation=revise",
+                        "feasibility=feasible",
+                        "auto_revised=false",
+                        "needs_attention=true",
+                        f"needs_attention_reason=Agent failed: {error_msg}",
+                        "scores.what=0",
+                        "scores.why=0",
+                        "scores.open_to_how=0",
+                        "scores.not_a_task=0",
+                        "scores.right_sized=0",
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
             except Exception:
                 pass
 
@@ -88,13 +100,11 @@ def verify(phase, ids_file):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Post-barrier verification for agent phases")
-    parser.add_argument("--phase", required=True,
-                        choices=list(PHASE_OUTPUT.keys()),
-                        help="Phase to verify")
-    parser.add_argument("--ids-file", required=True,
-                        help="File containing IDs to check")
+    parser = argparse.ArgumentParser(description="Post-barrier verification for agent phases")
+    parser.add_argument(
+        "--phase", required=True, choices=list(PHASE_OUTPUT.keys()), help="Phase to verify"
+    )
+    parser.add_argument("--ids-file", required=True, help="File containing IDs to check")
     args = parser.parse_args()
     verify(args.phase, args.ids_file)
 

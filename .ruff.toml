@@ -1,0 +1,9 @@
+line-length = 100
+
+[lint]
+# https://docs.astral.sh/ruff/rules/
+select = ["F", "E", "W", "I", "N"]
+
+[lint.per-file-ignores]
+# Inline HTML templates make line-length enforcement impractical
+"scripts/generate_review_pdf.py" = ["E501"]

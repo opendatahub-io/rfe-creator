@@ -31,12 +31,12 @@ from datetime import datetime, timezone
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from jira_utils import require_env, api_call_with_retry, make_request
+from jira_utils import api_call_with_retry, make_request, require_env
 from snapshot_fetch import (
-    fetch_all_issues,
-    compute_content_hash,
-    _fetch_paginated,
     SNAPSHOT_DIR,
+    _fetch_paginated,
+    compute_content_hash,
+    fetch_all_issues,
 )
 
 
@@ -45,8 +45,7 @@ def _load_run_report(results_dir, run_name):
 
     Returns (set_of_ids, report_dict) or (None, None) if no report found.
     """
-    path = os.path.join(results_dir, run_name,
-                        "auto-fix-runs", f"{run_name}.yaml")
+    path = os.path.join(results_dir, run_name, "auto-fix-runs", f"{run_name}.yaml")
     if not os.path.exists(path):
         return None, None
     with open(path, encoding="utf-8") as f:
@@ -97,22 +96,25 @@ def _fetch_changelog(server, user, token, key):
     start_at = 0
 
     while True:
-        path = (f"/issue/{urllib.parse.quote(key, safe='')}/changelog"
-                f"?startAt={start_at}&maxResults=100")
+        path = (
+            f"/issue/{urllib.parse.quote(key, safe='')}/changelog?startAt={start_at}&maxResults=100"
+        )
         data = api_call_with_retry(server, path, user, token)
 
         for history in data.get("values", []):
             created_str = history.get("created", "")
             try:
                 created = datetime.fromisoformat(
-                    re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2',
-                           created_str))
+                    re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", created_str)
+                )
             except (ValueError, TypeError):
                 continue
-            entries.append({
-                "created": created,
-                "items": history.get("items", []),
-            })
+            entries.append(
+                {
+                    "created": created,
+                    "items": history.get("items", []),
+                }
+            )
 
         total = data.get("total", 0)
         values = data.get("values", [])
@@ -135,11 +137,17 @@ def _description_at_time(changelog, target_dt):
     for entry in changelog:
         for item in entry["items"]:
             if item.get("field") == "description":
-                desc_changes.append({
-                    "created": entry["created"],
-                    "from": item.get("from") if item.get("from") is not None else item.get("fromString"),
-                    "to": item.get("to") if item.get("to") is not None else item.get("toString"),
-                })
+                desc_changes.append(
+                    {
+                        "created": entry["created"],
+                        "from": item.get("from")
+                        if item.get("from") is not None
+                        else item.get("fromString"),
+                        "to": item.get("to")
+                        if item.get("to") is not None
+                        else item.get("toString"),
+                    }
+                )
 
     if not desc_changes:
         return None
@@ -162,9 +170,16 @@ def _description_at_time(changelog, target_dt):
 
 
 _DONE_STATUS_PATTERNS = (
-    "done", "closed", "resolved", "completed",
-    "won't do", "won't fix", "rejected",
-    "cancelled", "canceled", "archived",
+    "done",
+    "closed",
+    "resolved",
+    "completed",
+    "won't do",
+    "won't fix",
+    "rejected",
+    "cancelled",
+    "canceled",
+    "archived",
 )
 
 
@@ -187,11 +202,13 @@ def _was_done_at_time(changelog, target_dt):
     for entry in changelog:
         for item in entry["items"]:
             if item.get("field") == "status":
-                status_changes.append({
-                    "created": entry["created"],
-                    "fromString": item.get("fromString", ""),
-                    "toString": item.get("toString", ""),
-                })
+                status_changes.append(
+                    {
+                        "created": entry["created"],
+                        "fromString": item.get("fromString", ""),
+                        "toString": item.get("toString", ""),
+                    }
+                )
 
     if not status_changes:
         return False
@@ -227,7 +244,10 @@ def _fetch_wiki_description(server, user, token, key):
     Used for apples-to-apples comparison with changelog toString
     values (which are also wiki markup on Jira Server/DC).
     """
-    url = f"{server.rstrip('/')}/rest/api/2/issue/{urllib.parse.quote(key, safe='')}?fields=description"
+    url = (
+        f"{server.rstrip('/')}/rest/api/2/issue/"
+        f"{urllib.parse.quote(key, safe='')}?fields=description"
+    )
     data = make_request(url, user, token)
     return (data.get("fields") or {}).get("description") or ""
 
@@ -263,18 +283,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("jql", help="JQL query (same as auto-fix uses)")
-    parser.add_argument("--results-dir", required=True,
-                        help="Path to results repo with run directories")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print what would be done without writing")
-    parser.add_argument("--artifacts-dir", default=None,
-                        help="Output directory (default: repo artifacts/)")
+    parser.add_argument(
+        "--results-dir", required=True, help="Path to results repo with run directories"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print what would be done without writing"
+    )
+    parser.add_argument(
+        "--artifacts-dir", default=None, help="Output directory (default: repo artifacts/)"
+    )
     args = parser.parse_args()
 
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required", file=sys.stderr)
         sys.exit(1)
 
     # Step 1: Find the last run timestamp
@@ -285,8 +307,10 @@ def main():
     print(f"Last run: {run_name} ({run_dt.isoformat()})", file=sys.stderr)
 
     # Step 2: Fetch all current issues with hard filters
-    jql = (f"({args.jql}) AND statusCategory != Done "
-           f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)")
+    jql = (
+        f"({args.jql}) AND statusCategory != Done "
+        f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)"
+    )
     print(f"JQL: {jql}", file=sys.stderr)
 
     current = fetch_all_issues(server, user, token, jql)
@@ -295,25 +319,19 @@ def main():
     # Filter to issues that were actually processed in the run
     processed_ids, report = _load_run_report(args.results_dir, run_name)
     if processed_ids is None:
-        print("Warning: no run report — including all issues",
-              file=sys.stderr)
-        report = None
+        print("Warning: no run report — including all issues", file=sys.stderr)
     else:
         before = len(current)
-        current = {k: v for k, v in current.items()
-                   if k in processed_ids}
-        print(f"Filtered to {len(current)}/{before} issues "
-              f"from run report", file=sys.stderr)
+        current = {k: v for k, v in current.items() if k in processed_ids}
+        print(f"Filtered to {len(current)}/{before} issues from run report", file=sys.stderr)
 
     # Step 3: Find which issues were updated since the run
     run_jql_ts = run_dt.strftime("%Y-%m-%d %H:%M")
-    updated_jql = (f"{jql} AND updated >= \"{run_jql_ts}\"")
+    updated_jql = f'{jql} AND updated >= "{run_jql_ts}"'
     updated_keys = set()
-    for issue in _fetch_paginated(
-            server, user, token, updated_jql, "key"):
+    for issue in _fetch_paginated(server, user, token, updated_jql, "key"):
         updated_keys.add(issue["key"])
-    print(f"Issues updated since run: {len(updated_keys)}",
-          file=sys.stderr)
+    print(f"Issues updated since run: {len(updated_keys)}", file=sys.stderr)
 
     # Step 4: Build snapshot — use historical descriptions for
     # issues updated since the run, current hash for the rest
@@ -350,8 +368,7 @@ def main():
             # Wiki markup (Jira Server/DC) — compare wiki-to-wiki
             # via v2 API to avoid false positives from format
             # differences (wiki h2. vs ADF ##)
-            current_wiki = _fetch_wiki_description(
-                server, user, token, key)
+            current_wiki = _fetch_wiki_description(server, user, token, key)
             hist_hash = compute_content_hash(hist_desc)
             current_wiki_hash = compute_content_hash(current_wiki)
             if hist_hash == current_wiki_hash:
@@ -361,36 +378,32 @@ def main():
                 snapshot_issues[key] = hist_hash
                 hist_changed += 1
 
-    print(f"Changelog lookups: {lookups} "
-          f"({hist_changed} with changed description)",
-          file=sys.stderr)
+    print(
+        f"Changelog lookups: {lookups} ({hist_changed} with changed description)", file=sys.stderr
+    )
     if done_excluded:
-        print(f"Excluded {done_excluded} issues (Done at run time)",
-              file=sys.stderr)
+        print(f"Excluded {done_excluded} issues (Done at run time)", file=sys.stderr)
 
     # Step 5: Write snapshot
     if args.dry_run:
-        print(f"\nDry run — would write snapshot with "
-              f"{len(snapshot_issues)} issue hashes")
+        print(f"\nDry run — would write snapshot with {len(snapshot_issues)} issue hashes")
         return
 
-    snapshot_dir = (os.path.join(args.artifacts_dir, "auto-fix-runs")
-                    if args.artifacts_dir else SNAPSHOT_DIR)
+    snapshot_dir = (
+        os.path.join(args.artifacts_dir, "auto-fix-runs") if args.artifacts_dir else SNAPSHOT_DIR
+    )
     os.makedirs(snapshot_dir, exist_ok=True)
 
     run_ts_str = run_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     snapshot = {
         "query_timestamp": run_ts_str,
-        "timestamp": datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "bootstrapped_from": run_name,
         "issues": snapshot_issues,
     }
-    snapshot_path = os.path.join(snapshot_dir,
-                                 f"issue-snapshot-{run_name}.yaml")
+    snapshot_path = os.path.join(snapshot_dir, f"issue-snapshot-{run_name}.yaml")
     with open(snapshot_path, "w", encoding="utf-8") as f:
-        yaml.dump(snapshot, f, default_flow_style=False,
-                  sort_keys=False)
+        yaml.dump(snapshot, f, default_flow_style=False, sort_keys=False)
     print(f"Wrote snapshot: {snapshot_path}")
     print(f"Bootstrap complete. {len(snapshot_issues)} issues.")
 

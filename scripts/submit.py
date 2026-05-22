@@ -19,7 +19,6 @@ Environment variables:
 
 import argparse
 import os
-import re
 import subprocess
 import sys
 
@@ -27,42 +26,37 @@ import sys
 # to a file or pipe (Python defaults to full buffering in that case).
 sys.stdout.reconfigure(line_buffering=True)
 
-import yaml
-
-from generate_run_report import _parse_run_id
-from jira_utils import (
-    require_env,
-    create_issue,
-    update_issue,
-    add_labels,
-    remove_labels,
-    swap_labels,
+import yaml  # noqa: E402
+from generate_run_report import _parse_run_id  # noqa: E402
+from jira_utils import (  # noqa: E402
     add_comment,
-    get_issue,
-    transition_issue,
+    add_labels,
     adf_to_markdown,
-    strip_metadata,
+    create_issue,
+    get_issue,
     markdown_to_adf,
     normalize_for_compare,
+    remove_labels,
+    require_env,
+    strip_metadata,
+    swap_labels,
+    transition_issue,
+    update_issue,
 )
 
 _normalize_for_compare = normalize_for_compare
 
-from snapshot_fetch import compute_content_hash, update_snapshot_hashes
-
-from artifact_utils import (
-    read_frontmatter,
-    read_frontmatter_validated,
-    update_frontmatter,
-    scan_task_files,
-    find_artifact_file,
+from artifact_utils import (  # noqa: E402
+    ValidationError,
     find_removed_context_yaml,
     find_review_file,
-    rename_to_jira_key,
+    read_frontmatter_validated,
     rebuild_index,
-    ValidationError,
+    rename_to_jira_key,
+    scan_task_files,
+    update_frontmatter,
 )
-
+from snapshot_fetch import compute_content_hash, update_snapshot_hashes  # noqa: E402
 
 FEASIBILITY_LABELS = {
     "feasible": "rfe-creator-feasibility-pass",
@@ -80,13 +74,11 @@ def feasibility_label_changes(verdict, *, is_reject, original_labels):
     """
     original = original_labels or []
     if is_reject:
-        return None, [lbl for lbl in FEASIBILITY_LABELS.values()
-                      if lbl in original]
+        return None, [lbl for lbl in FEASIBILITY_LABELS.values() if lbl in original]
     if verdict not in FEASIBILITY_LABELS:
         return None, []
     new_label = FEASIBILITY_LABELS[verdict]
-    stale = [lbl for lbl in FEASIBILITY_LABELS.values()
-             if lbl != new_label and lbl in original]
+    stale = [lbl for lbl in FEASIBILITY_LABELS.values() if lbl != new_label and lbl in original]
     return new_label, stale
 
 
@@ -115,15 +107,16 @@ def _render_jira_comment(yaml_path):
     if not sections:
         return ""
 
-    preamble = ("*[RFE Creator]* The following technical implementation "
-                "details were removed from the RFE description during review. "
-                "This content is better suited for a RHAISTRAT and is "
-                "preserved here for reference:")
+    preamble = (
+        "*[RFE Creator]* The following technical implementation "
+        "details were removed from the RFE description during review. "
+        "This content is better suited for a RHAISTRAT and is "
+        "preserved here for reference:"
+    )
     return preamble + "\n\n" + "\n\n".join(sections)
 
 
-def _post_needs_attention_comment(server, user, token, entry, results,
-                                  dry_run):
+def _post_needs_attention_comment(server, user, token, entry, results, dry_run):
     """Post a Jira comment explaining why human attention is needed.
 
     Only posts if:
@@ -147,10 +140,7 @@ def _post_needs_attention_comment(server, user, token, entry, results,
     if not target_key:
         return
 
-    comment_md = (
-        "*[RFE Creator]* This RFE has been flagged for human review:\n\n"
-        f"{reason}"
-    )
+    comment_md = f"*[RFE Creator]* This RFE has been flagged for human review:\n\n{reason}"
     comment_adf = markdown_to_adf(comment_md)
     add_comment(server, user, token, target_key, comment_adf)
     print(f"  {entry['rfe_id']}: Posted needs-attention comment")
@@ -158,34 +148,39 @@ def _post_needs_attention_comment(server, user, token, entry, results,
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print planned actions without making API calls")
-    parser.add_argument("--artifacts-dir", default="artifacts",
-                        help="Artifacts directory (default: artifacts)")
-    parser.add_argument("--auto-approve", action="store_true",
-                        help="Transition qualifying RFEs to Approved status "
-                             "in Jira (pass=true + feasibility=feasible)")
-    parser.add_argument("--generate-report", action="store_true",
-                        help="Generate YAML and HTML reports after submission")
-    parser.add_argument("--report-timestamp",
-                        help="Run timestamp for report naming "
-                             "(required with --generate-report)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print planned actions without making API calls"
+    )
+    parser.add_argument(
+        "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Transition qualifying RFEs to Approved status "
+        "in Jira (pass=true + feasibility=feasible)",
+    )
+    parser.add_argument(
+        "--generate-report",
+        action="store_true",
+        help="Generate YAML and HTML reports after submission",
+    )
+    parser.add_argument(
+        "--report-timestamp",
+        help="Run timestamp for report naming (required with --generate-report)",
+    )
     args = parser.parse_args()
 
     if args.generate_report and not args.report_timestamp:
-        parser.error("--report-timestamp is required when "
-                     "--generate-report is set")
+        parser.error("--report-timestamp is required when --generate-report is set")
 
     server, user, token = require_env()
 
     if not args.dry_run and not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
-              "required.", file=sys.stderr)
-        print("Set these or use --dry-run for local-only validation.",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)
+        print("Set these or use --dry-run for local-only validation.", file=sys.stderr)
         sys.exit(1)
 
     # Scan task files
@@ -196,12 +191,14 @@ def main():
 
     # --- Phase 1: Submit splits via split_submit.py ---
     # Find RHAIRFE parents that were split (Archived + have children)
-    child_parent_keys = {data.get("parent_key") for _, data in tasks
-                         if data.get("parent_key")}
-    split_parent_data = {data["rfe_id"]: data for _, data in tasks
-                         if data.get("status") == "Archived"
-                         and data["rfe_id"].startswith("RHAIRFE-")
-                         and data["rfe_id"] in child_parent_keys}
+    child_parent_keys = {data.get("parent_key") for _, data in tasks if data.get("parent_key")}
+    split_parent_data = {
+        data["rfe_id"]: data
+        for _, data in tasks
+        if data.get("status") == "Archived"
+        and data["rfe_id"].startswith("RHAIRFE-")
+        and data["rfe_id"] in child_parent_keys
+    }
     split_parents = list(split_parent_data.keys())
 
     # Build parent ancestry map to identify descendants of Jira split
@@ -230,8 +227,7 @@ def main():
         split_script = os.path.join(script_dir, "split_submit.py")
 
         for parent_key in sorted(split_parents):
-            cmd = [sys.executable, split_script, parent_key,
-                   "--artifacts-dir", args.artifacts_dir]
+            cmd = [sys.executable, split_script, parent_key, "--artifacts-dir", args.artifacts_dir]
             if args.dry_run:
                 cmd.append("--dry-run")
             print(f"--- {parent_key} ---")
@@ -239,22 +235,26 @@ def main():
             if result.returncode == 2:
                 # Too many children — record refusal, flag for human review
                 print(f"  {parent_key}: Split refused — too many children")
-                review_path = os.path.join(args.artifacts_dir, "rfe-reviews",
-                                           f"{parent_key}-review.md")
+                review_path = os.path.join(
+                    args.artifacts_dir, "rfe-reviews", f"{parent_key}-review.md"
+                )
                 attn_reason = (
                     "Automatic splitting produced too many child RFEs. "
                     "The decomposition needs human review to determine "
                     "the right granularity."
                 )
-                update_frontmatter(review_path, {
-                    "error": "split_refused: too many leaf children",
-                    "needs_attention": True,
-                    "needs_attention_reason": attn_reason,
-                }, "rfe-review")
+                update_frontmatter(
+                    review_path,
+                    {
+                        "error": "split_refused: too many leaf children",
+                        "needs_attention": True,
+                        "needs_attention_reason": attn_reason,
+                    },
+                    "rfe-review",
+                )
 
                 # Reuse the existing helper for the Jira comment
-                parent_labels = (split_parent_data[parent_key]
-                                 .get("original_labels") or [])
+                parent_labels = split_parent_data[parent_key].get("original_labels") or []
                 refusal_entry = {
                     "rfe_id": parent_key,
                     "attn_reason": attn_reason,
@@ -262,32 +262,35 @@ def main():
                 }
                 refusal_results = {parent_key: parent_key}
                 _post_needs_attention_comment(
-                    server, user, token, refusal_entry,
-                    refusal_results, args.dry_run)
+                    server, user, token, refusal_entry, refusal_results, args.dry_run
+                )
 
                 # Add label (helper only posts comment)
                 if not args.dry_run:
-                    add_labels(server, user, token, parent_key,
-                               ["rfe-creator-needs-attention"])
+                    add_labels(server, user, token, parent_key, ["rfe-creator-needs-attention"])
                 continue
             elif result.returncode == 3:
                 # Jira conflict — parent modified since fetch
                 print(f"  {parent_key}: Split refused — Jira conflict")
-                review_path = os.path.join(args.artifacts_dir, "rfe-reviews",
-                                           f"{parent_key}-review.md")
+                review_path = os.path.join(
+                    args.artifacts_dir, "rfe-reviews", f"{parent_key}-review.md"
+                )
                 attn_reason = (
                     "Parent RFE description was modified in Jira since "
                     "fetch. Split submission skipped to avoid "
                     "overwriting human edits."
                 )
-                update_frontmatter(review_path, {
-                    "error": "split_refused: jira conflict",
-                    "needs_attention": True,
-                    "needs_attention_reason": attn_reason,
-                }, "rfe-review")
+                update_frontmatter(
+                    review_path,
+                    {
+                        "error": "split_refused: jira conflict",
+                        "needs_attention": True,
+                        "needs_attention_reason": attn_reason,
+                    },
+                    "rfe-review",
+                )
 
-                parent_labels = (split_parent_data[parent_key]
-                                 .get("original_labels") or [])
+                parent_labels = split_parent_data[parent_key].get("original_labels") or []
                 refusal_entry = {
                     "rfe_id": parent_key,
                     "attn_reason": attn_reason,
@@ -295,16 +298,18 @@ def main():
                 }
                 refusal_results = {parent_key: parent_key}
                 _post_needs_attention_comment(
-                    server, user, token, refusal_entry,
-                    refusal_results, args.dry_run)
+                    server, user, token, refusal_entry, refusal_results, args.dry_run
+                )
 
                 if not args.dry_run:
-                    add_labels(server, user, token, parent_key,
-                               ["rfe-creator-needs-attention"])
+                    add_labels(server, user, token, parent_key, ["rfe-creator-needs-attention"])
                 continue
             elif result.returncode != 0:
-                print(f"Error: split_submit.py failed for {parent_key} "
-                      f"(exit code {result.returncode})", file=sys.stderr)
+                print(
+                    f"Error: split_submit.py failed for {parent_key} "
+                    f"(exit code {result.returncode})",
+                    file=sys.stderr,
+                )
                 sys.exit(result.returncode)
             print()
 
@@ -317,31 +322,30 @@ def main():
             split_child_hashes = {}
             post_split_tasks = scan_task_files(args.artifacts_dir)
             for path, data in post_split_tasks:
-                if data.get("parent_key") and \
-                        data.get("status") == "Submitted":
+                if data.get("parent_key") and data.get("status") == "Submitted":
                     rfe_id = data.get("rfe_id", "")
                     if rfe_id.startswith("RHAIRFE-"):
                         with open(path, encoding="utf-8") as f:
                             raw = f.read()
                         cleaned = strip_metadata(raw)
                         desc_adf = markdown_to_adf(cleaned)
-                        split_child_hashes[rfe_id] = compute_content_hash(
-                            desc_adf)
+                        split_child_hashes[rfe_id] = compute_content_hash(desc_adf)
             if split_child_hashes:
-                snap_dir = os.path.join(args.artifacts_dir,
-                                        "auto-fix-runs")
-                updated = update_snapshot_hashes(
-                    split_child_hashes, snap_dir)
+                snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
+                updated = update_snapshot_hashes(split_child_hashes, snap_dir)
                 if updated:
-                    print(f"  Updated snapshot with "
-                          f"{len(split_child_hashes)} split-child "
-                          f"hashes: {updated}")
+                    print(
+                        f"  Updated snapshot with "
+                        f"{len(split_child_hashes)} split-child "
+                        f"hashes: {updated}"
+                    )
                 else:
-                    print("  Warning: no snapshot found for split-child "
-                          f"hashes", file=sys.stderr)
+                    print("  Warning: no snapshot found for split-child hashes", file=sys.stderr)
         except Exception as exc:
-            print(f"  Warning: failed to record split-child hashes "
-                  f"in snapshot: {exc}", file=sys.stderr)
+            print(
+                f"  Warning: failed to record split-child hashes in snapshot: {exc}",
+                file=sys.stderr,
+            )
 
     # --- Phase 2: Submit regular (non-split) RFEs ---
     # Re-scan after splits may have renamed files
@@ -355,12 +359,17 @@ def main():
     # go through Phase 2 as regular creates.
     # Filtering Submitted makes replay safe: already-submitted entries are
     # skipped, preventing duplicate Jira creates.
-    submittable = [(path, data) for path, data in tasks
-                   if data.get("status") not in ("Archived", "Submitted")
-                   and not _has_jira_ancestor(data["rfe_id"])]
-    any_submitted = any(data.get("status") == "Submitted"
-                        for _, data in tasks
-                        if not _has_jira_ancestor(data["rfe_id"]))
+    submittable = [
+        (path, data)
+        for path, data in tasks
+        if data.get("status") not in ("Archived", "Submitted")
+        and not _has_jira_ancestor(data["rfe_id"])
+    ]
+    any_submitted = any(
+        data.get("status") == "Submitted"
+        for _, data in tasks
+        if not _has_jira_ancestor(data["rfe_id"])
+    )
     if not submittable:
         if split_parents or any_submitted:
             # Splits-only run, or replay where Phase 2 already completed
@@ -387,11 +396,9 @@ def main():
         review_data = None
         if review_path:
             try:
-                review_data, _ = read_frontmatter_validated(
-                    review_path, "rfe-review")
+                review_data, _ = read_frontmatter_validated(review_path, "rfe-review")
             except (ValidationError, Exception) as e:
-                print(f"Warning: cannot read review for {rfe_id}: {e}",
-                      file=sys.stderr)
+                print(f"Warning: cannot read review for {rfe_id}: {e}", file=sys.stderr)
 
         # Get recommendation from review
         rec = "submit"
@@ -405,77 +412,86 @@ def main():
             attn_reason = review_data.get("needs_attention_reason")
 
         # Determine if this RFE qualifies for auto-approve
-        auto_approve = (review_data
-                        and review_data.get("pass", False)
-                        and review_data.get("feasibility") == "feasible")
+        auto_approve = (
+            review_data
+            and review_data.get("pass", False)
+            and review_data.get("feasibility") == "feasible"
+        )
 
         if rec in ("reject", "autorevise_reject"):
             # Check if rubric-pass label needs to be removed (RFE was
             # previously passing but no longer does after re-review)
             remove = []
-            if (is_existing
-                    and "rfe-creator-autofix-rubric-pass" in original_labels):
+            if is_existing and "rfe-creator-autofix-rubric-pass" in original_labels:
                 remove.append("rfe-creator-autofix-rubric-pass")
             # Strip any feasibility labels currently on the issue
             _, feas_remove = feasibility_label_changes(
-                None, is_reject=True, original_labels=original_labels)
+                None, is_reject=True, original_labels=original_labels
+            )
             remove.extend(feas_remove)
-            plan.append({
-                "rfe_id": rfe_id, "title": title,
-                "is_existing": is_existing, "priority": priority, "size": size,
-                "action": "Remove labels" if remove else "SKIP",
-                "labels": [], "remove_labels": remove,
-                "skip_reason": None if remove else "rejected",
-                "task_path": task_path,
-                "attn_reason": None, "original_labels": original_labels,
-                "auto_approve": False, "jira_status": None,
-            })
+            plan.append(
+                {
+                    "rfe_id": rfe_id,
+                    "title": title,
+                    "is_existing": is_existing,
+                    "priority": priority,
+                    "size": size,
+                    "action": "Remove labels" if remove else "SKIP",
+                    "labels": [],
+                    "remove_labels": remove,
+                    "skip_reason": None if remove else "rejected",
+                    "task_path": task_path,
+                    "attn_reason": None,
+                    "original_labels": original_labels,
+                    "auto_approve": False,
+                    "jira_status": None,
+                }
+            )
             continue
 
         # For existing RFEs, check for Jira conflicts
         jira_status = None
         if is_existing and not args.dry_run:
-            original_path = os.path.join(
-                args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
+            original_path = os.path.join(args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
             if os.path.exists(original_path):
                 try:
                     with open(original_path, encoding="utf-8") as f:
                         orig_snap = _normalize_for_compare(f.read())
-                    issue = get_issue(server, user, token, rfe_id,
-                                      fields=["description", "status"])
-                    jira_status = (issue.get("fields", {})
-                                   .get("status", {}).get("name"))
+                    issue = get_issue(server, user, token, rfe_id, fields=["description", "status"])
+                    jira_status = issue.get("fields", {}).get("status", {}).get("name")
                     desc_raw = issue.get("fields", {}).get("description")
                     if isinstance(desc_raw, dict):
-                        jira_desc = _normalize_for_compare(
-                            adf_to_markdown(desc_raw))
+                        jira_desc = _normalize_for_compare(adf_to_markdown(desc_raw))
                     elif desc_raw is None:
                         jira_desc = ""
                     else:
                         jira_desc = _normalize_for_compare(str(desc_raw))
                     if orig_snap != jira_desc:
-                        plan.append({
-                            "rfe_id": rfe_id, "title": title,
-                            "is_existing": is_existing, "priority": priority,
-                            "size": size,
-                            "action": "SKIP", "labels": [],
-                            "remove_labels": [],
-                            "skip_reason": "Jira conflict — description "
-                                           "modified since fetch",
-                            "task_path": task_path,
-                            "attn_reason": None,
-                            "original_labels": original_labels,
-                            "auto_approve": False, "jira_status": jira_status,
-                        })
+                        plan.append(
+                            {
+                                "rfe_id": rfe_id,
+                                "title": title,
+                                "is_existing": is_existing,
+                                "priority": priority,
+                                "size": size,
+                                "action": "SKIP",
+                                "labels": [],
+                                "remove_labels": [],
+                                "skip_reason": "Jira conflict — description modified since fetch",
+                                "task_path": task_path,
+                                "attn_reason": None,
+                                "original_labels": original_labels,
+                                "auto_approve": False,
+                                "jira_status": jira_status,
+                            }
+                        )
                         continue
                 except Exception as e:
-                    print(f"Warning: conflict check failed for {rfe_id}: "
-                          f"{e}", file=sys.stderr)
+                    print(f"Warning: conflict check failed for {rfe_id}: {e}", file=sys.stderr)
 
         # For existing RFEs, check if content has changed
         if is_existing:
-            original_path = os.path.join(
-                args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
+            original_path = os.path.join(args.artifacts_dir, "rfe-originals", f"{rfe_id}.md")
             if os.path.exists(original_path):
                 with open(original_path, encoding="utf-8") as f:
                     original_body = strip_metadata(f.read())
@@ -500,20 +516,24 @@ def main():
                         if feas_add:
                             no_change_labels.append(feas_add)
                     has_work = no_change_labels or feas_remove
-                    plan.append({
-                        "rfe_id": rfe_id, "title": title,
-                        "is_existing": is_existing, "priority": priority,
-                        "size": size,
-                        "action": "Label only" if has_work else "SKIP",
-                        "labels": no_change_labels,
-                        "remove_labels": feas_remove,
-                        "skip_reason": None if has_work else "no changes",
-                        "task_path": task_path,
-                        "attn_reason": attn_reason,
-                        "original_labels": original_labels,
-                        "auto_approve": auto_approve,
-                        "jira_status": jira_status,
-                    })
+                    plan.append(
+                        {
+                            "rfe_id": rfe_id,
+                            "title": title,
+                            "is_existing": is_existing,
+                            "priority": priority,
+                            "size": size,
+                            "action": "Label only" if has_work else "SKIP",
+                            "labels": no_change_labels,
+                            "remove_labels": feas_remove,
+                            "skip_reason": None if has_work else "no changes",
+                            "task_path": task_path,
+                            "attn_reason": attn_reason,
+                            "original_labels": original_labels,
+                            "auto_approve": auto_approve,
+                            "jira_status": jira_status,
+                        }
+                    )
                     continue
 
         # Determine labels
@@ -537,14 +557,24 @@ def main():
                 labels.append(feas_add)
 
         action = f"Update {rfe_id}" if is_existing else "Create"
-        plan.append({
-            "rfe_id": rfe_id, "title": title,
-            "is_existing": is_existing, "priority": priority, "size": size,
-            "action": action, "labels": labels, "remove_labels": feas_remove,
-            "skip_reason": None, "task_path": task_path,
-            "attn_reason": attn_reason, "original_labels": original_labels,
-            "auto_approve": auto_approve, "jira_status": jira_status,
-        })
+        plan.append(
+            {
+                "rfe_id": rfe_id,
+                "title": title,
+                "is_existing": is_existing,
+                "priority": priority,
+                "size": size,
+                "action": action,
+                "labels": labels,
+                "remove_labels": feas_remove,
+                "skip_reason": None,
+                "task_path": task_path,
+                "attn_reason": attn_reason,
+                "original_labels": original_labels,
+                "auto_approve": auto_approve,
+                "jira_status": jira_status,
+            }
+        )
 
     # Print summary
     print(f"Submission plan: {len(plan)} RFEs")
@@ -553,8 +583,10 @@ def main():
     for entry in plan:
         t = entry["title"]
         display_title = t[:47] + "..." if len(t) > 50 else t
-        print(f"{entry['rfe_id']:<10} {display_title:<50} "
-              f"{entry['priority']:<10} {entry['action']:<20}")
+        print(
+            f"{entry['rfe_id']:<10} {display_title:<50} "
+            f"{entry['priority']:<10} {entry['action']:<20}"
+        )
         if entry["labels"]:
             print(f"{'':>10} Labels: {', '.join(entry['labels'])}")
         if entry.get("remove_labels"):
@@ -563,7 +595,7 @@ def main():
             print(f"{'':>10} Reason: {entry['skip_reason']}")
     print()
 
-    _APPROVE_COMMENT = (
+    approve_comment = (
         "*[RFE Creator]* This RFE has been automatically transitioned to "
         "Approved status based on passing rubric scoring and technical "
         "feasibility checks. Approval does not constitute a commitment to "
@@ -583,7 +615,7 @@ def main():
             return
         if transition_issue(server, user, token, jira_key, "Approved"):
             print(f"  {rfe_id}: Transitioned to Approved")
-            comment_adf = markdown_to_adf(_APPROVE_COMMENT)
+            comment_adf = markdown_to_adf(approve_comment)
             add_comment(server, user, token, jira_key, comment_adf)
             print(f"  {rfe_id}: Posted auto-approve comment")
 
@@ -604,12 +636,10 @@ def main():
             if entry["action"] == "Remove labels":
                 remove = entry["remove_labels"]
                 if args.dry_run:
-                    print(f"  {rfe_id}: Would remove labels: "
-                          f"{', '.join(remove)}")
+                    print(f"  {rfe_id}: Would remove labels: {', '.join(remove)}")
                 else:
                     remove_labels(server, user, token, rfe_id, remove)
-                    print(f"  {rfe_id}: Removed labels: "
-                          f"{', '.join(remove)}")
+                    print(f"  {rfe_id}: Removed labels: {', '.join(remove)}")
                 mark_processed_ids.append(rfe_id)
                 continue
             if entry["action"] == "Label only":
@@ -617,26 +647,19 @@ def main():
                 remove = entry.get("remove_labels") or []
                 if args.dry_run:
                     if remove:
-                        print(f"  {rfe_id}: Would remove labels: "
-                              f"{', '.join(remove)}")
+                        print(f"  {rfe_id}: Would remove labels: {', '.join(remove)}")
                     if labels:
-                        print(f"  {rfe_id}: Would add labels: "
-                              f"{', '.join(labels)}")
+                        print(f"  {rfe_id}: Would add labels: {', '.join(labels)}")
                 else:
                     if remove or labels:
-                        swap_labels(server, user, token, rfe_id,
-                                    labels, remove)
+                        swap_labels(server, user, token, rfe_id, labels, remove)
                         if remove:
-                            print(f"  {rfe_id}: Removed labels: "
-                                  f"{', '.join(remove)}")
+                            print(f"  {rfe_id}: Removed labels: {', '.join(remove)}")
                         if labels:
                             print(f"  {rfe_id}: Labels: {', '.join(labels)}")
-                    update_frontmatter(entry["task_path"],
-                                       {"status": "Submitted"},
-                                       "rfe-task")
+                    update_frontmatter(entry["task_path"], {"status": "Submitted"}, "rfe-task")
                 results[rfe_id] = rfe_id
-                _post_needs_attention_comment(
-                    server, user, token, entry, results, args.dry_run)
+                _post_needs_attention_comment(server, user, token, entry, results, args.dry_run)
                 _maybe_approve(rfe_id, rfe_id, entry)
                 mark_processed_ids.append(rfe_id)
                 continue
@@ -656,43 +679,41 @@ def main():
                 if args.dry_run:
                     print(f"  {rfe_id}: Would update")
                     if remove:
-                        print(f"           Would remove: "
-                              f"{', '.join(remove)}")
+                        print(f"           Would remove: {', '.join(remove)}")
                 else:
-                    update_issue(server, user, token, rfe_id, title,
-                                 description_adf)
+                    update_issue(server, user, token, rfe_id, title, description_adf)
                     print(f"  {rfe_id}: Updated")
                     if remove or labels:
-                        swap_labels(server, user, token, rfe_id,
-                                    labels, remove)
+                        swap_labels(server, user, token, rfe_id, labels, remove)
                         if remove:
                             print(f"           Removed: {', '.join(remove)}")
                         if labels:
                             print(f"           Labels: {', '.join(labels)}")
-                    submitted_hashes[rfe_id] = compute_content_hash(
-                        description_adf)
-                    update_frontmatter(entry["task_path"],
-                                       {"status": "Submitted"},
-                                       "rfe-task")
+                    submitted_hashes[rfe_id] = compute_content_hash(description_adf)
+                    update_frontmatter(entry["task_path"], {"status": "Submitted"}, "rfe-task")
                 results[rfe_id] = rfe_id
             else:
                 # Create new ticket
                 if args.dry_run:
-                    print(f"  {rfe_id}: Would create RHAIRFE ticket: "
-                          f"{title}")
+                    print(f"  {rfe_id}: Would create RHAIRFE ticket: {title}")
                     results[rfe_id] = "RHAIRFE-DRY"
                 else:
-                    new_key = create_issue(server, user, token, "RHAIRFE",
-                                           "Feature Request", title,
-                                           description_adf,
-                                           entry["priority"],
-                                           labels=labels)
+                    new_key = create_issue(
+                        server,
+                        user,
+                        token,
+                        "RHAIRFE",
+                        "Feature Request",
+                        title,
+                        description_adf,
+                        entry["priority"],
+                        labels=labels,
+                    )
                     print(f"  {rfe_id}: Created {new_key}")
                     if labels:
                         print(f"           Labels: {', '.join(labels)}")
                     results[rfe_id] = new_key
-                    submitted_hashes[new_key] = compute_content_hash(
-                        description_adf)
+                    submitted_hashes[new_key] = compute_content_hash(description_adf)
 
             # Post removed-context Jira comment if applicable
             yaml_path = find_removed_context_yaml(args.artifacts_dir, rfe_id)
@@ -702,16 +723,16 @@ def main():
                 if not comment_md:
                     pass  # No postable blocks
                 elif args.dry_run:
-                    print(f"  {rfe_id}: Would post removed-context comment "
-                          f"({len(comment_md)} chars)")
+                    print(
+                        f"  {rfe_id}: Would post removed-context comment ({len(comment_md)} chars)"
+                    )
                 elif target_key:
                     comment_adf = markdown_to_adf(comment_md)
                     add_comment(server, user, token, target_key, comment_adf)
                     print(f"  {rfe_id}: Posted removed-context comment")
 
             # Post needs-attention comment if newly flagged
-            _post_needs_attention_comment(
-                server, user, token, entry, results, args.dry_run)
+            _post_needs_attention_comment(server, user, token, entry, results, args.dry_run)
 
             # Auto-approve if qualifying
             target_key = results.get(rfe_id)
@@ -736,12 +757,15 @@ def main():
             review_path = find_review_file(args.artifacts_dir, rfe_id)
             if review_path:
                 try:
-                    update_frontmatter(review_path, {
-                        "needs_attention": True,
-                        "needs_attention_reason":
-                            f"Submit failed: {msg}",
-                        "error": f"submit_failed: {msg}",
-                    }, "rfe-review")
+                    update_frontmatter(
+                        review_path,
+                        {
+                            "needs_attention": True,
+                            "needs_attention_reason": f"Submit failed: {msg}",
+                            "error": f"submit_failed: {msg}",
+                        },
+                        "rfe-review",
+                    )
                 except Exception:
                     pass  # best-effort
 
@@ -751,23 +775,24 @@ def main():
     # doesn't re-flag our own changes.
     if (submitted_hashes or mark_processed_ids) and not args.dry_run:
         snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
-        updated = update_snapshot_hashes(submitted_hashes, snap_dir,
-                                         mark_processed=mark_processed_ids)
+        updated = update_snapshot_hashes(
+            submitted_hashes, snap_dir, mark_processed=mark_processed_ids
+        )
         if updated:
-            print(f"  Updated snapshot with {len(submitted_hashes)} "
-                  f"post-submit hashes, {len(mark_processed_ids)} "
-                  f"mark-processed: {updated}")
+            print(
+                f"  Updated snapshot with {len(submitted_hashes)} "
+                f"post-submit hashes, {len(mark_processed_ids)} "
+                f"mark-processed: {updated}"
+            )
         else:
-            print("  Warning: no snapshot found to update",
-                  file=sys.stderr)
+            print("  Warning: no snapshot found to update", file=sys.stderr)
 
     # Rebuild index
     rebuild_index(args.artifacts_dir)
     print(f"Done. Index rebuilt at {args.artifacts_dir}/rfes.md")
 
     if submit_errors:
-        print(f"\n{len(submit_errors)} RFE(s) failed during submit:",
-              file=sys.stderr)
+        print(f"\n{len(submit_errors)} RFE(s) failed during submit:", file=sys.stderr)
         for eid, emsg in submit_errors:
             print(f"  {eid}: {emsg}", file=sys.stderr)
 
@@ -780,29 +805,34 @@ def main():
         print("\nGenerating reports...")
 
         # YAML report
-        yaml_cmd = [sys.executable,
-                    os.path.join(script_dir, "generate_run_report.py"),
-                    "--start-time", ts,
-                    "--artifacts-dir", args.artifacts_dir]
+        yaml_cmd = [
+            sys.executable,
+            os.path.join(script_dir, "generate_run_report.py"),
+            "--start-time",
+            ts,
+            "--artifacts-dir",
+            args.artifacts_dir,
+        ]
         result = subprocess.run(yaml_cmd, capture_output=True, text=True)
         if result.returncode == 0:
             print(f"  YAML report: {result.stdout.strip()}")
         else:
-            print(f"Warning: YAML report generation failed: "
-                  f"{result.stderr}", file=sys.stderr)
+            print(f"Warning: YAML report generation failed: {result.stderr}", file=sys.stderr)
 
         # HTML report
-        html_output = os.path.join(args.artifacts_dir, "auto-fix-runs",
-                                   f"{run_id}-report.html")
-        html_cmd = [sys.executable,
-                    os.path.join(script_dir, "generate_review_pdf.py"),
-                    "--revised-only",
-                    "--artifacts-dir", args.artifacts_dir,
-                    "--output", html_output]
+        html_output = os.path.join(args.artifacts_dir, "auto-fix-runs", f"{run_id}-report.html")
+        html_cmd = [
+            sys.executable,
+            os.path.join(script_dir, "generate_review_pdf.py"),
+            "--revised-only",
+            "--artifacts-dir",
+            args.artifacts_dir,
+            "--output",
+            html_output,
+        ]
         result = subprocess.run(html_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"Warning: HTML report generation failed: "
-                  f"{result.stderr}", file=sys.stderr)
+            print(f"Warning: HTML report generation failed: {result.stderr}", file=sys.stderr)
 
     if submit_errors:
         sys.exit(1)

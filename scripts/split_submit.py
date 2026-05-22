@@ -27,34 +27,30 @@ import sys
 # to a file or pipe (Python defaults to full buffering in that case).
 sys.stdout.reconfigure(line_buffering=True)
 
-from jira_utils import (
-    require_env,
-    get_issue,
-    get_comments,
-    add_comment,
-    create_issue,
-    add_labels,
-    create_issue_link,
-    get_transitions,
-    do_transition,
-    markdown_to_adf,
-    adf_to_markdown,
-    normalize_for_compare,
-    text_to_adf_paragraph,
-    archival_comment_adf,
-    strip_metadata,
-)
-
-from artifact_utils import (
-    read_frontmatter,
-    read_frontmatter_validated,
-    update_frontmatter,
-    scan_task_files,
-    find_review_file,
-    rename_to_jira_key,
-    rebuild_index,
-    parse_child_artifact,
+from artifact_utils import (  # noqa: E402
     ValidationError,
+    find_review_file,
+    parse_child_artifact,
+    read_frontmatter_validated,
+    rebuild_index,
+    rename_to_jira_key,
+    scan_task_files,
+)
+from jira_utils import (  # noqa: E402
+    add_comment,
+    add_labels,
+    adf_to_markdown,
+    archival_comment_adf,
+    create_issue,
+    create_issue_link,
+    do_transition,
+    get_comments,
+    get_issue,
+    get_transitions,
+    markdown_to_adf,
+    normalize_for_compare,
+    require_env,
+    text_to_adf_paragraph,
 )
 
 MAX_LEAF_CHILDREN = 6
@@ -70,6 +66,7 @@ FEASIBILITY_LABELS = {
 
 
 # ─── Recovery / State Detection ──────────────────────────────────────────────
+
 
 def _extract_adf_text(node):
     """Recursively extract plain text from an ADF node."""
@@ -88,12 +85,12 @@ class SubmissionState:
     """Tracks progress of the split submission."""
 
     def __init__(self):
-        self.phase1_done = {}   # child_index -> comment ID
-        self.phase2_done = {}   # child_index -> created Jira key
+        self.phase1_done = {}  # child_index -> comment ID
+        self.phase2_done = {}  # child_index -> created Jira key
         self.parent_closed = False
         self.total_children = 0
         self.parent_components = []  # inherited by children
-        self.parent_labels = []      # non-automation labels inherited
+        self.parent_labels = []  # non-automation labels inherited
         self.parent_parent_key = None  # Jira parent (e.g. RHAISTRAT) inherited
 
 
@@ -107,17 +104,14 @@ def discover_state(server, user, token, parent_key, expected_children):
     for comment in comments:
         body_text = _extract_adf_text(comment.get("body", {}))
 
-        archival_match = re.search(
-            r'\[RFE Creator\] Split child (\d+) of (\d+):', body_text
-        )
+        archival_match = re.search(r"\[RFE Creator\] Split child (\d+) of (\d+):", body_text)
         if archival_match:
             idx = int(archival_match.group(1))
             state.phase1_done[idx] = comment["id"]
             continue
 
         confirm_match = re.search(
-            r'\[RFE Creator\] Created as (\S+),.*\(ref: child (\d+) of (\d+)\)',
-            body_text
+            r"\[RFE Creator\] Created as (\S+),.*\(ref: child (\d+) of (\d+)\)", body_text
         )
         if confirm_match:
             created_key = confirm_match.group(1)
@@ -126,9 +120,9 @@ def discover_state(server, user, token, parent_key, expected_children):
             continue
 
     # 2. Check issue links, components, labels, and Jira parent
-    issue = get_issue(server, user, token, parent_key,
-                      ["issuelinks", "status", "components", "labels",
-                       "parent"])
+    issue = get_issue(
+        server, user, token, parent_key, ["issuelinks", "status", "components", "labels", "parent"]
+    )
     for link in issue.get("fields", {}).get("issuelinks", []):
         if link.get("type", {}).get("name") != "Issue split":
             continue
@@ -142,27 +136,25 @@ def discover_state(server, user, token, parent_key, expected_children):
                 state.phase2_done[idx] = child_key
 
     # Capture parent's components and non-automation labels for inheritance
-    state.parent_components = [
-        c["name"] for c in
-        issue.get("fields", {}).get("components", [])
-    ]
+    state.parent_components = [c["name"] for c in issue.get("fields", {}).get("components", [])]
     state.parent_labels = [
-        l for l in issue.get("fields", {}).get("labels", [])
-        if not l.startswith("rfe-creator-")
+        label
+        for label in issue.get("fields", {}).get("labels", [])
+        if not label.startswith("rfe-creator-")
     ]
     jira_parent = issue.get("fields", {}).get("parent")
     if jira_parent:
         state.parent_parent_key = jira_parent.get("key")
 
     # 3. Check parent status
-    status_cat = (issue.get("fields", {}).get("status", {})
-                  .get("statusCategory", {}).get("key", ""))
-    state.parent_closed = (status_cat == "done")
+    status_cat = issue.get("fields", {}).get("status", {}).get("statusCategory", {}).get("key", "")
+    state.parent_closed = status_cat == "done"
 
     return state
 
 
 # ─── Phases ───────────────────────────────────────────────────────────────────
+
 
 def phase1_persist(server, user, token, parent_key, children, state, dry_run):
     """Post archival comments for each child not yet persisted."""
@@ -176,8 +168,10 @@ def phase1_persist(server, user, token, parent_key, children, state, dry_run):
         header = f"[RFE Creator] Split child {idx} of {total}: {title}"
 
         if dry_run:
-            print(f"  Phase 1: Would post archival comment for child "
-                  f"{idx}/{total}: {title} ({len(full_markdown)} chars)")
+            print(
+                f"  Phase 1: Would post archival comment for child "
+                f"{idx}/{total}: {title} ({len(full_markdown)} chars)"
+            )
             state.phase1_done[idx] = "dry-run"
             continue
 
@@ -187,19 +181,22 @@ def phase1_persist(server, user, token, parent_key, children, state, dry_run):
         print(f"  Phase 1: Posted content for child {idx}/{total}: {title}")
 
 
-def phase2_create_link(server, user, token, parent_key, children, state,
-                       artifacts_dir, dry_run):
+def phase2_create_link(server, user, token, parent_key, children, state, artifacts_dir, dry_run):
     """Create tickets, link to parent, and post confirmation comments."""
     total = len(children)
     for idx, (rfe_id, title, priority, artifact_path) in enumerate(children, 1):
         if idx in state.phase2_done:
-            print(f"  Phase 2: Child {idx}/{total} already created as "
-                  f"{state.phase2_done[idx]}, skipping")
+            print(
+                f"  Phase 2: Child {idx}/{total} already created as "
+                f"{state.phase2_done[idx]}, skipping"
+            )
             continue
 
         if idx not in state.phase1_done:
-            print(f"  ERROR: Child {idx}/{total} has no archival comment. "
-                  f"Run Phase 1 first.", file=sys.stderr)
+            print(
+                f"  ERROR: Child {idx}/{total} has no archival comment. Run Phase 1 first.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         _, _, _, cleaned_markdown = parse_child_artifact(artifact_path)
@@ -214,16 +211,14 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         feas_label = None
         if review_path:
             try:
-                review_data, _ = read_frontmatter_validated(
-                    review_path, "rfe-review")
+                review_data, _ = read_frontmatter_validated(review_path, "rfe-review")
                 review_rec = review_data.get("recommendation")
                 if review_data.get("auto_revised", False):
                     labels.append("rfe-creator-auto-revised")
                 if review_data.get("needs_attention", False):
                     labels.append("rfe-creator-needs-attention")
                     attn_reason = review_data.get("needs_attention_reason")
-                feas_label = FEASIBILITY_LABELS.get(
-                    review_data.get("feasibility"))
+                feas_label = FEASIBILITY_LABELS.get(review_data.get("feasibility"))
             except (ValidationError, Exception):
                 pass  # proceed without review data
         if review_rec == "submit":
@@ -235,52 +230,57 @@ def phase2_create_link(server, user, token, parent_key, children, state,
         labels = state.parent_labels + labels
 
         if dry_run:
-            print(f"  Phase 2: Would create RHAIRFE ticket for child "
-                  f"{idx}/{total}: {title} (priority: {priority})")
+            print(
+                f"  Phase 2: Would create RHAIRFE ticket for child "
+                f"{idx}/{total}: {title} (priority: {priority})"
+            )
             print(f"           Labels: {', '.join(labels)}")
             if state.parent_components:
-                print(f"           Components: "
-                      f"{', '.join(state.parent_components)}")
+                print(f"           Components: {', '.join(state.parent_components)}")
             if state.parent_parent_key:
                 print(f"           Parent: {state.parent_parent_key}")
             print(f"           Would link to {parent_key} via 'Issue split'")
             if attn_reason:
-                print(f"           Would post needs-attention comment")
+                print("           Would post needs-attention comment")
             state.phase2_done[idx] = "RHAIRFE-DRY"
             continue
 
         # 1. Create ticket with labels, inherited components, and parent
-        child_key = create_issue(server, user, token, "RHAIRFE",
-                                 "Feature Request", title, description_adf,
-                                 priority, labels=labels,
-                                 components=state.parent_components,
-                                 parent_key=state.parent_parent_key)
-        print(f"  Phase 2: Created {child_key} for child {idx}/{total}: "
-              f"{title}")
+        child_key = create_issue(
+            server,
+            user,
+            token,
+            "RHAIRFE",
+            "Feature Request",
+            title,
+            description_adf,
+            priority,
+            labels=labels,
+            components=state.parent_components,
+            parent_key=state.parent_parent_key,
+        )
+        print(f"  Phase 2: Created {child_key} for child {idx}/{total}: {title}")
         print(f"           Labels: {', '.join(labels)}")
         if state.parent_parent_key:
             print(f"           Parent: {state.parent_parent_key}")
 
         # 2. Link to parent
-        create_issue_link(server, user, token, "Issue split",
-                          parent_key, child_key)
+        create_issue_link(server, user, token, "Issue split", parent_key, child_key)
         print(f"           Linked {child_key} to {parent_key}")
 
         # 3. Post confirmation comment
-        confirm_text = (f"[RFE Creator] Created as {child_key}, linked to "
-                        f"parent. (ref: child {idx} of {total})")
-        add_comment(server, user, token, parent_key,
-                    text_to_adf_paragraph(confirm_text))
+        confirm_text = (
+            f"[RFE Creator] Created as {child_key}, linked to parent. (ref: child {idx} of {total})"
+        )
+        add_comment(server, user, token, parent_key, text_to_adf_paragraph(confirm_text))
 
         # 4. Post needs-attention comment on the new child ticket
         if attn_reason:
             attn_md = (
-                "*[RFE Creator]* This RFE has been flagged for human "
-                f"review:\n\n{attn_reason}"
+                f"*[RFE Creator]* This RFE has been flagged for human review:\n\n{attn_reason}"
             )
-            add_comment(server, user, token, child_key,
-                        markdown_to_adf(attn_md))
-            print(f"           Posted needs-attention comment")
+            add_comment(server, user, token, child_key, markdown_to_adf(attn_md))
+            print("           Posted needs-attention comment")
 
         state.phase2_done[idx] = child_key
 
@@ -291,28 +291,39 @@ def build_split_summary_adf(server, children, state, total):
     for idx, (_, title, _, _) in enumerate(children, 1):
         child_key = state.phase2_done[idx]
         url = f"{server.rstrip('/')}/browse/{child_key}"
-        list_items.append({
-            "type": "listItem",
-            "content": [{"type": "paragraph", "content": [
-                {"type": "inlineCard", "attrs": {"url": url}},
-                {"type": "text", "text": f": {title}"},
-            ]}]
-        })
+        list_items.append(
+            {
+                "type": "listItem",
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {"type": "inlineCard", "attrs": {"url": url}},
+                            {"type": "text", "text": f": {title}"},
+                        ],
+                    }
+                ],
+            }
+        )
     return {
-        "type": "doc", "version": 1,
+        "type": "doc",
+        "version": 1,
         "content": [
-            {"type": "paragraph", "content": [
-                {"type": "text", "text": "[RFE Creator]",
-                 "marks": [{"type": "em"}]},
-                {"type": "text", "text": f" This RFE has been split into "
-                                         f"{total} child RFEs:"},
-            ]},
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "[RFE Creator]", "marks": [{"type": "em"}]},
+                    {"type": "text", "text": f" This RFE has been split into {total} child RFEs:"},
+                ],
+            },
             {"type": "bulletList", "content": list_items},
-            {"type": "paragraph", "content": [
-                {"type": "text",
-                 "text": "Original content preserved in comments above."},
-            ]},
-        ]
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "Original content preserved in comments above."},
+                ],
+            },
+        ],
     }
 
 
@@ -324,23 +335,20 @@ def phase3_close(server, user, token, parent_key, children, state, dry_run):
 
     total = len(children)
     if len(state.phase2_done) < total:
-        missing = [i for i in range(1, total + 1)
-                   if i not in state.phase2_done]
-        print(f"  ERROR: Cannot close parent — children {missing} not yet "
-              f"created.", file=sys.stderr)
+        missing = [i for i in range(1, total + 1) if i not in state.phase2_done]
+        print(
+            f"  ERROR: Cannot close parent — children {missing} not yet created.", file=sys.stderr
+        )
         sys.exit(1)
 
     if dry_run:
-        print(f"  Phase 3: Would label {parent_key} with "
-              f"rfe-creator-split-original")
-        print(f"  Phase 3: Would transition {parent_key} to Closed "
-              f"(resolution: Obsolete)")
-        print(f"           Would post summary comment")
+        print(f"  Phase 3: Would label {parent_key} with rfe-creator-split-original")
+        print(f"  Phase 3: Would transition {parent_key} to Closed (resolution: Obsolete)")
+        print("           Would post summary comment")
         return
 
     # Label the parent
-    add_labels(server, user, token, parent_key,
-               ["rfe-creator-split-original"])
+    add_labels(server, user, token, parent_key, ["rfe-creator-split-original"])
     print(f"  Phase 3: Labeled {parent_key} with rfe-creator-split-original")
 
     # Find the "Closed" transition
@@ -353,64 +361,68 @@ def phase3_close(server, user, token, parent_key, children, state, dry_run):
 
     if not closed_transition:
         available = [t["name"] for t in transitions]
-        print(f"  WARNING: No 'Closed' transition found. Available: "
-              f"{available}", file=sys.stderr)
-        print(f"  Skipping parent closure.", file=sys.stderr)
+        print(f"  WARNING: No 'Closed' transition found. Available: {available}", file=sys.stderr)
+        print("  Skipping parent closure.", file=sys.stderr)
         return
 
     # Transition with resolution
-    do_transition(server, user, token, parent_key,
-                  closed_transition["id"],
-                  fields={"resolution": {"name": "Obsolete"}})
+    do_transition(
+        server,
+        user,
+        token,
+        parent_key,
+        closed_transition["id"],
+        fields={"resolution": {"name": "Obsolete"}},
+    )
     print(f"  Phase 3: Transitioned {parent_key} to Closed (Obsolete)")
 
     # Post summary comment with smart-linked child keys
     summary_adf = build_split_summary_adf(server, children, state, total)
     add_comment(server, user, token, parent_key, summary_adf)
-    print(f"  Phase 3: Posted summary comment")
+    print("  Phase 3: Posted summary comment")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("parent_key", help="Parent Jira issue key to split")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print planned actions without making API calls")
-    parser.add_argument("--artifacts-dir", default="artifacts",
-                        help="Artifacts directory (default: artifacts)")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print planned actions without making API calls"
+    )
+    parser.add_argument(
+        "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
     args = parser.parse_args()
 
     server, user, token = require_env()
 
     if not args.dry_run and not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
-              "required.", file=sys.stderr)
-        print("Set these or use --dry-run for local-only validation.",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)
+        print("Set these or use --dry-run for local-only validation.", file=sys.stderr)
         sys.exit(1)
 
     # Scan task files to find parent and children via frontmatter
     tasks = scan_task_files(args.artifacts_dir)
     if not tasks:
-        print("Error: No task files found. Run /rfe.split first.",
-              file=sys.stderr)
+        print("Error: No task files found. Run /rfe.split first.", file=sys.stderr)
         sys.exit(1)
 
     # Find parent: status=Archived with matching rfe_id
     parent_task = None
     for path, data in tasks:
-        if data.get("status") == "Archived" and \
-                data.get("rfe_id") == args.parent_key:
+        if data.get("status") == "Archived" and data.get("rfe_id") == args.parent_key:
             parent_task = (path, data)
             break
 
     if not parent_task:
-        print(f"Error: No archived parent with rfe_id={args.parent_key} "
-              f"found in task files.", file=sys.stderr)
+        print(
+            f"Error: No archived parent with rfe_id={args.parent_key} found in task files.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Find leaf children: walk the tree recursively to collect all
@@ -436,25 +448,29 @@ def main():
     child_tasks = _collect_leaves(args.parent_key)
 
     if not child_tasks:
-        print("Error: No child RFEs found with parent_key="
-              f"{args.parent_key}.", file=sys.stderr)
+        print(f"Error: No child RFEs found with parent_key={args.parent_key}.", file=sys.stderr)
         sys.exit(1)
 
     if len(child_tasks) > MAX_LEAF_CHILDREN:
-        print(f"Error: {args.parent_key} has {len(child_tasks)} leaf children "
-              f"(max {MAX_LEAF_CHILDREN}). Refusing to submit — requires "
-              f"human review.", file=sys.stderr)
+        print(
+            f"Error: {args.parent_key} has {len(child_tasks)} leaf children "
+            f"(max {MAX_LEAF_CHILDREN}). Refusing to submit — requires "
+            f"human review.",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     # Build children list: (rfe_id, title, priority, artifact_path)
     children = []
     for path, data in child_tasks:
-        children.append((
-            data["rfe_id"],
-            data["title"],
-            data["priority"],
-            path,
-        ))
+        children.append(
+            (
+                data["rfe_id"],
+                data["title"],
+                data["priority"],
+                path,
+            )
+        )
 
     print(f"Split submission: {args.parent_key} -> {len(children)} children")
     for i, (rfe_id, title, priority, _) in enumerate(children, 1):
@@ -463,32 +479,31 @@ def main():
 
     # Check for Jira conflicts on the parent before starting
     if not args.dry_run:
-        original_path = os.path.join(
-            args.artifacts_dir, "rfe-originals", f"{args.parent_key}.md")
+        original_path = os.path.join(args.artifacts_dir, "rfe-originals", f"{args.parent_key}.md")
         if os.path.exists(original_path):
             try:
                 with open(original_path, encoding="utf-8") as f:
                     orig_snap = normalize_for_compare(f.read())
-                issue = get_issue(server, user, token, args.parent_key,
-                                  fields=["description"])
+                issue = get_issue(server, user, token, args.parent_key, fields=["description"])
                 desc_raw = issue.get("fields", {}).get("description")
                 if isinstance(desc_raw, dict):
-                    jira_desc = normalize_for_compare(
-                        adf_to_markdown(desc_raw))
+                    jira_desc = normalize_for_compare(adf_to_markdown(desc_raw))
                 elif desc_raw is None:
                     jira_desc = ""
                 else:
                     jira_desc = normalize_for_compare(str(desc_raw))
                 if orig_snap != jira_desc:
-                    print(f"Error: {args.parent_key} description was modified "
-                          f"in Jira since fetch. Refusing to split — requires "
-                          f"human review.", file=sys.stderr)
+                    print(
+                        f"Error: {args.parent_key} description was modified "
+                        f"in Jira since fetch. Refusing to split — requires "
+                        f"human review.",
+                        file=sys.stderr,
+                    )
                     sys.exit(3)
             except SystemExit:
                 raise
             except Exception as e:
-                print(f"Warning: conflict check failed for "
-                      f"{args.parent_key}: {e}", file=sys.stderr)
+                print(f"Warning: conflict check failed for {args.parent_key}: {e}", file=sys.stderr)
 
     # Discover state (skip for dry-run without credentials)
     if args.dry_run and not all([server, user, token]):
@@ -498,39 +513,34 @@ def main():
         state.total_children = len(children)
     else:
         print("Checking submission state...")
-        state = discover_state(server, user, token, args.parent_key,
-                               children)
+        state = discover_state(server, user, token, args.parent_key, children)
         if state.phase1_done:
-            print(f"  Phase 1: {len(state.phase1_done)}/{len(children)} "
-                  f"archival comments found")
+            print(f"  Phase 1: {len(state.phase1_done)}/{len(children)} archival comments found")
         if state.phase2_done:
-            print(f"  Phase 2: {len(state.phase2_done)}/{len(children)} "
-                  f"tickets created")
+            print(f"  Phase 2: {len(state.phase2_done)}/{len(children)} tickets created")
         if state.parent_closed:
-            print(f"  Phase 3: Parent already closed")
+            print("  Phase 3: Parent already closed")
         if not state.phase1_done and not state.phase2_done:
-            print(f"  Fresh start — no prior progress found")
+            print("  Fresh start — no prior progress found")
         print()
 
     # Run phases
     print("Phase 1: Persisting child RFE content to parent comments...")
-    phase1_persist(server, user, token, args.parent_key, children, state,
-                   args.dry_run)
+    phase1_persist(server, user, token, args.parent_key, children, state, args.dry_run)
     print()
 
     print("Phase 2: Creating tickets and linking...")
-    phase2_create_link(server, user, token, args.parent_key, children, state,
-                       args.artifacts_dir, args.dry_run)
+    phase2_create_link(
+        server, user, token, args.parent_key, children, state, args.artifacts_dir, args.dry_run
+    )
     print()
 
     print("Phase 3: Closing parent...")
-    phase3_close(server, user, token, args.parent_key, children, state,
-                 args.dry_run)
+    phase3_close(server, user, token, args.parent_key, children, state, args.dry_run)
     print()
 
     # Post-submit: update frontmatter and rename files
-    for idx, (rfe_id, title, priority, artifact_path) in \
-            enumerate(children, 1):
+    for idx, (rfe_id, title, priority, artifact_path) in enumerate(children, 1):
         assigned_key = state.phase2_done.get(idx)
         if not assigned_key or assigned_key == "RHAIRFE-DRY":
             continue

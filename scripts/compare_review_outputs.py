@@ -7,10 +7,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import read_frontmatter
-
 import yaml
-
+from artifact_utils import read_frontmatter
 
 EXACT_FIELDS = ["pass", "recommendation", "auto_revised", "feasibility", "needs_attention"]
 TOLERANCE_FIELDS = ["score"]
@@ -71,7 +69,6 @@ def compare_review(rfe_id, golden_dir, new_dir, golden_review_path):
 
     # Check companion files exist
     prefix = rfe_id
-    companion_suffixes = ["-review.md"]
     task_suffixes = [".md", "-comments.md"]
     original_name = f"{prefix}.md"
 
@@ -92,14 +89,14 @@ def compare_review(rfe_id, golden_dir, new_dir, golden_review_path):
         print(f"  FAIL: missing files: {', '.join(missing)}")
         fails += 1
     else:
-        print(f"  OK: all files present")
+        print("  OK: all files present")
 
     # Compare removed-context YAML headings
     g_rc = os.path.join(golden_dir, "rfe-tasks", f"{prefix}-removed-context.yaml")
     n_rc = os.path.join(new_dir, "rfe-tasks", f"{prefix}-removed-context.yaml")
     if os.path.exists(g_rc):
         if not os.path.exists(n_rc):
-            print(f"  FAIL: removed-context YAML missing")
+            print("  FAIL: removed-context YAML missing")
             fails += 1
         else:
             with open(g_rc) as f:
@@ -109,7 +106,7 @@ def compare_review(rfe_id, golden_dir, new_dir, golden_review_path):
             g_headings = {b.get("heading") for b in g_blocks if isinstance(b, dict)}
             n_headings = {b.get("heading") for b in n_blocks if isinstance(b, dict)}
             if g_headings == n_headings:
-                print(f"  OK: removed-context headings match")
+                print("  OK: removed-context headings match")
             else:
                 only_golden = g_headings - n_headings
                 only_new = n_headings - g_headings
@@ -127,13 +124,13 @@ def compare_review(rfe_id, golden_dir, new_dir, golden_review_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare golden reference review outputs against new outputs.")
+        description="Compare golden reference review outputs against new outputs."
+    )
     parser.add_argument("golden_dir", help="Golden reference artifacts directory")
     parser.add_argument("new_dir", help="New output artifacts directory")
     args = parser.parse_args()
 
-    golden_reviews = sorted(glob.glob(
-        os.path.join(args.golden_dir, "rfe-reviews", "*-review.md")))
+    golden_reviews = sorted(glob.glob(os.path.join(args.golden_dir, "rfe-reviews", "*-review.md")))
 
     if not golden_reviews:
         print("No review files found in golden directory.", file=sys.stderr)
