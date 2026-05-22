@@ -9,7 +9,6 @@ Usage:
 """
 
 import argparse
-import sys
 
 from artifact_utils import rebuild_index
 
@@ -19,17 +18,20 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--artifacts-dir", default="artifacts",
-                        help="Artifacts directory (default: artifacts)")
+    parser.add_argument(
+        "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
     args = parser.parse_args()
 
     content = rebuild_index(args.artifacts_dir)
     print(f"Rebuilt {args.artifacts_dir}/rfes.md")
 
     # Count entries
-    lines = [l for l in content.split("\n")
-             if l.startswith("|") and not l.startswith("| ID")
-             and not l.startswith("|---")]
+    lines = [
+        line
+        for line in content.split("\n")
+        if line.startswith("|") and not line.startswith("| ID") and not line.startswith("|---")
+    ]
     print(f"  {len(lines)} RFEs indexed")
 
 

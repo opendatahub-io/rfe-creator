@@ -6,6 +6,7 @@ Bug: Lines starting with # that don't match the heading regex
 because they were excluded from both the heading handler AND the paragraph
 accumulator, so `i` never advanced.
 """
+
 import os
 import signal
 import sys
@@ -14,17 +15,17 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from jira_utils import adf_to_markdown, markdown_to_adf
-
+from jira_utils import adf_to_markdown, markdown_to_adf  # noqa: E402
 
 # ── Timeout helper ──────────────────────────────────────────────────────────
 
-class _Timeout(Exception):
+
+class _TimeoutError(Exception):
     pass
 
 
 def _timeout_handler(signum, frame):
-    raise _Timeout("markdown_to_adf did not complete within timeout")
+    raise _TimeoutError("markdown_to_adf did not complete within timeout")
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,7 @@ def enforce_timeout():
 
 
 # ── Well-formed markdown (behavior must not change) ────────────────────────
+
 
 class TestWellFormedHeadings:
     def test_h1(self):
@@ -76,6 +78,7 @@ class TestWellFormedHeadings:
 
 
 # ── Malformed headings that caused infinite loops ──────────────────────────
+
 
 class TestMalformedHeadings:
     """Lines starting with # that don't match the heading regex."""
@@ -128,6 +131,7 @@ class TestMalformedHeadings:
 
 
 # ── Real CI failure patterns ──────────────────────────────────────────────
+
 
 class TestCIFailurePatterns:
     """Reproduce the exact patterns from the 2026-04-04 CI run."""
@@ -205,49 +209,65 @@ class TestCIFailurePatterns:
 
 # ── Panel round-trip tests ────────────────────────────────────────────────
 
+
 class TestPanelRoundTrip:
     """Verify ADF panel → markdown → ADF survives the fetch/edit/submit cycle."""
 
     def test_multiline_panel_all_lines_quoted(self):
         """adf_to_markdown must prefix every line with '> ', not just the first."""
         panel_adf = {
-            "type": "doc", "version": 1,
-            "content": [{
-                "type": "panel",
-                "attrs": {"panelType": "info"},
-                "content": [
-                    {"type": "heading", "attrs": {"level": 3},
-                     "content": [{"type": "text", "text": "Problem",
-                                  "marks": [{"type": "strong"}]}]},
-                    {"type": "paragraph",
-                     "content": [{"type": "text",
-                                  "text": "Description here."}]},
-                ],
-            }],
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "panel",
+                    "attrs": {"panelType": "info"},
+                    "content": [
+                        {
+                            "type": "heading",
+                            "attrs": {"level": 3},
+                            "content": [
+                                {"type": "text", "text": "Problem", "marks": [{"type": "strong"}]}
+                            ],
+                        },
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": "Description here."}],
+                        },
+                    ],
+                }
+            ],
         }
         md = adf_to_markdown(panel_adf)
         # Every non-empty line should be quoted
         for line in md.strip().split("\n"):
             if line.strip():
-                assert line.startswith("> "), \
-                    f"Line not quoted: {line!r}"
+                assert line.startswith("> "), f"Line not quoted: {line!r}"
 
     def test_panel_round_trip_preserves_headings(self):
         """Panel with headings round-trips: panel → markdown → panel."""
         panel_adf = {
-            "type": "doc", "version": 1,
-            "content": [{
-                "type": "panel",
-                "attrs": {"panelType": "info"},
-                "content": [
-                    {"type": "heading", "attrs": {"level": 3},
-                     "content": [{"type": "text", "text": "Problem",
-                                  "marks": [{"type": "strong"}]}]},
-                    {"type": "paragraph",
-                     "content": [{"type": "text",
-                                  "text": "Description here."}]},
-                ],
-            }],
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "panel",
+                    "attrs": {"panelType": "info"},
+                    "content": [
+                        {
+                            "type": "heading",
+                            "attrs": {"level": 3},
+                            "content": [
+                                {"type": "text", "text": "Problem", "marks": [{"type": "strong"}]}
+                            ],
+                        },
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": "Description here."}],
+                        },
+                    ],
+                }
+            ],
         }
         md = adf_to_markdown(panel_adf)
         result = markdown_to_adf(md)
@@ -258,6 +278,7 @@ class TestPanelRoundTrip:
 
 
 # ── Safety net tests ──────────────────────────────────────────────────────
+
 
 class TestSafetyNet:
     """Verify the defensive fallback handles any unrecognized line."""

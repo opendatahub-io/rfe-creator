@@ -26,14 +26,14 @@ import yaml
 
 # Add parent directory to path for artifact_utils
 sys.path.insert(0, os.path.dirname(__file__))
-from artifact_utils import read_frontmatter, find_removed_context_yaml
+from artifact_utils import find_removed_context_yaml
 
 
 def strip_frontmatter(content):
     """Remove YAML frontmatter from markdown content."""
-    match = re.match(r'^---\s*\n.*?\n---\s*\n', content, re.DOTALL)
+    match = re.match(r"^---\s*\n.*?\n---\s*\n", content, re.DOTALL)
     if match:
-        return content[match.end():]
+        return content[match.end() :]
     return content
 
 
@@ -43,13 +43,13 @@ def split_into_blocks(content):
     Returns list of (heading, lines) tuples. Content before the first
     heading gets heading="(preamble)".
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
     blocks = []
     current_heading = "(preamble)"
     current_lines = []
 
     for line in lines:
-        if re.match(r'^#{1,6}\s+', line):
+        if re.match(r"^#{1,6}\s+", line):
             if current_lines:
                 blocks.append((current_heading, current_lines))
             current_heading = line.strip()
@@ -75,7 +75,7 @@ def get_signature_lines(lines):
 
 def normalize(text):
     """Normalize whitespace for comparison."""
-    return re.sub(r'\s+', ' ', text.strip().lower())
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def load_removed_context_yaml(yaml_path):
@@ -83,40 +83,39 @@ def load_removed_context_yaml(yaml_path):
     if not yaml_path or not os.path.exists(yaml_path):
         return [], ""
 
-    with open(yaml_path, encoding='utf-8') as f:
+    with open(yaml_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
-    if not data or 'blocks' not in data:
+    if not data or "blocks" not in data:
         return [], ""
 
-    blocks = data['blocks'] or []
+    blocks = data["blocks"] or []
     # Build target text from all block content
     parts = []
     for block in blocks:
-        content = block.get('content', '')
+        content = block.get("content", "")
         if content:
             parts.append(normalize(content))
-    return blocks, ' '.join(parts)
+    return blocks, " ".join(parts)
 
 
-def check_preservation(original_path, task_path, yaml_path=None,
-                       verbose=False):
+def check_preservation(original_path, task_path, yaml_path=None, verbose=False):
     """Compare original to task file and find missing content blocks.
 
     Returns list of dicts with 'heading', 'sig_count', 'missing_count',
     'content', and optionally 'missing_lines'.
     """
-    with open(original_path, encoding='utf-8') as f:
+    with open(original_path, encoding="utf-8") as f:
         original = strip_frontmatter(f.read())
 
-    with open(task_path, encoding='utf-8') as f:
+    with open(task_path, encoding="utf-8") as f:
         task = strip_frontmatter(f.read())
 
     # Build the full target text (task + removed-context YAML content)
     target_text = normalize(task)
     existing_blocks, rc_text = load_removed_context_yaml(yaml_path)
     if rc_text:
-        target_text += ' ' + rc_text
+        target_text += " " + rc_text
 
     original_blocks = split_into_blocks(original)
     missing = []
@@ -137,14 +136,14 @@ def check_preservation(original_path, task_path, yaml_path=None,
         preservation_rate = found / len(sig_lines)
         if preservation_rate < 0.6:
             entry = {
-                'heading': heading,
-                'sig_count': len(sig_lines),
-                'missing_count': len(sig_lines) - found,
-                'preservation_rate': round(preservation_rate, 2),
-                'content': '\n'.join(lines).strip(),
+                "heading": heading,
+                "sig_count": len(sig_lines),
+                "missing_count": len(sig_lines) - found,
+                "preservation_rate": round(preservation_rate, 2),
+                "content": "\n".join(lines).strip(),
             }
             if verbose:
-                entry['missing_lines'] = missing_lines_list
+                entry["missing_lines"] = missing_lines_list
             missing.append(entry)
 
     return missing
@@ -160,62 +159,62 @@ def write_removed_context_yaml(yaml_path, missing_blocks, existing_blocks=None):
     existing_by_heading = {}
     if existing_blocks:
         for block in existing_blocks:
-            existing_by_heading[block.get('heading', '')] = block
+            existing_by_heading[block.get("heading", "")] = block
 
     merged = []
 
     # Keep existing classified blocks
-    for block in (existing_blocks or []):
+    for block in existing_blocks or []:
         merged.append(block)
 
     # Add new missing blocks (not already tracked)
     for m in missing_blocks:
-        heading = m['heading']
+        heading = m["heading"]
         if heading not in existing_by_heading:
-            merged.append({
-                'heading': heading,
-                'type': 'unclassified',
-                'content': m['content'],
-            })
+            merged.append(
+                {
+                    "heading": heading,
+                    "type": "unclassified",
+                    "content": m["content"],
+                }
+            )
 
     if not merged:
         return
 
-    data = {'blocks': merged}
+    data = {"blocks": merged}
     os.makedirs(os.path.dirname(yaml_path), exist_ok=True)
-    with open(yaml_path, 'w', encoding='utf-8') as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True,
-                  sort_keys=False, width=200)
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False, width=200)
 
 
 def get_yaml_path_for_task(task_path):
     """Derive the removed-context YAML path from a task file path."""
     tasks_dir = os.path.dirname(task_path)
-    basename = os.path.basename(task_path).replace('.md', '')
+    basename = os.path.basename(task_path).replace(".md", "")
     return os.path.join(tasks_dir, f"{basename}-removed-context.yaml")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Check content preservation between originals and tasks')
-    parser.add_argument('original', nargs='?',
-                        help='Path to original file')
-    parser.add_argument('task_file', nargs='?',
-                        help='Path to task file')
-    parser.add_argument('--batch', action='store_true',
-                        help='Scan all originals in artifacts/rfe-originals/')
-    parser.add_argument('--verbose', action='store_true',
-                        help='Show missing lines')
-    parser.add_argument('--json', action='store_true',
-                        help='Output as JSON')
-    parser.add_argument('--write-yaml', action='store_true',
-                        help='Write missing blocks to removed-context YAML')
+        description="Check content preservation between originals and tasks"
+    )
+    parser.add_argument("original", nargs="?", help="Path to original file")
+    parser.add_argument("task_file", nargs="?", help="Path to task file")
+    parser.add_argument(
+        "--batch", action="store_true", help="Scan all originals in artifacts/rfe-originals/"
+    )
+    parser.add_argument("--verbose", action="store_true", help="Show missing lines")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument(
+        "--write-yaml", action="store_true", help="Write missing blocks to removed-context YAML"
+    )
 
     args = parser.parse_args()
 
     if args.batch:
-        originals_dir = os.path.join('artifacts', 'rfe-originals')
-        tasks_dir = os.path.join('artifacts', 'rfe-tasks')
+        originals_dir = os.path.join("artifacts", "rfe-originals")
+        tasks_dir = os.path.join("artifacts", "rfe-tasks")
 
         if not os.path.isdir(originals_dir):
             print("No artifacts/rfe-originals/ directory found", file=sys.stderr)
@@ -225,10 +224,10 @@ def main():
         any_missing = False
 
         for filename in sorted(os.listdir(originals_dir)):
-            if not filename.endswith('.md'):
+            if not filename.endswith(".md"):
                 continue
 
-            key = filename.replace('.md', '')
+            key = filename.replace(".md", "")
             original_path = os.path.join(originals_dir, filename)
             task_path = os.path.join(tasks_dir, filename)
 
@@ -237,9 +236,8 @@ def main():
                     print(f"SKIP {key}: no task file")
                 continue
 
-            yaml_path = find_removed_context_yaml('artifacts', key)
-            missing = check_preservation(
-                original_path, task_path, yaml_path, verbose=args.verbose)
+            yaml_path = find_removed_context_yaml("artifacts", key)
+            missing = check_preservation(original_path, task_path, yaml_path, verbose=args.verbose)
 
             if missing:
                 any_missing = True
@@ -247,12 +245,14 @@ def main():
                 if not args.json:
                     print(f"FAIL {key}: {len(missing)} block(s) missing")
                     for m in missing:
-                        print(f"  - {m['heading']}: "
-                              f"{m['missing_count']}/{m['sig_count']} "
-                              f"signature lines missing "
-                              f"({m['preservation_rate']:.0%} preserved)")
-                        if args.verbose and 'missing_lines' in m:
-                            for line in m['missing_lines']:
+                        print(
+                            f"  - {m['heading']}: "
+                            f"{m['missing_count']}/{m['sig_count']} "
+                            f"signature lines missing "
+                            f"({m['preservation_rate']:.0%} preserved)"
+                        )
+                        if args.verbose and "missing_lines" in m:
+                            for line in m["missing_lines"]:
                                 print(f"    > {line[:100]}")
 
                 if args.write_yaml:
@@ -260,8 +260,7 @@ def main():
                     existing, _ = load_removed_context_yaml(yaml_path)
                     write_removed_context_yaml(yp, missing, existing)
                     if not args.json:
-                        print(f"       Wrote {len(missing)} block(s) to "
-                              f"{os.path.basename(yp)}")
+                        print(f"       Wrote {len(missing)} block(s) to {os.path.basename(yp)}")
             else:
                 if not args.json:
                     print(f"OK   {key}")
@@ -280,32 +279,32 @@ def main():
             sys.exit(1)
 
         # Try to find removed-context YAML
-        key = os.path.basename(args.task_file).replace('.md', '')
+        key = os.path.basename(args.task_file).replace(".md", "")
         artifacts_dir = os.path.dirname(os.path.dirname(args.task_file))
         yaml_path = find_removed_context_yaml(artifacts_dir, key)
 
-        missing = check_preservation(
-            args.original, args.task_file, yaml_path, verbose=args.verbose)
+        missing = check_preservation(args.original, args.task_file, yaml_path, verbose=args.verbose)
 
         if args.json:
             print(json.dumps(missing, indent=2))
         elif missing:
             print(f"FAIL: {len(missing)} block(s) missing")
             for m in missing:
-                print(f"  - {m['heading']}: "
-                      f"{m['missing_count']}/{m['sig_count']} "
-                      f"signature lines missing "
-                      f"({m['preservation_rate']:.0%} preserved)")
-                if args.verbose and 'missing_lines' in m:
-                    for line in m['missing_lines']:
+                print(
+                    f"  - {m['heading']}: "
+                    f"{m['missing_count']}/{m['sig_count']} "
+                    f"signature lines missing "
+                    f"({m['preservation_rate']:.0%} preserved)"
+                )
+                if args.verbose and "missing_lines" in m:
+                    for line in m["missing_lines"]:
                         print(f"    > {line[:100]}")
 
             if args.write_yaml:
                 yp = yaml_path or get_yaml_path_for_task(args.task_file)
                 existing, _ = load_removed_context_yaml(yaml_path)
                 write_removed_context_yaml(yp, missing, existing)
-                print(f"Wrote {len(missing)} block(s) to "
-                      f"{os.path.basename(yp)}")
+                print(f"Wrote {len(missing)} block(s) to {os.path.basename(yp)}")
         else:
             print("OK: all content preserved")
 
@@ -316,5 +315,5 @@ def main():
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

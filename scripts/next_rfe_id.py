@@ -17,7 +17,6 @@ import os
 import re
 import sys
 
-
 TASKS_DIR = "artifacts/rfe-tasks"
 LOCK_FILE = "artifacts/.rfe-id-lock"
 

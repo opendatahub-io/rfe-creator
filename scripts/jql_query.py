@@ -12,13 +12,13 @@ Output:
 """
 
 import argparse
-import sys
 import os
+import sys
 import urllib.parse
 
 # Add parent directory so we can import jira_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from jira_utils import require_env, api_call_with_retry
+from jira_utils import api_call_with_retry, require_env
 
 
 def search_issues(server, user, token, jql, limit=None):
@@ -28,8 +28,9 @@ def search_issues(server, user, token, jql, limit=None):
     next_page_token = None
 
     while True:
-        path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-                f"&maxResults={page_size}&fields=key")
+        path = (
+            f"/search/jql?jql={urllib.parse.quote(jql, safe='')}&maxResults={page_size}&fields=key"
+        )
         if next_page_token:
             path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
         data = api_call_with_retry(server, path, user, token)
@@ -59,20 +60,21 @@ def search_issues(server, user, token, jql, limit=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Execute a JQL query and return issue keys.")
+    parser = argparse.ArgumentParser(description="Execute a JQL query and return issue keys.")
     parser.add_argument("jql", help="JQL query string")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Maximum number of keys to return")
+    parser.add_argument("--limit", type=int, default=None, help="Maximum number of keys to return")
     args = parser.parse_args()
 
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set", file=sys.stderr)
         sys.exit(1)
 
-    jql = f"({args.jql}) AND statusCategory != Done AND (labels not in (rfe-creator-ignore, rfe-creator-autofix-rubric-pass) OR labels is EMPTY)"
+    jql = (
+        f"({args.jql}) AND statusCategory != Done"
+        " AND (labels not in (rfe-creator-ignore,"
+        " rfe-creator-autofix-rubric-pass) OR labels is EMPTY)"
+    )
     print(f"JQL={jql}", file=sys.stderr)
     search_issues(server, user, token, jql, args.limit)
 

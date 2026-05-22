@@ -18,8 +18,8 @@ import unicodedata
 import urllib.error
 import urllib.request
 
-
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
+
 
 def make_request(url, user, token, body=None, method=None):
     """HTTP request with Basic Auth. Returns parsed JSON or None for 204."""
@@ -48,8 +48,7 @@ def api_call(server, path, user, token, body=None, method=None):
     return make_request(url, user, token, body, method)
 
 
-def api_call_with_retry(server, path, user, token, body=None, method=None,
-                        max_retries=3):
+def api_call_with_retry(server, path, user, token, body=None, method=None, max_retries=3):
     """Wrap api_call with retry on transient errors."""
     last_error = None
     for attempt in range(max_retries):
@@ -64,9 +63,8 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
                 last_error = e
                 continue
             if e.code in (502, 503, 504):
-                wait = 4 ** attempt  # 1, 4, 16
-                print(f"  HTTP {e.code}, retrying in {wait}s...",
-                      file=sys.stderr)
+                wait = 4**attempt  # 1, 4, 16
+                print(f"  HTTP {e.code}, retrying in {wait}s...", file=sys.stderr)
                 time.sleep(wait)
                 last_error = e
                 continue
@@ -74,9 +72,8 @@ def api_call_with_retry(server, path, user, token, body=None, method=None,
             print(f"HTTP {e.code}: {error_body}", file=sys.stderr)
             raise
         except urllib.error.URLError as e:
-            wait = 4 ** attempt
-            print(f"  Network error: {e.reason}, retrying in {wait}s...",
-                  file=sys.stderr)
+            wait = 4**attempt
+            print(f"  Network error: {e.reason}, retrying in {wait}s...", file=sys.stderr)
             time.sleep(wait)
             last_error = e
     raise last_error
@@ -91,6 +88,7 @@ def require_env():
 
 
 # ─── Jira Operations ─────────────────────────────────────────────────────────
+
 
 def get_issue(server, user, token, key, fields=None):
     """GET /rest/api/3/issue/{key}"""
@@ -118,13 +116,22 @@ def get_comments(server, user, token, issue_key):
 def add_comment(server, user, token, issue_key, body_adf):
     """POST a comment with ADF body."""
     path = f"/issue/{issue_key}/comment"
-    return api_call_with_retry(server, path, user, token,
-                               body={"body": body_adf})
+    return api_call_with_retry(server, path, user, token, body={"body": body_adf})
 
 
-def create_issue(server, user, token, project, issue_type, summary,
-                 description_adf, priority, labels=None, components=None,
-                 parent_key=None):
+def create_issue(
+    server,
+    user,
+    token,
+    project,
+    issue_type,
+    summary,
+    description_adf,
+    priority,
+    labels=None,
+    components=None,
+    parent_key=None,
+):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
         "fields": {
@@ -159,22 +166,14 @@ def update_issue(server, user, token, issue_key, summary, description_adf):
 
 def add_labels(server, user, token, issue_key, labels):
     """Add labels to an existing issue without removing existing ones."""
-    body = {
-        "update": {
-            "labels": [{"add": label} for label in labels]
-        }
-    }
+    body = {"update": {"labels": [{"add": label} for label in labels]}}
     path = f"/issue/{issue_key}"
     api_call_with_retry(server, path, user, token, body=body, method="PUT")
 
 
 def remove_labels(server, user, token, issue_key, labels):
     """Remove labels from an existing issue without affecting other labels."""
-    body = {
-        "update": {
-            "labels": [{"remove": label} for label in labels]
-        }
-    }
+    body = {"update": {"labels": [{"remove": label} for label in labels]}}
     path = f"/issue/{issue_key}"
     api_call_with_retry(server, path, user, token, body=body, method="PUT")
 
@@ -182,11 +181,7 @@ def remove_labels(server, user, token, issue_key, labels):
 def swap_labels(server, user, token, issue_key, add, remove):
     """Atomically add and remove labels in a single PUT to avoid race conditions."""
     ops = [{"add": label} for label in add] + [{"remove": label} for label in remove]
-    body = {
-        "update": {
-            "labels": ops
-        }
-    }
+    body = {"update": {"labels": ops}}
     path = f"/issue/{issue_key}"
     api_call_with_retry(server, path, user, token, body=body, method="PUT")
 
@@ -227,14 +222,18 @@ def transition_issue(server, user, token, issue_key, target_status):
             break
     if not match:
         available = [t["name"] for t in transitions]
-        print(f"  WARNING: No '{target_status}' transition found for "
-              f"{issue_key}. Available: {available}", file=sys.stderr)
+        print(
+            f"  WARNING: No '{target_status}' transition found for "
+            f"{issue_key}. Available: {available}",
+            file=sys.stderr,
+        )
         return False
     do_transition(server, user, token, issue_key, match["id"])
     return True
 
 
 # ─── ADF Helpers ──────────────────────────────────────────────────────────────
+
 
 def _adf_doc(content):
     """Wrap content nodes in an ADF document."""
@@ -256,8 +255,7 @@ def _adf_text(text, marks=None):
 
 def _adf_heading(level, text_nodes):
     """Create an ADF heading node."""
-    return {"type": "heading", "attrs": {"level": level},
-            "content": text_nodes}
+    return {"type": "heading", "attrs": {"level": level}, "content": text_nodes}
 
 
 def _adf_code_block(text, language=""):
@@ -272,10 +270,7 @@ def _adf_bullet_list(items):
     """Create an ADF bulletList from a list of content node lists."""
     return {
         "type": "bulletList",
-        "content": [
-            {"type": "listItem", "content": [_adf_paragraph(nodes)]}
-            for nodes in items
-        ],
+        "content": [{"type": "listItem", "content": [_adf_paragraph(nodes)]} for nodes in items],
     }
 
 
@@ -283,10 +278,7 @@ def _adf_ordered_list(items):
     """Create an ADF orderedList from a list of content node lists."""
     return {
         "type": "orderedList",
-        "content": [
-            {"type": "listItem", "content": [_adf_paragraph(nodes)]}
-            for nodes in items
-        ],
+        "content": [{"type": "listItem", "content": [_adf_paragraph(nodes)]} for nodes in items],
     }
 
 
@@ -307,10 +299,12 @@ def _adf_table(rows, has_header=True):
         cell_type = "tableHeader" if is_header else "tableCell"
         adf_cells = []
         for cell_text in cells:
-            adf_cells.append({
-                "type": cell_type,
-                "content": [_adf_paragraph(_parse_inline(cell_text.strip()))],
-            })
+            adf_cells.append(
+                {
+                    "type": cell_type,
+                    "content": [_adf_paragraph(_parse_inline(cell_text.strip()))],
+                }
+            )
         adf_rows.append({"type": "tableRow", "content": adf_cells})
     return {"type": "table", "content": adf_rows}
 
@@ -322,16 +316,16 @@ def _parse_inline(text):
     """
     nodes = []
     pattern = re.compile(
-        r'(\*\*(?P<bold>.+?)\*\*)'
-        r'|(\*(?P<italic>.+?)\*)'
-        r'|(~~(?P<strike>.+?)~~)'
-        r'|(`(?P<code>[^`]+)`)'
-        r'|(\[(?P<link_text>[^\]]*)\]\((?P<link_url>[^)]+)\))'
+        r"(\*\*(?P<bold>.+?)\*\*)"
+        r"|(\*(?P<italic>.+?)\*)"
+        r"|(~~(?P<strike>.+?)~~)"
+        r"|(`(?P<code>[^`]+)`)"
+        r"|(\[(?P<link_text>[^\]]*)\]\((?P<link_url>[^)]+)\))"
     )
     pos = 0
     for m in pattern.finditer(text):
         if m.start() > pos:
-            nodes.append(_adf_text(text[pos:m.start()]))
+            nodes.append(_adf_text(text[pos : m.start()]))
 
         if m.group("bold") is not None:
             nodes.append(_adf_text(m.group("bold"), [{"type": "strong"}]))
@@ -342,11 +336,11 @@ def _parse_inline(text):
         elif m.group("code") is not None:
             nodes.append(_adf_text(m.group("code"), [{"type": "code"}]))
         elif m.group("link_text") is not None:
-            nodes.append(_adf_text(
-                m.group("link_text"),
-                [{"type": "link",
-                  "attrs": {"href": m.group("link_url")}}]
-            ))
+            nodes.append(
+                _adf_text(
+                    m.group("link_text"), [{"type": "link", "attrs": {"href": m.group("link_url")}}]
+                )
+            )
         pos = m.end()
 
     if pos < len(text):
@@ -382,7 +376,7 @@ def markdown_to_adf(markdown):
             continue
 
         # Heading
-        heading_match = re.match(r'^(#{1,6})\s+(.*)', line)
+        heading_match = re.match(r"^(#{1,6})\s+(.*)", line)
         if heading_match:
             level = len(heading_match.group(1))
             text = heading_match.group(2).strip()
@@ -394,27 +388,28 @@ def markdown_to_adf(markdown):
             continue
 
         # Horizontal rule
-        if re.match(r'^---+\s*$', line):
+        if re.match(r"^---+\s*$", line):
             content.append(_adf_rule())
             i += 1
             continue
 
         # Bullet list
-        if re.match(r'^[-*]\s', line) or re.match(r'^- \[[ x]\]\s', line):
+        if re.match(r"^[-*]\s", line) or re.match(r"^- \[[ x]\]\s", line):
             items = []
-            while i < len(lines) and (re.match(r'^[-*]\s', lines[i]) or
-                                       re.match(r'^- \[[ x]\]\s', lines[i])):
-                item_text = re.sub(r'^[-*]\s+', '', lines[i])
+            while i < len(lines) and (
+                re.match(r"^[-*]\s", lines[i]) or re.match(r"^- \[[ x]\]\s", lines[i])
+            ):
+                item_text = re.sub(r"^[-*]\s+", "", lines[i])
                 items.append(_parse_inline(item_text))
                 i += 1
             content.append(_adf_bullet_list(items))
             continue
 
         # Ordered list
-        if re.match(r'^\d+\.\s', line):
+        if re.match(r"^\d+\.\s", line):
             items = []
-            while i < len(lines) and re.match(r'^\d+\.\s', lines[i]):
-                item_text = re.sub(r'^\d+\.\s+', '', lines[i])
+            while i < len(lines) and re.match(r"^\d+\.\s", lines[i]):
+                item_text = re.sub(r"^\d+\.\s+", "", lines[i])
                 items.append(_parse_inline(item_text))
                 i += 1
             content.append(_adf_ordered_list(items))
@@ -423,38 +418,40 @@ def markdown_to_adf(markdown):
         # Blockquote
         if line.startswith("> ") or line == ">":
             quote_lines = []
-            while i < len(lines) and (lines[i].startswith("> ") or
-                                       lines[i] == ">"):
-                quote_lines.append(re.sub(r'^>\s?', '', lines[i]))
+            while i < len(lines) and (lines[i].startswith("> ") or lines[i] == ">"):
+                quote_lines.append(re.sub(r"^>\s?", "", lines[i]))
                 i += 1
             quote_md = "\n".join(quote_lines)
             inner = markdown_to_adf(quote_md)
             inner_content = inner.get("content", [])
-            has_headings = any(n.get("type") == "heading"
-                               for n in inner_content)
+            has_headings = any(n.get("type") == "heading" for n in inner_content)
             if has_headings:
                 # ADF blockquotes cannot contain headings, but panels
                 # can. Quoted headings originate from Jira panels that
                 # were converted to markdown blockquotes on fetch.
-                content.append({
-                    "type": "panel",
-                    "attrs": {"panelType": "info"},
-                    "content": inner_content,
-                })
+                content.append(
+                    {
+                        "type": "panel",
+                        "attrs": {"panelType": "info"},
+                        "content": inner_content,
+                    }
+                )
             else:
-                content.append({
-                    "type": "blockquote",
-                    "content": inner_content,
-                })
+                content.append(
+                    {
+                        "type": "blockquote",
+                        "content": inner_content,
+                    }
+                )
             continue
 
         # Table
-        if re.match(r'^\|.+\|', line):
+        if re.match(r"^\|.+\|", line):
             table_rows = []
-            while i < len(lines) and re.match(r'^\|.+\|', lines[i]):
+            while i < len(lines) and re.match(r"^\|.+\|", lines[i]):
                 row_text = lines[i].strip()
                 # Skip separator rows (| --- | --- |)
-                if re.match(r'^\|[\s\-:|]+\|$', row_text):
+                if re.match(r"^\|[\s\-:|]+\|$", row_text):
                     i += 1
                     continue
                 # Split cells, dropping empty first/last from leading/trailing |
@@ -473,13 +470,16 @@ def markdown_to_adf(markdown):
 
         # Paragraph — accumulate consecutive non-empty, non-special lines
         para_lines = []
-        while i < len(lines) and lines[i].strip() and \
-                not lines[i].startswith("#") and \
-                not lines[i].startswith("```") and \
-                not re.match(r'^[-*]\s', lines[i]) and \
-                not re.match(r'^\d+\.\s', lines[i]) and \
-                not re.match(r'^---+\s*$', lines[i]) and \
-                not re.match(r'^\|.+\|', lines[i]):
+        while (
+            i < len(lines)
+            and lines[i].strip()
+            and not lines[i].startswith("#")
+            and not lines[i].startswith("```")
+            and not re.match(r"^[-*]\s", lines[i])
+            and not re.match(r"^\d+\.\s", lines[i])
+            and not re.match(r"^---+\s*$", lines[i])
+            and not re.match(r"^\|.+\|", lines[i])
+        ):
             para_lines.append(lines[i])
             i += 1
         if para_lines:
@@ -492,8 +492,7 @@ def markdown_to_adf(markdown):
             content.append(_adf_paragraph(_parse_inline(line)))
             i += 1
 
-    return _adf_doc(content) if content else \
-        _adf_doc([_adf_paragraph([_adf_text("")])])
+    return _adf_doc(content) if content else _adf_doc([_adf_paragraph([_adf_text("")])])
 
 
 def text_to_adf_codeblock(text):
@@ -508,13 +507,16 @@ def text_to_adf_paragraph(text):
 
 def archival_comment_adf(header, markdown_body):
     """Build ADF for an archival comment: header paragraph + codeBlock body."""
-    return _adf_doc([
-        _adf_paragraph(_parse_inline(header)),
-        _adf_code_block(markdown_body),
-    ])
+    return _adf_doc(
+        [
+            _adf_paragraph(_parse_inline(header)),
+            _adf_code_block(markdown_body),
+        ]
+    )
 
 
 # ─── ADF → Markdown ──────────────────────────────────────────────────────────
+
 
 def adf_to_markdown(node, list_depth=0):
     """Convert Atlassian Document Format (ADF) JSON to markdown."""
@@ -569,9 +571,7 @@ def adf_to_markdown(node, list_depth=0):
     if node_type == "orderedList":
         result = []
         for idx, item in enumerate(content, 1):
-            item_text = adf_to_markdown(
-                item.get("content", []), list_depth + 1
-            ).strip()
+            item_text = adf_to_markdown(item.get("content", []), list_depth + 1).strip()
             indent = "  " * list_depth
             result.append(f"{indent}{idx}. {item_text}\n")
         return "".join(result) + ("\n" if list_depth == 0 else "")
@@ -583,9 +583,7 @@ def adf_to_markdown(node, list_depth=0):
             if child_type in ("bulletList", "orderedList"):
                 item_parts.append(adf_to_markdown(child, list_depth + 1))
             else:
-                item_parts.append(
-                    adf_to_markdown(child, list_depth).strip()
-                )
+                item_parts.append(adf_to_markdown(child, list_depth).strip())
         indent = "  " * list_depth
         first = item_parts[0] if item_parts else ""
         rest = "".join(item_parts[1:])
@@ -611,9 +609,7 @@ def adf_to_markdown(node, list_depth=0):
             if row_node.get("type") == "tableRow":
                 cells = []
                 for cell in row_node.get("content", []):
-                    cell_text = adf_to_markdown(
-                        cell.get("content", []), list_depth
-                    ).strip()
+                    cell_text = adf_to_markdown(cell.get("content", []), list_depth).strip()
                     cell_text = cell_text.replace("\n", " ")
                     cells.append(cell_text)
                 rows.append(cells)
@@ -659,6 +655,7 @@ def adf_to_markdown(node, list_depth=0):
 
 # ─── Content Processing ──────────────────────────────────────────────────────
 
+
 def strip_metadata(markdown):
     """Remove artifact metadata and revision notes from RFE markdown.
 
@@ -674,13 +671,12 @@ def strip_metadata(markdown):
       rendered view and should never be pushed
     """
     # Strip YAML frontmatter if present
-    frontmatter_match = re.match(r'^---\s*\n.*?\n---\s*\n', markdown,
-                                 re.DOTALL)
+    frontmatter_match = re.match(r"^---\s*\n.*?\n---\s*\n", markdown, re.DOTALL)
     if frontmatter_match:
-        markdown = markdown[frontmatter_match.end():]
+        markdown = markdown[frontmatter_match.end() :]
 
     # Strip all HTML comments (invisible in Jira rendered view)
-    markdown = re.sub(r'<!--.*?-->', '', markdown, flags=re.DOTALL)
+    markdown = re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
 
     lines = markdown.split("\n")
     result = []
@@ -688,25 +684,27 @@ def strip_metadata(markdown):
 
     for line in lines:
         # Skip title heading — duplicates Summary
-        if re.match(r'^#\s+(RFE-\d+|RHAIRFE-\d+|STRAT-\d+|RHAISTRAT-\d+):',
-                    line):
+        if re.match(r"^#\s+(RFE-\d+|RHAIRFE-\d+|STRAT-\d+|RHAISTRAT-\d+):", line):
             continue
 
         # Skip metadata lines (legacy inline format, now in frontmatter)
-        if re.match(r'^\*\*(Jira Key|Size|Split from|Priority|'
-                    r'Source RFE)\*\*:', line):
+        if re.match(
+            r"^\*\*(Jira Key|Size|Split from|Priority|"
+            r"Source RFE)\*\*:",
+            line,
+        ):
             continue
 
         # Skip review note blockquotes
-        if re.match(r'^>\s*\*Review note:', line):
+        if re.match(r"^>\s*\*Review note:", line):
             continue
 
         # Track revision notes section
-        if re.match(r'^###\s+Revision Notes', line):
+        if re.match(r"^###\s+Revision Notes", line):
             in_revision_notes = True
             continue
         if in_revision_notes:
-            if re.match(r'^##\s', line):
+            if re.match(r"^##\s", line):
                 in_revision_notes = False
             else:
                 continue
@@ -715,7 +713,7 @@ def strip_metadata(markdown):
 
     # Clean up multiple consecutive blank lines
     cleaned = "\n".join(result)
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
 
@@ -745,7 +743,10 @@ def normalize_for_compare(text):
     text = re.sub(
         r"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
         r"\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF"
-        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]", "", text)
+        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]",
+        "",
+        text,
+    )
     # Normalize table separator rows (varying dash counts)
     text = re.sub(r"-{2,}", "--", text)
     # Strip auto-linked URLs: [url](url) -> url
@@ -757,5 +758,3 @@ def normalize_for_compare(text):
     # Collapse multiple blank lines to one
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-

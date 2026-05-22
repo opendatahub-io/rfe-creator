@@ -11,7 +11,10 @@ their previous hashes (enabling stale-hash change detection), and issues
 never selected remain absent (staying NEW until selected).
 
 Usage:
-    python3 scripts/snapshot_fetch.py fetch "<jql>" --ids-file tmp/autofix-all-ids.txt --changed-file tmp/autofix-changed-ids.txt [--limit 100] [--data-dir <path>]
+    python3 scripts/snapshot_fetch.py fetch "<jql>" \\
+        --ids-file tmp/autofix-all-ids.txt \\
+        --changed-file tmp/autofix-changed-ids.txt \\
+        [--limit 100] [--data-dir <path>]
 
 Selection: changed and new IDs are written to --ids-file. Unchanged-processed
 IDs (already submitted with current content) are EXCLUDED from selection by
@@ -28,23 +31,23 @@ Output (stdout):
 """
 
 import argparse
-from collections import OrderedDict
 import glob
 import hashlib
 import os
 import random
 import sys
 import urllib.parse
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jira_utils import (
-    require_env,
-    api_call_with_retry,
     adf_to_markdown,
+    api_call_with_retry,
     normalize_for_compare,
+    require_env,
 )
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,11 +87,13 @@ def _fetch_paginated(server, user, token, jql, fields):
     next_page_token = None
 
     while True:
-        path = (f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
-                f"&maxResults={page_size}&fields={fields}")
+        path = (
+            f"/search/jql?jql={urllib.parse.quote(jql, safe='')}"
+            f"&maxResults={page_size}&fields={fields}"
+        )
         if next_page_token:
-            path += f"&nextPageToken="
-            path += urllib.parse.quote(next_page_token, safe='')
+            path += "&nextPageToken="
+            path += urllib.parse.quote(next_page_token, safe="")
         data = api_call_with_retry(server, path, user, token)
 
         for issue in data.get("issues", []):
@@ -108,8 +113,7 @@ def fetch_all_issues(server, user, token, jql):
     Order matches Jira's default (created desc).
     """
     issues = OrderedDict()
-    for issue in _fetch_paginated(
-            server, user, token, jql, "key,description,labels"):
+    for issue in _fetch_paginated(server, user, token, jql, "key,description,labels"):
         key = issue["key"]
         fields = issue.get("fields", {})
         description = fields.get("description")
@@ -161,8 +165,7 @@ def load_snapshot_from_dir(data_dir):
         latest_target = os.path.basename(os.readlink(latest_link))
         print(f"Data repo latest: {latest_target}", file=sys.stderr)
     else:
-        print("Data repo: no 'latest' symlink, scanning directories",
-              file=sys.stderr)
+        print("Data repo: no 'latest' symlink, scanning directories", file=sys.stderr)
         latest_target = None
 
     # Collect run directories sorted newest-first
@@ -192,10 +195,12 @@ def load_snapshot_from_dir(data_dir):
                 with open(sf, encoding="utf-8") as fh:
                     data = yaml.safe_load(fh)
                 if data and isinstance(data.get("issues"), dict):
-                    print(f"Data repo snapshot: {run_name}/"
-                          f"{os.path.basename(sf)} "
-                          f"({len(data['issues'])} issues)",
-                          file=sys.stderr)
+                    print(
+                        f"Data repo snapshot: {run_name}/"
+                        f"{os.path.basename(sf)} "
+                        f"({len(data['issues'])} issues)",
+                        file=sys.stderr,
+                    )
                     return data
             except Exception:
                 continue
@@ -288,11 +293,9 @@ def update_snapshot_hashes(hashes, snapshot_dir=None, mark_processed=None):
                             if isinstance(entry, dict):
                                 entry["processed"] = True
                             else:
-                                issues[key] = {"hash": entry,
-                                               "processed": True}
+                                issues[key] = {"hash": entry, "processed": True}
                 with open(f, "w", encoding="utf-8") as fh:
-                    yaml.dump(data, fh, default_flow_style=False,
-                              sort_keys=False)
+                    yaml.dump(data, fh, default_flow_style=False, sort_keys=False)
                 return f
         except Exception:
             continue
@@ -306,26 +309,25 @@ def cmd_fetch(args):
     # --reprocess without --jql: skip Jira, reuse prior IDs, all changed
     if reprocess and not args.jql:
         if not os.path.exists(args.ids_file):
-            print("Error: No prior IDs found. Run with --jql or "
-                  "explicit IDs first.", file=sys.stderr)
+            print(
+                "Error: No prior IDs found. Run with --jql or explicit IDs first.", file=sys.stderr
+            )
             sys.exit(1)
         all_ids = read_id_file(args.ids_file)
         write_id_file(args.changed_file, all_ids)
         print(f"TOTAL={len(all_ids)}")
         print(f"CHANGED={len(all_ids)}")
-        print(f"NEW=0")
-        print(f"UNCHANGED=0")
+        print("NEW=0")
+        print("UNCHANGED=0")
         return
 
     if not args.jql:
-        print("Error: JQL query required (or use --reprocess)",
-              file=sys.stderr)
+        print("Error: JQL query required (or use --reprocess)", file=sys.stderr)
         sys.exit(1)
 
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required", file=sys.stderr)
         sys.exit(1)
 
     # Load previous snapshot
@@ -337,24 +339,23 @@ def cmd_fetch(args):
 
     if prev_path:
         prev_count = len(prev_data.get("issues", {}))
-        print(f"Previous snapshot: {prev_path} ({prev_count} issues)",
-              file=sys.stderr)
+        print(f"Previous snapshot: {prev_path} ({prev_count} issues)", file=sys.stderr)
     elif prev_data:
         prev_count = len(prev_data.get("issues", {}))
-        print(f"Previous snapshot: from data dir ({prev_count} issues)",
-              file=sys.stderr)
+        print(f"Previous snapshot: from data dir ({prev_count} issues)", file=sys.stderr)
     else:
         print("Previous snapshot: none (first run)", file=sys.stderr)
 
     # Hard filters only
     # NOTE: "labels not in (X)" excludes issues with NO labels at all in Jira,
     # so we must also include "labels is EMPTY" to catch unlabeled issues.
-    jql = (f"({args.jql}) AND statusCategory != Done "
-           f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)")
+    jql = (
+        f"({args.jql}) AND statusCategory != Done "
+        f"AND (labels not in (rfe-creator-ignore) OR labels is EMPTY)"
+    )
     print(f"JQL={jql}", file=sys.stderr)
 
-    query_timestamp = datetime.now(timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ")
+    query_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Fetch all matching issues
     current = fetch_all_issues(server, user, token, jql)
@@ -366,17 +367,17 @@ def cmd_fetch(args):
     # changed and new are already ordered lists from diff_snapshots
     changed_set = set(changed)
     new_set = set(new)
-    unchanged = [k for k in current
-                 if k not in changed_set and k not in new_set]
+    unchanged = [k for k in current if k not in changed_set and k not in new_set]
 
     random_n = getattr(args, "random", None)
     if random_n is not None:
         # Random sampling from all fetched issues (for testing)
         all_keys = list(current.keys())
         if random_n >= len(all_keys):
-            print(f"Warning: --random {random_n} >= fetched "
-                  f"{len(all_keys)} issues, using all",
-                  file=sys.stderr)
+            print(
+                f"Warning: --random {random_n} >= fetched {len(all_keys)} issues, using all",
+                file=sys.stderr,
+            )
             all_ids = sorted(all_keys)
         else:
             all_ids = sorted(random.sample(all_keys, random_n))
@@ -389,7 +390,7 @@ def cmd_fetch(args):
         # explicitly wants to re-do everything in scope.
         all_ids = (changed + new)[:limit]
         if reprocess and len(all_ids) < limit:
-            all_ids.extend(unchanged[:limit - len(all_ids)])
+            all_ids.extend(unchanged[: limit - len(all_ids)])
 
     # Build cumulative snapshot: previous entries + selected issues.
     # Only selected issues get their hashes recorded (or updated).
@@ -424,8 +425,7 @@ def cmd_fetch(args):
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
     snapshot = {
         "query_timestamp": query_timestamp,
-        "timestamp": datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "issues": merged_issues,
     }
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -446,8 +446,7 @@ def cmd_fetch(args):
     # Counts: TOTAL is what's selected for processing. UNCHANGED_SKIPPED
     # tracks unchanged-processed RFEs that were filtered out (the snapshot
     # already records them as processed with current content).
-    unchanged_in_selection = sum(
-        1 for k in all_ids if k not in changed_set and k not in new_set)
+    unchanged_in_selection = sum(1 for k in all_ids if k not in changed_set and k not in new_set)
     print(f"TOTAL={len(all_ids)}")
     print(f"CHANGED={len(changed_out)}")
     print(f"NEW={len(out_new)}")
@@ -462,24 +461,25 @@ def main():
     )
     sub = parser.add_subparsers(dest="command")
 
-    fetch_p = sub.add_parser(
-        "fetch", help="Fetch issues and diff against previous snapshot")
-    fetch_p.add_argument("jql", nargs="?", default=None,
-                         help="JQL query string")
-    fetch_p.add_argument("--limit", type=int, default=None,
-                         help="Max number of changed keys to output")
-    fetch_p.add_argument("--ids-file", required=True,
-                         help="Output file for all IDs to process")
-    fetch_p.add_argument("--changed-file", required=True,
-                         help="Output file for changed-only IDs")
-    fetch_p.add_argument("--data-dir",
-                         help="Local directory with previous run results")
-    fetch_p.add_argument("--reprocess", action="store_true",
-                         help="Skip Jira fetch, reuse prior IDs, "
-                         "mark all as changed")
-    fetch_p.add_argument("--random", type=int, default=None,
-                         help="With --reprocess: randomly sample N IDs "
-                         "from the prior set (for testing)")
+    fetch_p = sub.add_parser("fetch", help="Fetch issues and diff against previous snapshot")
+    fetch_p.add_argument("jql", nargs="?", default=None, help="JQL query string")
+    fetch_p.add_argument(
+        "--limit", type=int, default=None, help="Max number of changed keys to output"
+    )
+    fetch_p.add_argument("--ids-file", required=True, help="Output file for all IDs to process")
+    fetch_p.add_argument("--changed-file", required=True, help="Output file for changed-only IDs")
+    fetch_p.add_argument("--data-dir", help="Local directory with previous run results")
+    fetch_p.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="Skip Jira fetch, reuse prior IDs, mark all as changed",
+    )
+    fetch_p.add_argument(
+        "--random",
+        type=int,
+        default=None,
+        help="With --reprocess: randomly sample N IDs from the prior set (for testing)",
+    )
 
     args = parser.parse_args()
     if args.command == "fetch":

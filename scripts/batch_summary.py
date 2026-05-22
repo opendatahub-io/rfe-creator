@@ -12,10 +12,12 @@ from artifact_utils import read_frontmatter
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Aggregate RFE review results for batch summaries.")
+        description="Aggregate RFE review results for batch summaries."
+    )
     parser.add_argument("ids", nargs="+", help="RFE IDs (e.g. RHAIRFE-100)")
-    parser.add_argument("--counts-only", action="store_true",
-                        help="Print only the counts line, no per-ID details")
+    parser.add_argument(
+        "--counts-only", action="store_true", help="Print only the counts line, no per-ID details"
+    )
     args = parser.parse_args()
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
@@ -28,7 +30,7 @@ def main():
         task_path = os.path.join(artifacts_dir, "rfe-tasks", f"{rfe_id}.md")
         try:
             data, _ = read_frontmatter(task_path)
-            for child_id in (data.get("children") or []):
+            for child_id in data.get("children") or []:
                 if child_id not in id_set:
                     all_ids.append(child_id)
                     id_set.add(child_id)
@@ -84,8 +86,7 @@ def main():
         lines.append(f"{rfe_id}: {rec} ({score_str}{detail_str})")
 
     total = len(all_ids)
-    print(f"TOTAL={total} PASSED={passed} FAILED={failed} "
-          f"SPLIT={split} ERRORS={errors}")
+    print(f"TOTAL={total} PASSED={passed} FAILED={failed} SPLIT={split} ERRORS={errors}")
     if not args.counts_only:
         for line in lines:
             print(line)

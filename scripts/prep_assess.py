@@ -15,7 +15,6 @@ Outputs:
 import os
 import sys
 
-
 SINGLE_DIR = "/tmp/rfe-assess/single"
 TASK_DIR = os.path.join("artifacts", "rfe-tasks")
 

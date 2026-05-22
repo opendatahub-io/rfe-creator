@@ -60,9 +60,10 @@ def main():
         sys.exit(1)
 
     result = subprocess.run(
-        ["python3", "scripts/collect_recommendations.py", "--errors"]
-        + all_ids,
-        capture_output=True, text=True)
+        ["python3", "scripts/collect_recommendations.py", "--errors"] + all_ids,
+        capture_output=True,
+        text=True,
+    )
     error_ids = []
     for line in result.stdout.splitlines():
         if line.startswith("ERRORS="):
@@ -89,8 +90,7 @@ def main():
             error_details[rfe_id] = {"error": "no_review_file"}
 
     with open(RETRY_ERRORS_FILE, "w") as f:
-        yaml.dump(error_details, f, default_flow_style=False,
-                  sort_keys=False)
+        yaml.dump(error_details, f, default_flow_style=False, sort_keys=False)
 
     # Step 4: Persist retry IDs
     _write_ids(RETRY_IDS_FILE, error_ids)
@@ -117,9 +117,9 @@ def main():
                 if fm:
                     subprocess.run(
                         ["python3", "scripts/frontmatter.py", "set", tmp]
-                        + [f"{k}={v}" for k, v in fm.items()
-                           if k != "content"],
-                        capture_output=True)
+                        + [f"{k}={v}" for k, v in fm.items() if k != "content"],
+                        capture_output=True,
+                    )
                 os.rename(tmp, task)
 
         # Delete review and assessment artifacts
@@ -140,14 +140,13 @@ def main():
 
         # Clean up split artifacts
         if is_split_error:
-            split_status = (f"artifacts/rfe-reviews/"
-                            f"{rfe_id}-split-status.yaml")
+            split_status = f"artifacts/rfe-reviews/{rfe_id}-split-status.yaml"
             if os.path.exists(split_status):
                 os.remove(split_status)
             # Clean children via cleanup_partial_split.py
             subprocess.run(
-                ["python3", "scripts/cleanup_partial_split.py", rfe_id],
-                capture_output=True)
+                ["python3", "scripts/cleanup_partial_split.py", rfe_id], capture_output=True
+            )
 
     # Step 6: Post-cleanup verification
     warnings = []
@@ -161,8 +160,7 @@ def main():
                 warnings.append(f"  stale: {path}")
                 os.remove(path)  # retry delete
     if warnings:
-        print("WARNING: stale artifacts found after cleanup:",
-              file=sys.stderr)
+        print("WARNING: stale artifacts found after cleanup:", file=sys.stderr)
         for w in warnings:
             print(w, file=sys.stderr)
 
@@ -174,8 +172,7 @@ def main():
         _save_state(state)
         _write_ids(retry_batch_file, error_ids)
 
-    print(f"ERROR_COLLECT: retry batch with {len(error_ids)} error IDs"
-          f" [{', '.join(error_ids)}]")
+    print(f"ERROR_COLLECT: retry batch with {len(error_ids)} error IDs [{', '.join(error_ids)}]")
     for rfe_id, details in error_details.items():
         print(f"  {rfe_id}: {details.get('error', 'unknown')}")
 

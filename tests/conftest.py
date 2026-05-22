@@ -1,4 +1,5 @@
 """Shared test fixtures — jira-emulator server for integration tests."""
+
 import base64
 import json
 import os
@@ -50,15 +51,16 @@ def jira_emu():
 
     # Import inside the fixture so env vars are set first
     from jira_emulator.config import get_settings
+
     get_settings.cache_clear()
     from jira_emulator.database import reset_engine
+
     reset_engine()
-    from jira_emulator.app import create_app
     import uvicorn
+    from jira_emulator.app import create_app
 
     app = create_app()
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning")
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, daemon=True)
@@ -88,15 +90,17 @@ def jira(jira_emu):
     """
     # Patch emulator seed data to include link types this project needs
     from jira_emulator.services import seed_service
+
     _extra_link_types = [
-        {"name": "Issue split",
-         "inward_description": "is split from",
-         "outward_description": "split to"},
+        {
+            "name": "Issue split",
+            "inward_description": "is split from",
+            "outward_description": "split to",
+        },
     ]
     _orig = seed_service.LINK_TYPES
     seed_service.LINK_TYPES = _orig + [
-        lt for lt in _extra_link_types
-        if lt["name"] not in {x["name"] for x in _orig}
+        lt for lt in _extra_link_types if lt["name"] not in {x["name"] for x in _orig}
     ]
 
     # Patch RHAIRFE workflow to add global "Approve" transition (matches
@@ -107,16 +111,14 @@ def jira(jira_emu):
         seed_service.WORKFLOWS["RHAIRFE Workflow"] = _wf + [_global_approve]
 
     # Reset all data before each test (re-seeds with patched data)
-    req = urllib.request.Request(
-        f"{jira_emu}/api/admin/reset", method="POST", data=b"")
+    req = urllib.request.Request(f"{jira_emu}/api/admin/reset", method="POST", data=b"")
     urllib.request.urlopen(req)
 
     class JiraHelper:
         url = jira_emu
 
         @staticmethod
-        def create(key, summary, description, labels=None,
-                   components=None):
+        def create(key, summary, description, labels=None, components=None):
             """Import an issue with a specific key."""
             issue = {
                 "key": key,
@@ -129,21 +131,19 @@ def jira(jira_emu):
                 issue["labels"] = labels
             if components:
                 issue["components"] = [{"name": c} for c in components]
-            _jira_request(jira_emu, "POST", "/api/admin/import",
-                          {"issues": [issue]})
+            _jira_request(jira_emu, "POST", "/api/admin/import", {"issues": [issue]})
 
         @staticmethod
         def get(key):
             """GET an issue, return parsed JSON."""
-            return _jira_request(jira_emu, "GET",
-                                 f"/rest/api/3/issue/{key}")
+            return _jira_request(jira_emu, "GET", f"/rest/api/3/issue/{key}")
 
         @staticmethod
         def search(jql, fields="key,description,labels"):
             """JQL search, return list of issues."""
             from urllib.parse import quote
-            path = (f"/rest/api/3/search/jql"
-                    f"?jql={quote(jql, safe='')}&fields={fields}")
+
+            path = f"/rest/api/3/search/jql?jql={quote(jql, safe='')}&fields={fields}"
             data = _jira_request(jira_emu, "GET", path)
             return data.get("issues", [])
 

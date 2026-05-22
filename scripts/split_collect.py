@@ -60,14 +60,15 @@ def main():
     if split_parents:
         result = subprocess.run(
             ["python3", "scripts/collect_children.py"] + split_parents,
-            capture_output=True, text=True)
+            capture_output=True,
+            text=True,
+        )
         for line in result.stdout.splitlines():
             if ":" not in line:
                 continue
             pid, children_str = line.split(":", 1)
             pid = pid.strip()
-            children = [c.strip() for c in children_str.split(",")
-                        if c.strip()]
+            children = [c.strip() for c in children_str.split(",") if c.strip()]
             if children:
                 all_children.extend(children)
             else:
@@ -82,8 +83,7 @@ def _set_revise(rfe_id):
     """Set recommendation=revise on the review file."""
     review_path = f"artifacts/rfe-reviews/{rfe_id}-review.md"
     if os.path.exists(review_path):
-        update_frontmatter(review_path,
-                           {"recommendation": "revise"}, "rfe-review")
+        update_frontmatter(review_path, {"recommendation": "revise"}, "rfe-review")
 
 
 def _write_ids(path, ids):

@@ -32,8 +32,8 @@ import re
 import sys
 import unicodedata
 
-from jira_utils import require_env, get_issue, adf_to_markdown
 from artifact_utils import scan_task_files
+from jira_utils import adf_to_markdown, get_issue, require_env
 
 
 def _normalize_for_compare(text):
@@ -62,7 +62,10 @@ def _normalize_for_compare(text):
     text = re.sub(
         r"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
         r"\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF"
-        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]", "", text)
+        r"\U00002702-\U000027B0\U0000FE00-\U0000FE0F]",
+        "",
+        text,
+    )
     # Normalize table separator rows (varying dash counts)
     text = re.sub(r"-{2,}", "--", text)
     # Strip auto-linked URLs: [url](url) -> url
@@ -81,14 +84,14 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--artifacts-dir", default="artifacts",
-                        help="Artifacts directory (default: artifacts)")
+    parser.add_argument(
+        "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
     args = parser.parse_args()
 
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars "
-              "required.", file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)
         sys.exit(2)
 
     originals_dir = os.path.join(args.artifacts_dir, "rfe-originals")
@@ -119,18 +122,15 @@ def main():
 
         # Fetch current Jira description
         try:
-            issue = get_issue(server, user, token, rfe_id,
-                              fields=["description"])
+            issue = get_issue(server, user, token, rfe_id, fields=["description"])
             fields = issue.get("fields", {})
             current_desc_raw = fields.get("description")
             if isinstance(current_desc_raw, dict):
-                current_desc = _normalize_for_compare(
-                    adf_to_markdown(current_desc_raw))
+                current_desc = _normalize_for_compare(adf_to_markdown(current_desc_raw))
             elif current_desc_raw is None:
                 current_desc = ""
             else:
-                current_desc = _normalize_for_compare(
-                    str(current_desc_raw))
+                current_desc = _normalize_for_compare(str(current_desc_raw))
         except Exception as e:
             print(f"Warning: could not fetch {rfe_id}: {e}", file=sys.stderr)
             continue

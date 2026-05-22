@@ -15,7 +15,6 @@ import yaml
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter
 
-
 PHASE_CHECKS = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
     "assess": lambda id: f"/tmp/rfe-assess/single/{id}.result.md",
@@ -104,8 +103,12 @@ def _detect_fast(explicit_flag):
     """Return True if fast-poll should be used."""
     if explicit_flag:
         return True
-    for cfg in ("tmp/review-config.yaml", "tmp/split-config.yaml",
-                 "tmp/autofix-config.yaml", "tmp/speedrun-config.yaml"):
+    for cfg in (
+        "tmp/review-config.yaml",
+        "tmp/split-config.yaml",
+        "tmp/autofix-config.yaml",
+        "tmp/speedrun-config.yaml",
+    ):
         if os.path.exists(cfg):
             try:
                 with open(cfg) as f:
@@ -118,29 +121,38 @@ def _detect_fast(explicit_flag):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Check review pipeline progress by phase")
-    parser.add_argument("--phase", required=True,
-                        choices=list(PHASE_CHECKS.keys()),
-                        help="Pipeline phase to check")
-    parser.add_argument("--also-phase", action="append",
-                        dest="also_phases",
-                        choices=list(PHASE_CHECKS.keys()),
-                        help="Additional phases to check (wait mode)")
-    parser.add_argument("--id-file",
-                        help="File containing IDs (one per line or "
-                             "space-separated)")
-    parser.add_argument("--fast-poll", action="store_true",
-                        help="Cap poll interval at 15s (interactive mode). "
-                             "Auto-enabled when config files show headless=false.")
-    parser.add_argument("--wait", action="store_true",
-                        help="Block until all agents complete, sleeping "
-                             "internally between checks. Exit 0 when done.")
-    parser.add_argument("--max-wait", type=int, default=90,
-                        help="Max seconds to wait in --wait mode before timing out (exit 3). "
-                             "Default 90 (fits within 2-min bash timeout).")
-    parser.add_argument("ids", nargs="*", metavar="ID",
-                        help="RFE IDs to check")
+    parser = argparse.ArgumentParser(description="Check review pipeline progress by phase")
+    parser.add_argument(
+        "--phase", required=True, choices=list(PHASE_CHECKS.keys()), help="Pipeline phase to check"
+    )
+    parser.add_argument(
+        "--also-phase",
+        action="append",
+        dest="also_phases",
+        choices=list(PHASE_CHECKS.keys()),
+        help="Additional phases to check (wait mode)",
+    )
+    parser.add_argument("--id-file", help="File containing IDs (one per line or space-separated)")
+    parser.add_argument(
+        "--fast-poll",
+        action="store_true",
+        help="Cap poll interval at 15s (interactive mode). "
+        "Auto-enabled when config files show headless=false.",
+    )
+    parser.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block until all agents complete, sleeping "
+        "internally between checks. Exit 0 when done.",
+    )
+    parser.add_argument(
+        "--max-wait",
+        type=int,
+        default=90,
+        help="Max seconds to wait in --wait mode before timing out (exit 3). "
+        "Default 90 (fits within 2-min bash timeout).",
+    )
+    parser.add_argument("ids", nargs="*", metavar="ID", help="RFE IDs to check")
     args = parser.parse_args()
 
     ids = args.ids
@@ -165,11 +177,10 @@ def main():
             all_complete = True
             max_poll = 0
             for phase in phases:
-                completed, errors, pending, total, next_poll = \
-                    _check_phase(phase, ids, fast)
-                print(_format_status(
-                    phase, completed, errors, pending, total, next_poll),
-                    flush=True)
+                completed, errors, pending, total, next_poll = _check_phase(phase, ids, fast)
+                print(
+                    _format_status(phase, completed, errors, pending, total, next_poll), flush=True
+                )
                 if pending > 0:
                     all_complete = False
                 max_poll = max(max_poll, next_poll)
@@ -189,20 +200,20 @@ def main():
                             pending_ids.add(rfe_id)
                 id_list = sorted(pending_ids)
                 if len(id_list) > 5:
-                    id_summary = ' '.join(id_list[:5]) + f' ... and {len(id_list) - 5} more'
+                    id_summary = " ".join(id_list[:5]) + f" ... and {len(id_list) - 5} more"
                 else:
-                    id_summary = ' '.join(id_list)
-                print(f"Waited {int(elapsed)}s, still pending: "
-                      f"{id_summary}. "
-                      f"Re-run this command.", flush=True)
+                    id_summary = " ".join(id_list)
+                print(
+                    f"Waited {int(elapsed)}s, still pending: {id_summary}. Re-run this command.",
+                    flush=True,
+                )
                 sys.exit(3)
 
             print(f"Sleeping {max_poll}s...", flush=True)
             time.sleep(max_poll)
     else:
         # Legacy single-phase mode
-        completed, errors, pending, total, next_poll = \
-            _check_phase(args.phase, ids, fast)
+        completed, errors, pending, total, next_poll = _check_phase(args.phase, ids, fast)
         parts = [f"COMPLETED={completed}/{total}"]
         if pending:
             parts.append(f"PENDING={pending}")
