@@ -20,7 +20,7 @@ If `--headless` is present, skip Step 2 entirely and proceed directly from Step 
 
 ## Step 1: Load Rubric
 
-If `artifacts/rfe-rubric.md` does not exist, try to bootstrap and export it:
+If `artifacts/rfe-rubric.md` does not exist, bootstrap and export it:
 
 1. Run `bash scripts/bootstrap-assess-rfe.sh` to fetch the assess-rfe skills
 2. When any assess-rfe skill resolves its `{PLUGIN_ROOT}`, it should use the absolute path of `.context/assess-rfe/` in the project working directory.

@@ -22,7 +22,7 @@ Review a single RFE specified by ID. Read the task file at `artifacts/rfe-tasks/
 
 Read the file `.context/architecture-context/LATEST_VERSION` to get the version directory name (e.g., `rhoai-3.4-ea.2`). Then read `.context/architecture-context/architecture/<version>/PLATFORM.md` to identify which components the RFE touches, and read relevant component docs. Use this to ground your feasibility assessment in the actual platform.
 
-If `LATEST_VERSION` does not exist or the PLATFORM.md read fails, assess feasibility based on the RFE content alone and note that architecture context was not available.
+If `LATEST_VERSION` does not exist or the PLATFORM.md read fails, assess feasibility based on the RFE content alone and state that architecture context was not available.
 
 ## Architecture Context Overlays
 

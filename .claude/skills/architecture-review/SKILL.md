@@ -41,7 +41,7 @@ Overlays applied:
 
 For each strategy:
 
-1. **Are dependencies correctly identified?** Check every component mentioned against the architecture docs. Are there dependencies the strategy missed? Are any listed dependencies incorrect or outdated?
+1. **Are all dependencies identified and accurate?** Check every component mentioned against the architecture docs. Are there dependencies the strategy missed? Are any listed dependencies incorrect or outdated?
 2. **Are integration patterns correct?** Does the strategy propose integrations that match how components actually communicate? Does it assume APIs or capabilities that don't exist?
 3. **Are component boundaries respected?** Does the strategy require changes to components in ways that violate their intended boundaries? Would this create unwanted coupling?
 4. **Is the deployment model correct?** Does the strategy account for how the affected components are actually deployed (Operators, Helm, standalone)?
