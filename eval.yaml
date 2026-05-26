@@ -16,14 +16,15 @@ runner:
 
 # Models — defaults for each role (CLI flags override)
 models:
-  skill: claude-opus-4-7
-  subagent: claude-opus-4-7
-  judge: claude-opus-4-7
+  skill: claude-opus-4-6
+  subagent: claude-opus-4-6
+  judge: claude-opus-4-6
 
 # Permissions for headless execution
 permissions:
   allow:
     - "Skill"
+    - "Agent"
     - "Write(/tmp/rfe-assess/**)"
     - "Write(/private/tmp/rfe-assess/**)"
     - "Edit(/tmp/rfe-assess/**)"
@@ -324,15 +325,19 @@ judges:
       and no feasibility file should contain "architecture context was
       not available".
     check: |
+      import re
       files = outputs.get("files", {})
       feasibility = {k: v for k, v in files.items()
                      if k.endswith("-feasibility.md")}
       if not feasibility:
           return (False, "No feasibility files found")
       errors = []
+      no_ctx_pattern = re.compile(
+          r'architecture context was not available|no architecture context was available',
+          re.IGNORECASE
+      )
       for fname, content in sorted(feasibility.items()):
-          lower = content.lower()
-          if "architecture context was not available" in lower:
+          if no_ctx_pattern.search(content):
               errors.append(f"{fname}: architecture context not used")
       return (len(errors) == 0,
               "; ".join(errors) if errors else f"{len(feasibility)} feasibility reviews used architecture context")
