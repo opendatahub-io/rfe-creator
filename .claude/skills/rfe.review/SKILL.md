@@ -57,7 +57,7 @@ Remove failed IDs from the processing list and continue with remaining IDs.
 
 ## Review Step 1.5: Setup
 
-Run these in parallel (two Bash calls):
+Run these in parallel (three Bash calls):
 
 ```bash
 bash scripts/fetch-architecture-context.sh
@@ -67,7 +67,11 @@ bash scripts/fetch-architecture-context.sh
 bash scripts/bootstrap-assess-rfe.sh
 ```
 
-If architecture fetch fails, proceed without it. If bootstrap fails, note it — review agents will do basic quality checks instead.
+```bash
+bash scripts/bootstrap-jtbd-registry.sh
+```
+
+If architecture fetch fails, proceed without it. If assess-rfe bootstrap fails, note it — review agents will do basic quality checks instead. If JTBD registry bootstrap fails, note it — JTBD alignment scoring will be skipped (set to `null`).
 
 ## Review Step 2: Launch Assessment + Feasibility Agents
 
@@ -109,12 +113,48 @@ After completion, check prerequisites for each ID via Glob:
 - If feasibility file (`artifacts/rfe-reviews/<ID>-feasibility.md`) is missing → write error: `feasibility_failed`
 - If either is missing for an ID, write the error to review frontmatter and remove from processing list
 
+## Review Step 2.5: JTBD Alignment Assessment
+
+If `.context/jtbd-registry/index.yaml` exists, launch a **JTBD review agent** (model: opus, run_in_background: true) for each ID:
+
+```
+Read .claude/skills/rfe.review/prompts/jtbd-review-agent.md and follow all instructions. The RFE ID to review is: <ID>. Read the RFE from artifacts/rfe-tasks/<ID>.md and its frontmatter.
+```
+
+The JTBD review agent:
+1. Reads `governance.yaml` first (behavioral constraints)
+2. Reads `index.yaml` (18 jobs ranked by opportunity score, ~500 tokens)
+3. Validates any existing `jtbd_mapping` in the RFE frontmatter
+4. Independently assesses job mapping against the registry
+5. Scores JTBD alignment (0–2) using a four-dimension rubric:
+   - **Job Mapping Validity** — is the RFE mapped to the correct JTBD?
+   - **Evidence Utilization** — does the WHY section cite research data effectively?
+   - **Persona-Task Coherence** — is the persona/workflow connection sound?
+   - **Opportunity Justification** — does the research data support the stated priority?
+6. Returns structured scoring with per-dimension breakdown and recommendations
+
+**Composite scoring rule:**
+- Any dimension at 0 → composite is **0** (no meaningful alignment)
+- All dimensions at 2 → composite is **2** (strong alignment)
+- Otherwise → composite is **1** (partial alignment)
+
+If the RFE is legitimately non-user-facing (pure infra, internal tooling), score is `null` (not applicable).
+
+Launch all JTBD review agents in parallel with the assess/feasibility agents from Step 2. Write IDs to poll file and poll:
+
+```bash
+python3 scripts/state.py write-ids tmp/rfe-poll-jtbd.txt <all_IDs>
+python3 scripts/check_review_progress.py --phase jtbd --id-file tmp/rfe-poll-jtbd.txt
+```
+
+If the registry was unavailable, skip this step entirely and set `jtbd_alignment=null` for all IDs in Review Step 3.
+
 ## Review Step 3: Launch Review Agents
 
 For each remaining ID, launch a **review agent** (model: opus, run_in_background: true):
 
 ```
-Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=true
+Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {JTBD_PATH}=artifacts/rfe-reviews/<ID>-jtbd.md, {FIRST_PASS}=true
 ```
 
 Launch all review agents in parallel.
@@ -147,7 +187,7 @@ The script outputs the IDs that need revision (filters out passing, infeasible, 
 Launch a **revise agent** (model: opus, run_in_background: true) for each ID returned:
 
 ```
-Read .claude/skills/rfe.review/prompts/revise-agent.md and follow all instructions. Substitute: {ID}=<ID>
+Read .claude/skills/rfe.review/prompts/revise-agent.md and follow all instructions. Substitute: {ID}=<ID>. If the JTBD alignment score for this ID is 0 or 1 and .context/jtbd-registry/index.yaml exists, also read .claude/skills/rfe.review/prompts/revise-agent-jtbd-extension.md and follow its instructions to strengthen JTBD grounding.
 ```
 
 Launch all revise agents in parallel.

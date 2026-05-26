@@ -63,6 +63,26 @@ SCHEMAS = {
             "required": False,
             "default": None,
         },
+        "jtbd_mapping": {
+            "type": "dict",
+            "required": False,
+            "default": None,
+            "fields": {
+                "confidence": {
+                    "type": "string",
+                    "required": True,
+                    "enum": ["high", "medium", "low", "none"],
+                },
+                "jobs": {
+                    "type": "list",
+                    "required": False,
+                },
+                "personas": {
+                    "type": "list",
+                    "required": False,
+                },
+            },
+        },
     },
     "rfe-review": {
         "rfe_id": {
@@ -107,6 +127,8 @@ SCHEMAS = {
                 "open_to_how": {"type": "int", "required": True},
                 "not_a_task": {"type": "int", "required": True},
                 "right_sized": {"type": "int", "required": True},
+                "jtbd_alignment": {"type": "int", "required": False,
+                                   "nullable": True, "min": 0, "max": 2},
             },
         },
         "error": {

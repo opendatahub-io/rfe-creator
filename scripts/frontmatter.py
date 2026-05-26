@@ -73,6 +73,34 @@ def _coerce_value(value_str, field_spec):
     return value_str
 
 
+def _deep_set(data, parts, value):
+    """Set a value at an arbitrary dot-path, creating intermediates.
+
+    Numeric path segments are treated as list indices. The list is
+    auto-extended with empty dicts to accommodate the index.
+    """
+    container = data
+    for i, seg in enumerate(parts[:-1]):
+        next_seg = parts[i + 1]
+        if seg.isdigit():
+            idx = int(seg)
+            while len(container) <= idx:
+                container.append({})
+            container = container[idx]
+        else:
+            if seg not in container:
+                container[seg] = [] if next_seg.isdigit() else {}
+            container = container[seg]
+    last = parts[-1]
+    if last.isdigit():
+        idx = int(last)
+        while len(container) <= idx:
+            container.append(None)
+        container[idx] = value
+    else:
+        container[last] = value
+
+
 def _detect_schema_type(path):
     """Detect schema type from file path."""
     if "/rfe-reviews/" in path or "rfe-reviews/" in path:
@@ -138,28 +166,35 @@ def cmd_set(args):
 
         field_name, value_str = field_value.split("=", 1)
 
-        # Handle dot notation for nested fields (e.g., scores.what=2)
+        # Handle dot notation for nested fields (e.g., scores.what=2,
+        # jtbd_mapping.jobs.0.id=6)
         if "." in field_name:
-            parts = field_name.split(".", 1)
-            parent_name, child_name = parts
-            if parent_name not in schema:
-                print(f"Error: unknown field '{parent_name}'",
+            parts = field_name.split(".")
+            root = parts[0]
+            if root not in schema:
+                print(f"Error: unknown field '{root}'",
                       file=sys.stderr)
                 sys.exit(1)
-            parent_spec = schema[parent_name]
-            if parent_spec.get("type") != "dict":
-                print(f"Error: '{parent_name}' is not a dict field",
-                      file=sys.stderr)
-                sys.exit(1)
-            nested_fields = parent_spec.get("fields", {})
-            if child_name not in nested_fields:
-                print(f"Error: unknown field '{field_name}'",
-                      file=sys.stderr)
-                sys.exit(1)
-            coerced = _coerce_value(value_str, nested_fields[child_name])
-            if parent_name not in data:
-                data[parent_name] = {}
-            data[parent_name][child_name] = coerced
+
+            # Walk schema to find the leaf spec for type coercion.
+            leaf_spec = {"type": "string"}
+            cur_spec = schema[root]
+            for seg in parts[1:]:
+                if cur_spec is None:
+                    break
+                if seg.isdigit():
+                    leaf_spec = {"type": "string"}
+                    cur_spec = None
+                elif cur_spec.get("type") == "dict":
+                    nested = cur_spec.get("fields", {})
+                    cur_spec = nested.get(seg)
+                    if cur_spec:
+                        leaf_spec = cur_spec
+                else:
+                    cur_spec = None
+
+            coerced = _coerce_value(value_str, leaf_spec)
+            _deep_set(data, parts, coerced)
         else:
             if field_name not in schema:
                 print(f"Error: unknown field '{field_name}' for schema "
