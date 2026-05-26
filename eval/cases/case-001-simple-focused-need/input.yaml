@@ -1,8 +1,0 @@
-prompt: >
-  Our data scientists at Acme Corp and GlobalTech need to be able to export
-  their trained models from the RHOAI dashboard as ONNX files. Right now they
-  have to SSH into the serving node and run a manual conversion script, which
-  breaks their workflow and adds 30 minutes per model. This has been raised
-  by both customers in their latest QBRs and is blocking Acme's renewal
-  ($400K ARR at risk). This is fundamentally about making the handoff from
-  development to production seamless.
