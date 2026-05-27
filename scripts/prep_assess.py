@@ -47,9 +47,8 @@ def main():
     with open(src, "r", encoding="utf-8") as f:
         content = f.read()
 
-    if not content.strip() or '---' not in content:
-        print(f"SKIP: {rfe_id} — task file empty or missing frontmatter: {src}",
-              file=sys.stderr)
+    if not content.strip() or "---" not in content:
+        print(f"SKIP: {rfe_id} — task file empty or missing frontmatter: {src}", file=sys.stderr)
         sys.exit(0)
 
     dst = os.path.join(SINGLE_DIR, f"{rfe_id}.md")
