@@ -1,8 +1,38 @@
+# Editor and IDE
+.idea
+*.swp
+*.swo
+*~
+.vscode
+.envrc
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+*.egg
+
+# Claude Code local settings
+.claude/settings.local.json
+.mcp.json
+*.local.json
+
+# Working directories
 .context/
 artifacts/
+tmp/
+
+# Vendored skills (fetched at runtime)
 .claude/skills/assess-rfe/
 .claude/skills/export-rubric/
-__pycache__/
-tmp/
-.mcp.json
+
+# Ruff cache
+.ruff_cache/
+
+# Logs
+*.log

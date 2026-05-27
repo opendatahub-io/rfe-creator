@@ -123,6 +123,25 @@ export JIRA_TOKEN=your-api-token
 
 The Atlassian MCP server is used for read operations (fetching issues, comments) when available, with a REST API fallback.
 
+## Development
+
+### Prerequisites
+
+- Python 3.10+ with [ruff](https://docs.astral.sh/ruff/)
+- [shellcheck](https://www.shellcheck.net/)
+
+### Validate Changes
+
+```bash
+make lint
+```
+
+This runs [skillsaw](https://github.com/stbenjam/skillsaw), ruff (check + format), shellcheck, and pytest.
+
+You can auto-fix some skillsaw issues with `make skillsaw-fix`.
+
+See [AGENTS.md](AGENTS.md) for architecture details and conventions.
+
 ## CI / Headless Mode
 
 All orchestrator skills support `--headless` for non-interactive use in CI pipelines. Combined with `--dry-run`, you can validate the full pipeline without Jira writes:

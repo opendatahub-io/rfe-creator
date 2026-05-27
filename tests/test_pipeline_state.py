@@ -4,10 +4,10 @@
 Focuses on complex decision points and the invariant that every
 revision is followed by a review.
 """
+
 import os
 import subprocess
 import sys
-import textwrap
 
 import pytest
 
@@ -59,18 +59,18 @@ def make_state(**overrides):
 
 # ---------- Init ----------
 
+
 class TestInit:
     def test_preserves_existing_id_files(self, tmp_dir):
         """init must not wipe existing files in tmp/ (required for --reprocess)."""
-        write_ids("tmp/pipeline-all-ids.txt",
-                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         write_ids("tmp/pipeline-changed-ids.txt", ["RHAIRFE-1001"])
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_init([])
-        assert read_ids("tmp/pipeline-all-ids.txt") == [
-            "RHAIRFE-1001", "RHAIRFE-1002"]
+        assert read_ids("tmp/pipeline-all-ids.txt") == ["RHAIRFE-1001", "RHAIRFE-1002"]
         assert read_ids("tmp/pipeline-changed-ids.txt") == ["RHAIRFE-1001"]
 
     def test_cleans_stale_batch_files(self, tmp_dir):
@@ -82,6 +82,7 @@ class TestInit:
         write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_init([])
         assert not os.path.exists("tmp/pipeline-batch-1-ids.txt")
@@ -97,16 +98,17 @@ class TestInit:
             f.write("FIXUP")
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_init([])
         assert not os.path.exists(ps.DISPATCH_MARKER)
 
     def test_resets_state_on_reinit(self, tmp_dir):
         """init resets pipeline state even if prior state exists."""
-        ps._save_state(make_state(phase="COLLECT", batch=3,
-                                  reassess_cycle=2))
+        ps._save_state(make_state(phase="COLLECT", batch=3, reassess_cycle=2))
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_init(["--batch-size", "25"])
         state = ps._load_state()
@@ -127,6 +129,7 @@ class TestInit:
         ps._save_state(make_state(phase="INIT"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -141,6 +144,7 @@ class TestInit:
         ps._save_state(make_state(phase="DONE"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -153,12 +157,11 @@ class TestInit:
 
 # ---------- BATCH_START ----------
 
+
 class TestBatchStart:
     def test_resets_counters(self, tmp_dir):
         write_ids("tmp/pipeline-batch-1-ids.txt", ["A", "B"])
-        state = make_state(
-            phase="BATCH_START", batch=0,
-            reassess_cycle=2, correction_cycle=1)
+        state = make_state(phase="BATCH_START", batch=0, reassess_cycle=2, correction_cycle=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "FETCH"
         assert state["reassess_cycle"] == 0
@@ -173,6 +176,7 @@ class TestBatchStart:
 
 
 # ---------- Linear sequences ----------
+
 
 class TestLinearSequences:
     def test_main_sequence(self, tmp_dir):
@@ -210,6 +214,7 @@ class TestLinearSequences:
 
 
 # ---------- REASSESS loop ----------
+
 
 class TestReassessLoop:
     def test_reassess_check_enters_loop(self, tmp_dir, monkeypatch):
@@ -339,6 +344,7 @@ class TestReassessFullCycle:
 
 # ---------- REVIEW → REVISE filter ----------
 
+
 class TestReviewToRevise:
     def test_review_filters_active_ids(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-active-ids.txt", ["A", "B", "C"])
@@ -359,6 +365,7 @@ class TestReviewToRevise:
 
 # ---------- Split pipeline ----------
 
+
 class TestSplitPipeline:
     def test_split_review_filters_for_revision(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
@@ -376,9 +383,7 @@ class TestSplitPipeline:
             next_phase, _ = ps.advance(state)
             phases.append(next_phase)
             state["phase"] = next_phase
-        assert phases == [
-            "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE"
-        ]
+        assert phases == ["SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE"]
 
     def test_split_restore_to_correction_check(self, tmp_dir):
         """SPLIT_RESTORE is the last linear step before SPLIT_CORRECTION_CHECK."""
@@ -394,8 +399,7 @@ class TestSplitFullCycle:
     def test_revised_children_are_re_reviewed(self, tmp_dir, monkeypatch):
         """Trace: SPLIT_REVIEW filters → SPLIT_REVISE → FIXUP → re-review."""
         # SPLIT_REVIEW: 1 of 3 children needs revision
-        write_ids("tmp/pipeline-split-children-ids.txt",
-                  ["RFE-001", "RFE-002", "RFE-003"])
+        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002", "RFE-003"])
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "RFE-002")
         state = make_state(phase="SPLIT_REVIEW")
         next_phase, _ = ps.advance(state)
@@ -404,14 +408,19 @@ class TestSplitFullCycle:
 
         # Walk through the full post-revise sequence
         expected_phases = [
-            "SPLIT_FIXUP", "SPLIT_SAVE", "SPLIT_REASSESS",
-            "SPLIT_RE_REVIEW", "SPLIT_RESTORE", "SPLIT_CORRECTION_CHECK",
+            "SPLIT_FIXUP",
+            "SPLIT_SAVE",
+            "SPLIT_REASSESS",
+            "SPLIT_RE_REVIEW",
+            "SPLIT_RESTORE",
+            "SPLIT_CORRECTION_CHECK",
         ]
         state["phase"] = next_phase
         for expected in expected_phases:
             next_phase, _ = ps.advance(state)
             assert next_phase == expected, (
-                f"Expected {expected} after {state['phase']}, got {next_phase}")
+                f"Expected {expected} after {state['phase']}, got {next_phase}"
+            )
             state["phase"] = next_phase
 
     def test_no_revision_skips_reassess(self, tmp_dir, monkeypatch):
@@ -430,18 +439,22 @@ class TestSplitFullCycle:
             next_phase, _ = ps.advance(state)
             phases.append(next_phase)
         assert phases == [
-            "SPLIT_REVISE", "SPLIT_FIXUP", "SPLIT_SAVE",
-            "SPLIT_REASSESS", "SPLIT_RE_REVIEW", "SPLIT_RESTORE",
+            "SPLIT_REVISE",
+            "SPLIT_FIXUP",
+            "SPLIT_SAVE",
+            "SPLIT_REASSESS",
+            "SPLIT_RE_REVIEW",
+            "SPLIT_RESTORE",
         ]
 
 
 # ---------- SPLIT_CORRECTION_CHECK ----------
 
+
 class TestSplitCorrectionCheck:
     def test_undersized_loops_back(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
-        monkeypatch.setattr(ps, "_run_script",
-                            lambda cmd: "RESPLIT=RFE-001")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=RFE-001")
         state = make_state(phase="SPLIT_CORRECTION_CHECK", correction_cycle=0)
         next_phase, summary = ps.advance(state)
         assert next_phase == "SPLIT"
@@ -457,8 +470,7 @@ class TestSplitCorrectionCheck:
 
     def test_max_correction_cycle_exits(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001"])
-        monkeypatch.setattr(ps, "_run_script",
-                            lambda cmd: "RESPLIT=RFE-001")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=RFE-001")
         state = make_state(phase="SPLIT_CORRECTION_CHECK", correction_cycle=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "BATCH_DONE"
@@ -466,12 +478,13 @@ class TestSplitCorrectionCheck:
 
 # ---------- COLLECT ----------
 
+
 class TestCollect:
     def test_splits_go_to_split_phase(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-active-ids.txt", ["A", "B"])
         monkeypatch.setattr(
-            ps, "_run_script",
-            lambda cmd: "SUBMIT=A\nSPLIT=B\nREVISE=\nREJECT=\nERRORS=")
+            ps, "_run_script", lambda cmd: "SUBMIT=A\nSPLIT=B\nREVISE=\nREJECT=\nERRORS="
+        )
         state = make_state(phase="COLLECT")
         next_phase, summary = ps.advance(state)
         assert next_phase == "SPLIT"
@@ -481,14 +494,15 @@ class TestCollect:
     def test_no_splits_go_to_batch_done(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-active-ids.txt", ["A"])
         monkeypatch.setattr(
-            ps, "_run_script",
-            lambda cmd: "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS=")
+            ps, "_run_script", lambda cmd: "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
+        )
         state = make_state(phase="COLLECT")
         next_phase, _ = ps.advance(state)
         assert next_phase == "BATCH_DONE"
 
 
 # ---------- SPLIT_COLLECT ----------
+
 
 class TestSplitCollect:
     def test_children_exist(self, tmp_dir):
@@ -505,6 +519,7 @@ class TestSplitCollect:
 
 
 # ---------- BATCH_DONE ----------
+
 
 class TestBatchDone:
     def test_more_batches(self, tmp_dir, monkeypatch):
@@ -526,8 +541,7 @@ class TestBatchDone:
             return ""
 
         monkeypatch.setattr(ps, "_run_script", mock_run)
-        state = make_state(phase="BATCH_DONE", batch=2, total_batches=2,
-                           retry_cycle=0)
+        state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, retry_cycle=0)
         next_phase, _ = ps.advance(state)
         assert next_phase == "ERROR_COLLECT"
 
@@ -535,9 +549,10 @@ class TestBatchDone:
         write_ids("tmp/pipeline-active-ids.txt", ["A"])
         write_ids("tmp/pipeline-all-ids.txt", ["A"])
         monkeypatch.setattr(
-            ps, "_run_script",
-            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd
-            else "ERRORS=")
+            ps,
+            "_run_script",
+            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=",
+        )
         state = make_state(phase="BATCH_DONE", batch=1, total_batches=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "REPORT"
@@ -546,16 +561,17 @@ class TestBatchDone:
         write_ids("tmp/pipeline-active-ids.txt", ["A"])
         write_ids("tmp/pipeline-all-ids.txt", ["A", "B"])
         monkeypatch.setattr(
-            ps, "_run_script",
-            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd
-            else "ERRORS=B")
-        state = make_state(phase="BATCH_DONE", batch=2, total_batches=2,
-                           retry_cycle=1)
+            ps,
+            "_run_script",
+            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=B",
+        )
+        state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, retry_cycle=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "REPORT"
 
 
 # ---------- ERROR_COLLECT ----------
+
 
 class TestErrorCollect:
     def test_transitions_to_batch_start(self, tmp_dir):
@@ -568,11 +584,13 @@ class TestErrorCollect:
 
 # ---------- get-phase-config ----------
 
+
 class TestGetPhaseConfig:
     def test_includes_phase_name(self, tmp_dir):
         ps._save_state(make_state(phase="FETCH"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_get_phase_config([])
@@ -584,6 +602,7 @@ class TestGetPhaseConfig:
         ps._save_state(make_state(phase="FIXUP"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_get_phase_config([])
@@ -597,6 +616,7 @@ class TestGetPhaseConfig:
         ps._save_state(make_state(phase="ASSESS"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_get_phase_config([])
@@ -608,19 +628,20 @@ class TestGetPhaseConfig:
 
 # ---------- run-phase ----------
 
+
 class TestRunPhase:
     def test_executes_script(self, tmp_dir, monkeypatch):
         """REPORT (no ids_file) runs the correct command."""
-        ps._save_state(make_state(phase="REPORT",
-                                  start_time="2026-04-09T00:00:00Z",
-                                  batch_size=50))
+        ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: (calls.append(cmd),
-                               type("R", (), {"returncode": 0})())[1])
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+        )
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_run_phase([])
@@ -631,15 +652,16 @@ class TestRunPhase:
     def test_appends_ids(self, tmp_dir, monkeypatch):
         """FIXUP reads IDs from ids_file and appends them."""
         ps._save_state(make_state(phase="FIXUP"))
-        write_ids("tmp/pipeline-revise-ids.txt",
-                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         calls = []
         monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: (calls.append(cmd),
-                               type("R", (), {"returncode": 0})())[1])
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+        )
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
         assert "RHAIRFE-1001" in calls[0]
@@ -647,16 +669,16 @@ class TestRunPhase:
 
     def test_substitutes_state_vars(self, tmp_dir, monkeypatch):
         """REPORT substitutes {start_time} and {batch_size}."""
-        ps._save_state(make_state(phase="REPORT",
-                                  start_time="2026-04-09T00:00:00Z",
-                                  batch_size=50))
+        ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: (calls.append(cmd),
-                               type("R", (), {"returncode": 0})())[1])
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+        )
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
         assert "2026-04-09T00:00:00Z" in calls[0]
@@ -681,11 +703,10 @@ class TestRunPhase:
         """run-phase writes dispatch marker on success."""
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001"])
-        monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: type("R", (), {"returncode": 0})())
+        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 0})())
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
         assert os.path.exists(ps.DISPATCH_MARKER)
@@ -696,11 +717,10 @@ class TestRunPhase:
         """run-phase does NOT write dispatch marker on failure."""
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001"])
-        monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: type("R", (), {"returncode": 1})())
+        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 1})())
         import io
         from contextlib import redirect_stdout
+
         with pytest.raises(SystemExit):
             with redirect_stdout(io.StringIO()):
                 ps.cmd_run_phase([])
@@ -711,10 +731,11 @@ class TestRunPhase:
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001"])
         monkeypatch.setattr(
-            subprocess, "run",
-            lambda cmd, **kw: type("R", (), {"returncode": 42})())
+            subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 42})()
+        )
         import io
         from contextlib import redirect_stdout
+
         with pytest.raises(SystemExit) as exc_info:
             with redirect_stdout(io.StringIO()):
                 ps.cmd_run_phase([])
@@ -722,6 +743,7 @@ class TestRunPhase:
 
 
 # ---------- Dispatch marker guard ----------
+
 
 class TestDispatchMarker:
     """Verify advance refuses to proceed for script phases without dispatch."""
@@ -751,6 +773,7 @@ class TestDispatchMarker:
             f.write("FIXUP")
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -764,6 +787,7 @@ class TestDispatchMarker:
         write_ids("tmp/pipeline-batch-1-ids.txt", ["RHAIRFE-1001"])
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -779,6 +803,7 @@ class TestDispatchMarker:
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -789,6 +814,7 @@ class TestDispatchMarker:
         ps._save_state(make_state(phase="FIXUP"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance(["--dry-run"])
@@ -819,6 +845,7 @@ class TestAgentPhaseGuard:
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -849,6 +876,7 @@ class TestAgentPhaseGuard:
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -860,6 +888,7 @@ class TestAgentPhaseGuard:
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
         import io
         from contextlib import redirect_stderr
+
         buf = io.StringIO()
         with pytest.raises(SystemExit), redirect_stderr(buf):
             ps.cmd_advance([])
@@ -873,6 +902,7 @@ class TestAgentPhaseGuard:
         # No task file → would fail without dry-run
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance(["--dry-run"])
@@ -885,6 +915,7 @@ class TestAgentPhaseGuard:
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_advance([])
@@ -893,17 +924,18 @@ class TestAgentPhaseGuard:
 
 # ---------- set-wave ----------
 
+
 class TestSetWave:
     def test_set_wave_writes_ids(self, tmp_dir):
         """set-wave writes IDs to the wave file."""
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_set_wave(["RHAIRFE-10", "RHAIRFE-20", "RHAIRFE-30"])
         assert "3 IDs" in buf.getvalue()
-        assert read_ids("tmp/pipeline-wave-ids.txt") == [
-            "RHAIRFE-10", "RHAIRFE-20", "RHAIRFE-30"]
+        assert read_ids("tmp/pipeline-wave-ids.txt") == ["RHAIRFE-10", "RHAIRFE-20", "RHAIRFE-30"]
 
     def test_set_wave_overwrites_previous(self, tmp_dir):
         """Successive set-wave calls replace the file."""
@@ -919,6 +951,7 @@ class TestSetWave:
 
 # ---------- FIXUP → REASSESS_CHECK ----------
 
+
 class TestFixup:
     def test_fixup_goes_to_reassess_check(self, tmp_dir):
         state = make_state(phase="FIXUP")
@@ -927,6 +960,7 @@ class TestFixup:
 
 
 # ---------- Invariant: every revision is followed by a review ----------
+
 
 class TestRevisionReviewInvariant:
     """Verify that no path through the state machine allows an unreviewed
@@ -975,6 +1009,7 @@ class TestRevisionReviewInvariant:
 
 # ---------- End-to-end dispatch loop simulation ----------
 
+
 class TestDispatchLoopE2E:
     """Simulate the LLM dispatch loop: get-phase-config → run-phase/advance.
 
@@ -994,6 +1029,7 @@ class TestDispatchLoopE2E:
             ps.cmd_get_phase_config([])
         config_output = buf.getvalue()
         import yaml
+
         config = yaml.safe_load(config_output)
 
         phase = config["phase"]
@@ -1001,19 +1037,14 @@ class TestDispatchLoopE2E:
 
         # Verify invariant: script phases never expose command or ids_file
         if phase_type == "script":
-            assert "command" not in config, \
-                f"command leaked in {phase} config"
-            assert "ids_file" not in config, \
-                f"ids_file leaked in {phase} config"
+            assert "command" not in config, f"command leaked in {phase} config"
+            assert "ids_file" not in config, f"ids_file leaked in {phase} config"
 
         # Verify invariant: agent phases retain needed fields
         if phase_type == "agent":
-            assert "prompt" in config, \
-                f"prompt missing from {phase} config"
-            assert "ids_file" in config, \
-                f"ids_file missing from {phase} config"
-            assert "poll_phase" in config, \
-                f"poll_phase missing from {phase} config"
+            assert "prompt" in config, f"prompt missing from {phase} config"
+            assert "ids_file" in config, f"ids_file missing from {phase} config"
+            assert "poll_phase" in config, f"poll_phase missing from {phase} config"
 
         # Step 2: dispatch based on type
         if phase_type == "script":
@@ -1035,6 +1066,7 @@ class TestDispatchLoopE2E:
                 for pp in phases_to_sim:
                     for rfe_id in ids:
                         from check_review_progress import PHASE_CHECKS
+
                         path = PHASE_CHECKS[pp](rfe_id)
                         os.makedirs(os.path.dirname(path), exist_ok=True)
                         if pp == "review":
@@ -1066,8 +1098,10 @@ class TestDispatchLoopE2E:
             phase = self._dispatch_once(monkeypatch, subprocess_mock)
             phases.append(phase)
         else:
-            pytest.fail(f"Dispatch loop did not reach DONE in {max_phases}"
-                        f" phases. Last phases: {phases[-10:]}")
+            pytest.fail(
+                f"Dispatch loop did not reach DONE in {max_phases}"
+                f" phases. Last phases: {phases[-10:]}"
+            )
         return phases
 
     def test_single_batch_no_splits(self, tmp_dir, monkeypatch):
@@ -1091,23 +1125,36 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --reassess" in cmd:
                 return "REASSESS=\nDONE=RHAIRFE-1001 RHAIRFE-1002 RHAIRFE-1003"
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=RHAIRFE-1001 RHAIRFE-1002 RHAIRFE-1003\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return (
+                    "SUBMIT=RHAIRFE-1001 RHAIRFE-1002 RHAIRFE-1003\n"
+                    "SPLIT=\nREVISE=\nREJECT=\nERRORS="
+                )
             if "batch_summary.py" in cmd:
                 return "submit=3 split=0 revise=0 reject=0 errors=0"
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         # Mock subprocess.run for run-phase (script phases)
-        subprocess_mock = lambda cmd, **kw: type("R", (), {"returncode": 0})()
+        def subprocess_mock(cmd, **kw):
+            return type("R", (), {"returncode": 0})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
         expected = [
-            "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE",
-            "FIXUP", "REASSESS_CHECK", "COLLECT", "BATCH_DONE", "REPORT",
+            "BATCH_START",
+            "FETCH",
+            "SETUP",
+            "ASSESS",
+            "REVIEW",
+            "REVISE",
+            "FIXUP",
+            "REASSESS_CHECK",
+            "COLLECT",
+            "BATCH_DONE",
+            "REPORT",
         ]
         assert phases == expected
 
@@ -1143,29 +1190,47 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=RHAIRFE-1001 RHAIRFE-1002\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=RHAIRFE-1001 RHAIRFE-1002\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=2"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
-        subprocess_mock = lambda cmd, **kw: type("R", (), {"returncode": 0})()
+        def subprocess_mock(cmd, **kw):
+            return type("R", (), {"returncode": 0})()
+
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
         expected = [
-            "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE",
-            "FIXUP", "REASSESS_CHECK",
+            "BATCH_START",
+            "FETCH",
+            "SETUP",
+            "ASSESS",
+            "REVIEW",
+            "REVISE",
+            "FIXUP",
+            "REASSESS_CHECK",
             # Cycle 1
-            "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
-            "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
+            "REASSESS_SAVE",
+            "REASSESS_ASSESS",
+            "REASSESS_REVIEW",
+            "REASSESS_RESTORE",
+            "REASSESS_REVISE",
+            "REASSESS_FIXUP",
             "REASSESS_CHECK",
             # Cycle 2
-            "REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
-            "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP",
+            "REASSESS_SAVE",
+            "REASSESS_ASSESS",
+            "REASSESS_REVIEW",
+            "REASSESS_RESTORE",
+            "REASSESS_REVISE",
+            "REASSESS_FIXUP",
             "REASSESS_CHECK",
             # Exit to collect
-            "COLLECT", "BATCH_DONE", "REPORT",
+            "COLLECT",
+            "BATCH_DONE",
+            "REPORT",
         ]
         assert phases == expected
 
@@ -1194,22 +1259,20 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py" in cmd:
                 if current_batch["n"] == 0:
                     current_batch["n"] = 1
-                    return ("SUBMIT=RHAIRFE-1001\n"
-                            "SPLIT=RHAIRFE-1002\nREVISE=\nREJECT=\nERRORS=")
-                return ("SUBMIT=RHAIRFE-1003\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                    return "SUBMIT=RHAIRFE-1001\nSPLIT=RHAIRFE-1002\nREVISE=\nREJECT=\nERRORS="
+                return "SUBMIT=RHAIRFE-1003\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "check_right_sized.py" in cmd:
                 return "RESPLIT="  # no undersized children
             if "batch_summary.py" in cmd:
                 return "submit=1"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         # SPLIT_COLLECT writes child IDs
         def subprocess_mock(cmd, **kw):
             if "split_collect.py" in cmd:
-                write_ids("tmp/pipeline-split-children-ids.txt",
-                          ["RFE-001", "RFE-002"])
+                write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
             return type("R", (), {"returncode": 0})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
@@ -1222,14 +1285,14 @@ class TestDispatchLoopE2E:
         assert "SPLIT_CORRECTION_CHECK" in phases
 
         # Batch boundary
-        batch_done_indices = [i for i, p in enumerate(phases)
-                              if p == "BATCH_DONE"]
+        batch_done_indices = [i for i, p in enumerate(phases) if p == "BATCH_DONE"]
         assert len(batch_done_indices) == 2  # one per batch
 
         # Batch 2: no splits
-        batch2_phases = phases[batch_done_indices[0] + 1:]
-        assert "SPLIT" not in batch2_phases or \
-            batch2_phases.index("BATCH_DONE") < batch2_phases.index("SPLIT")
+        batch2_phases = phases[batch_done_indices[0] + 1 :]
+        assert "SPLIT" not in batch2_phases or batch2_phases.index(
+            "BATCH_DONE"
+        ) < batch2_phases.index("SPLIT")
 
         # Ends with REPORT
         assert phases[-1] == "REPORT"
@@ -1256,19 +1319,19 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=RHAIRFE-1001\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=RHAIRFE-1001\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=1"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
         # Script phases that were dispatched via run-phase
-        script_phases_hit = [p for p in phases
-                             if ps.PHASE_CONFIG.get(p, {}).get("type")
-                             == "script"]
+        script_phases_hit = [
+            p for p in phases if ps.PHASE_CONFIG.get(p, {}).get("type") == "script"
+        ]
         # Script phases with empty IDs files are skipped (no subprocess call),
         # so run_phase_calls may be fewer than script_phases_hit.
         assert len(run_phase_calls) <= len(script_phases_hit)
@@ -1296,8 +1359,7 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=\nSPLIT=RHAIRFE-1001\n"
-                        "REVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=\nSPLIT=RHAIRFE-1001\nREVISE=\nREJECT=\nERRORS="
             if "check_right_sized.py" in cmd:
                 correction_checks["count"] += 1
                 if correction_checks["count"] == 1:
@@ -1306,6 +1368,7 @@ class TestDispatchLoopE2E:
             if "batch_summary.py" in cmd:
                 return "submit=0"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         split_collect_calls = {"count": 0}
@@ -1314,18 +1377,15 @@ class TestDispatchLoopE2E:
             if "split_collect.py" in cmd:
                 split_collect_calls["count"] += 1
                 if split_collect_calls["count"] == 1:
-                    write_ids("tmp/pipeline-split-children-ids.txt",
-                              ["RFE-001", "RFE-002"])
+                    write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
                 else:
-                    write_ids("tmp/pipeline-split-children-ids.txt",
-                              ["RFE-003", "RFE-004"])
+                    write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-003", "RFE-004"])
             return type("R", (), {"returncode": 0})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
         # Should see SPLIT_CORRECTION_CHECK twice (once loops back, once exits)
-        correction_indices = [i for i, p in enumerate(phases)
-                              if p == "SPLIT_CORRECTION_CHECK"]
+        correction_indices = [i for i, p in enumerate(phases) if p == "SPLIT_CORRECTION_CHECK"]
         assert len(correction_indices) == 2
 
         # First correction check loops back to SPLIT (undersized children)
@@ -1357,11 +1417,11 @@ class TestDispatchLoopE2E:
                     return "ERRORS=RHAIRFE-1002"  # error on first pass
                 return "ERRORS="  # clean on retry
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=RHAIRFE-1001 RHAIRFE-1002\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=RHAIRFE-1001 RHAIRFE-1002\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=2"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
@@ -1404,11 +1464,11 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=\nSPLIT=RHAIRFE-1001\n"
-                        "REVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=\nSPLIT=RHAIRFE-1001\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=0"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
@@ -1453,11 +1513,11 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=RHAIRFE-1001\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=RHAIRFE-1001\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=1"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         # Track what run-phase sees for REASSESS_FIXUP on last cycle
@@ -1515,6 +1575,7 @@ class TestDispatchLoopE2E:
         # Init does NOT wipe existing files
         import io
         from contextlib import redirect_stdout
+
         with redirect_stdout(io.StringIO()):
             ps.cmd_init(["--batch-size", "50"])
 
@@ -1539,20 +1600,31 @@ class TestDispatchLoopE2E:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             if "collect_recommendations.py" in cmd:
-                return ("SUBMIT=" + " ".join(ids) + "\n"
-                        "SPLIT=\nREVISE=\nREJECT=\nERRORS=")
+                return "SUBMIT=" + " ".join(ids) + "\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
             if "batch_summary.py" in cmd:
                 return "submit=3"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
-        subprocess_mock = lambda cmd, **kw: type("R", (), {"returncode": 0})()
+        def subprocess_mock(cmd, **kw):
+            return type("R", (), {"returncode": 0})()
+
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
         # All 3 IDs processed — same flow as normal
         expected = [
-            "BATCH_START", "FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE",
-            "FIXUP", "REASSESS_CHECK", "COLLECT", "BATCH_DONE", "REPORT",
+            "BATCH_START",
+            "FETCH",
+            "SETUP",
+            "ASSESS",
+            "REVIEW",
+            "REVISE",
+            "FIXUP",
+            "REASSESS_CHECK",
+            "COLLECT",
+            "BATCH_DONE",
+            "REPORT",
         ]
         assert phases == expected
 
@@ -1564,7 +1636,9 @@ def _run_next_action():
     """Run cmd_next_action and return parsed YAML output."""
     import io
     from contextlib import redirect_stdout
+
     import yaml as _yaml
+
     buf = io.StringIO()
     with redirect_stdout(buf):
         ps.cmd_next_action([])
@@ -1617,6 +1691,7 @@ class TestNextActionNoop:
             if "batch_summary.py" in cmd:
                 return "submit=1"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         # REASSESS_CHECK (noop) → COLLECT (noop) → BATCH_DONE (noop) → REPORT (script)
@@ -1637,6 +1712,7 @@ class TestNextActionNoop:
             if "collect_recommendations.py --errors" in cmd:
                 return "ERRORS="
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         ps._save_state(make_state(phase="BATCH_DONE", batch=1, total_batches=2))
@@ -1698,6 +1774,7 @@ class TestNextActionScript:
             if "batch_summary.py" in cmd:
                 return "submit=1"
             return ""
+
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         result = _run_next_action()
@@ -1723,13 +1800,10 @@ class TestNextActionScript:
 class TestNextActionAgent:
     def test_agent_wave_output(self, tmp_dir):
         """ASSESS returns launch_wave with correct agents."""
-        write_ids("tmp/pipeline-active-ids.txt",
-                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         ps._save_state(make_state(phase="ASSESS", batch=1))
 
         # Need prep_assess.py to succeed
-        import io
-        from contextlib import redirect_stdout
 
         # Mock _run_script for pre_script
         original_run_script = ps._run_script
@@ -1739,7 +1813,6 @@ class TestNextActionAgent:
                 return ""
             return original_run_script(cmd)
 
-        import types
         ps._run_script = mock_run_script
         try:
             result = _run_next_action()
@@ -1761,8 +1834,7 @@ class TestNextActionAgent:
 
     def test_multi_phase_prefilter(self, tmp_dir):
         """Pre-filter checks both assess and feasibility phases."""
-        write_ids("tmp/pipeline-active-ids.txt",
-                  ["RHAIRFE-1001", "RHAIRFE-1002"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         ps._save_state(make_state(phase="ASSESS", batch=1))
 
         # RHAIRFE-1001: assess complete, feasibility missing → still pending
@@ -1837,6 +1909,7 @@ class TestNextActionAgent:
 
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_next_action([])
@@ -1879,6 +1952,7 @@ class TestWaitForWave:
         write_ids(ps.WAVE_IDS_FILE, [])
         import io
         from contextlib import redirect_stderr
+
         buf = io.StringIO()
         with redirect_stderr(buf):
             ps.cmd_wait_for_wave([])
@@ -1936,6 +2010,7 @@ class TestWaitForWave:
 
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with pytest.raises(SystemExit) as exc_info:
             with redirect_stdout(buf):
@@ -1982,6 +2057,7 @@ class TestDispatchContextNextAction:
         ps._save_state(make_state(phase="ASSESS"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -1996,6 +2072,7 @@ class TestDispatchContextNextAction:
         ps._save_state(make_state(phase="REVIEW", batch=2, total_batches=3))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -2007,6 +2084,7 @@ class TestDispatchContextNextAction:
         ps._save_state(make_state(phase="INIT"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -2019,6 +2097,7 @@ class TestDispatchContextNextAction:
         ps._save_state(make_state(phase="DONE"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_dispatch_context([])
@@ -2036,6 +2115,7 @@ class TestGetPhaseConfigHygiene:
         ps._save_state(make_state(phase="ASSESS"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_get_phase_config([])
@@ -2047,6 +2127,7 @@ class TestGetPhaseConfigHygiene:
         ps._save_state(make_state(phase="ASSESS"))
         import io
         from contextlib import redirect_stdout
+
         buf = io.StringIO()
         with redirect_stdout(buf):
             ps.cmd_get_phase_config([])

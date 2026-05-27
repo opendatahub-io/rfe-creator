@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for scripts/check_resume.py — resume checking with changed-ID bypass
 and file-based I/O."""
+
 import os
 import subprocess
 import sys
@@ -9,10 +10,9 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts",
-                      "check_resume.py")
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_resume.py")
 
-from check_resume import check_resume, read_ids_from_file
+from check_resume import check_resume, read_ids_from_file  # noqa: E402
 
 
 def _write(path, content):
@@ -98,52 +98,56 @@ def art_dir(tmp_path):
 class TestCheckResumeFunction:
     def test_no_reviews_all_process(self, art_dir):
         """IDs with no review files → all need processing."""
-        process, skip = check_resume(
-            ["RHAIRFE-1", "RHAIRFE-2"], [], art_dir)
+        process, skip = check_resume(["RHAIRFE-1", "RHAIRFE-2"], [], art_dir)
         assert process == ["RHAIRFE-1", "RHAIRFE-2"]
         assert skip == []
 
     def test_passing_review_skipped(self, art_dir):
         """ID with passing review → skipped."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-1"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
         process, skip = check_resume(["RHAIRFE-1"], [], art_dir)
         assert process == []
         assert skip == ["RHAIRFE-1"]
 
     def test_failing_review_processed(self, art_dir):
         """ID with failing review → needs processing."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               FAILING_REVIEW.format(rfe_id="RHAIRFE-1"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", FAILING_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
         process, skip = check_resume(["RHAIRFE-1"], [], art_dir)
         assert process == ["RHAIRFE-1"]
         assert skip == []
 
     def test_error_review_processed(self, art_dir):
         """ID with error in review → needs processing."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               ERROR_REVIEW.format(rfe_id="RHAIRFE-1"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", ERROR_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
         process, skip = check_resume(["RHAIRFE-1"], [], art_dir)
         assert process == ["RHAIRFE-1"]
         assert skip == []
 
     def test_changed_id_bypasses_passing_review(self, art_dir):
         """Changed ID with passing review → still processed (bypass)."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-1"))
-        process, skip = check_resume(
-            ["RHAIRFE-1"], ["RHAIRFE-1"], art_dir)
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
+        process, skip = check_resume(["RHAIRFE-1"], ["RHAIRFE-1"], art_dir)
         assert process == ["RHAIRFE-1"]
         assert skip == []
 
     def test_mixed_changed_and_new(self, art_dir):
         """Mix of changed and unchanged IDs with various review states."""
         # RHAIRFE-1: changed, has passing review → process (bypass)
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-1"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
         # RHAIRFE-2: not changed, has passing review → skip
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-2-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-2"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-2-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-2")
+        )
         # RHAIRFE-3: not changed, no review → process
         # RHAIRFE-4: changed, no review → process
 
@@ -155,8 +159,7 @@ class TestCheckResumeFunction:
 
     def test_preserves_input_order(self, art_dir):
         """Output preserves the order of input IDs."""
-        process, skip = check_resume(
-            ["RHAIRFE-3", "RHAIRFE-1", "RHAIRFE-2"], [], art_dir)
+        process, skip = check_resume(["RHAIRFE-3", "RHAIRFE-1", "RHAIRFE-2"], [], art_dir)
         assert process == ["RHAIRFE-3", "RHAIRFE-1", "RHAIRFE-2"]
 
 
@@ -165,8 +168,7 @@ class TestReadIdsFromFile:
         path = str(tmp_path / "ids.txt")
         with open(path, "w") as f:
             f.write("RHAIRFE-1\nRHAIRFE-2\nRHAIRFE-3\n")
-        assert read_ids_from_file(path) == [
-            "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
+        assert read_ids_from_file(path) == ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
 
     def test_missing_file_returns_empty(self):
         assert read_ids_from_file("/nonexistent/file.txt") == []
@@ -196,22 +198,31 @@ class TestFileBasedMode:
             f.write("")
 
         result = subprocess.run(
-            ["python3", SCRIPT,
-             "--ids-file", ids_file,
-             "--changed-file", changed_file,
-             "--output-file", output_file,
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True,
+            [
+                "python3",
+                SCRIPT,
+                "--ids-file",
+                ids_file,
+                "--changed-file",
+                changed_file,
+                "--output-file",
+                output_file,
+                "--artifacts-dir",
+                art_dir,
+            ],
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         with open(output_file) as f:
-            ids = [l.strip() for l in f if l.strip()]
+            ids = [line.strip() for line in f if line.strip()]
         assert ids == ["RHAIRFE-1", "RHAIRFE-2"]
 
     def test_changed_ids_bypass_resume(self, art_dir, tmp_path):
         """Changed IDs bypass passing reviews in file-based mode."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-1"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-1")
+        )
 
         ids_file = str(tmp_path / "all.txt")
         changed_file = str(tmp_path / "changed.txt")
@@ -223,24 +234,33 @@ class TestFileBasedMode:
             f.write("RHAIRFE-1\n")
 
         result = subprocess.run(
-            ["python3", SCRIPT,
-             "--ids-file", ids_file,
-             "--changed-file", changed_file,
-             "--output-file", output_file,
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True,
+            [
+                "python3",
+                SCRIPT,
+                "--ids-file",
+                ids_file,
+                "--changed-file",
+                changed_file,
+                "--output-file",
+                output_file,
+                "--artifacts-dir",
+                art_dir,
+            ],
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         assert "PROCESS=1" in result.stdout
         assert "SKIP=0" in result.stdout
         with open(output_file) as f:
-            ids = [l.strip() for l in f if l.strip()]
+            ids = [line.strip() for line in f if line.strip()]
         assert ids == ["RHAIRFE-1"]
 
     def test_stdout_counts(self, art_dir, tmp_path):
         """File-based mode prints PROCESS=, SKIP=, CHANGED= counts."""
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-2-review.md",
-               PASSING_REVIEW.format(rfe_id="RHAIRFE-2"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-2-review.md", PASSING_REVIEW.format(rfe_id="RHAIRFE-2")
+        )
 
         ids_file = str(tmp_path / "all.txt")
         changed_file = str(tmp_path / "changed.txt")
@@ -252,12 +272,20 @@ class TestFileBasedMode:
             f.write("RHAIRFE-3\n")
 
         result = subprocess.run(
-            ["python3", SCRIPT,
-             "--ids-file", ids_file,
-             "--changed-file", changed_file,
-             "--output-file", output_file,
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True,
+            [
+                "python3",
+                SCRIPT,
+                "--ids-file",
+                ids_file,
+                "--changed-file",
+                changed_file,
+                "--output-file",
+                output_file,
+                "--artifacts-dir",
+                art_dir,
+            ],
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         assert "PROCESS=2" in result.stdout

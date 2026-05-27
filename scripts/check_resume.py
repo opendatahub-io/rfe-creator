@@ -69,30 +69,27 @@ def check_resume(ids, changed_ids, artifacts_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Check which RFE IDs need processing")
+    parser = argparse.ArgumentParser(description="Check which RFE IDs need processing")
     parser.add_argument("ids", nargs="*", help="RFE IDs to check (legacy)")
-    parser.add_argument("--ids-file",
-                        help="File containing all IDs (one per line)")
-    parser.add_argument("--changed-file",
-                        help="File containing changed IDs (one per line)")
-    parser.add_argument("--output-file",
-                        help="File to write process IDs to (one per line)")
-    parser.add_argument("--artifacts-dir", default="artifacts",
-                        help="Path to artifacts directory (default: artifacts)")
+    parser.add_argument("--ids-file", help="File containing all IDs (one per line)")
+    parser.add_argument("--changed-file", help="File containing changed IDs (one per line)")
+    parser.add_argument("--output-file", help="File to write process IDs to (one per line)")
+    parser.add_argument(
+        "--artifacts-dir",
+        default="artifacts",
+        help="Path to artifacts directory (default: artifacts)",
+    )
     args = parser.parse_args()
 
     # File-based mode
     if args.ids_file:
         all_ids = read_ids_from_file(args.ids_file)
         changed_ids = read_ids_from_file(args.changed_file)
-        process_ids, skip_ids = check_resume(
-            all_ids, changed_ids, args.artifacts_dir)
+        process_ids, skip_ids = check_resume(all_ids, changed_ids, args.artifacts_dir)
 
         # Write output file
         if args.output_file:
-            os.makedirs(os.path.dirname(args.output_file) or "tmp",
-                        exist_ok=True)
+            os.makedirs(os.path.dirname(args.output_file) or "tmp", exist_ok=True)
             with open(args.output_file, "w", encoding="utf-8") as f:
                 for id_ in process_ids:
                     f.write(f"{id_}\n")

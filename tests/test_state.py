@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for scripts/state.py."""
+
 import os
 import subprocess
+
 import pytest
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "state.py")
@@ -11,7 +13,8 @@ def run_state(*args):
     """Run state.py and return (stdout, stderr, returncode)."""
     result = subprocess.run(
         ["python3", SCRIPT, *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.stdout, result.stderr, result.returncode
 
@@ -62,7 +65,7 @@ class TestSet:
         run_state("init", "tmp/config.yaml", "a=1", "b=2", "c=3")
         run_state("set", "tmp/config.yaml", "b=updated")
         out, _, _ = run_state("read", "tmp/config.yaml")
-        lines = [l for l in out.strip().split("\n") if l]
+        lines = [line for line in out.strip().split("\n") if line]
         assert lines[0] == "a: 1"
         assert lines[1] == "b: updated"
         assert lines[2] == "c: 3"
@@ -145,6 +148,7 @@ class TestErrorHandling:
 class TestTimestamp:
     def test_returns_iso8601(self, tmp_dir):
         import re
+
         out, _, rc = run_state("timestamp")
         assert rc == 0
         assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", out.strip())

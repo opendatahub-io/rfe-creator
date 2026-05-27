@@ -15,8 +15,8 @@ Output:
     Space-separated IDs that should receive a revise agent, or empty if none.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter_validated, update_frontmatter
@@ -35,8 +35,7 @@ def main():
         try:
             data, _ = read_frontmatter_validated(review_path, "rfe-review")
         except Exception as e:
-            print(f"Warning: cannot read review for {rfe_id}: {e}",
-                  file=sys.stderr)
+            print(f"Warning: cannot read review for {rfe_id}: {e}", file=sys.stderr)
             continue
 
         score = data.get("score", 0)
@@ -47,11 +46,11 @@ def main():
 
         # Check for score regression
         if before_score is not None and score < before_score:
-            update_frontmatter(review_path,
-                               {"recommendation": "autorevise_reject"},
-                               "rfe-review")
-            print(f"{rfe_id}: score regressed ({before_score} -> {score}), "
-                  f"setting autorevise_reject", file=sys.stderr)
+            update_frontmatter(review_path, {"recommendation": "autorevise_reject"}, "rfe-review")
+            print(
+                f"{rfe_id}: score regressed ({before_score} -> {score}), setting autorevise_reject",
+                file=sys.stderr,
+            )
             continue
 
         if passed:

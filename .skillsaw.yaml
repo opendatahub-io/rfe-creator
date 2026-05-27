@@ -1,0 +1,23 @@
+# skillsaw configuration
+# https://github.com/stbenjam/skillsaw
+
+version: "0.10.1"
+
+rules:
+  # Skill names use dots (rfe.create, rfe.review) intentionally
+  agentskill-name:
+    enabled: false
+
+  context-budget:
+    enabled: true
+    severity: warning
+    limits:
+      skill:
+        warn: 4000
+        error: 8000
+
+  content-critical-position:
+    enabled: true
+    severity: info
+
+strict: true

@@ -68,13 +68,12 @@ def collect_errors(ids):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Group RFE IDs by review recommendation.")
+    parser = argparse.ArgumentParser(description="Group RFE IDs by review recommendation.")
     parser.add_argument("ids", nargs="+", help="RFE IDs to check")
-    parser.add_argument("--reassess", action="store_true",
-                        help="Collect re-assess candidates instead")
-    parser.add_argument("--errors", action="store_true",
-                        help="Collect IDs with error field set")
+    parser.add_argument(
+        "--reassess", action="store_true", help="Collect re-assess candidates instead"
+    )
+    parser.add_argument("--errors", action="store_true", help="Collect IDs with error field set")
     args = parser.parse_args()
 
     if args.errors:

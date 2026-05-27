@@ -8,8 +8,10 @@ Usage:
     DATA_REPO_TOKEN=<token> python3 scripts/clone_results_repo.py <repo-path-or-url> [dest]
 
 Examples:
-    DATA_REPO_TOKEN=glpat-xxx python3 scripts/clone_results_repo.py redhat/rhel-ai/agentic-ci/rfe-autofixer-results
-    DATA_REPO_TOKEN=glpat-xxx python3 scripts/clone_results_repo.py https://gitlab.com/my/repo.git /tmp/data-repo
+    DATA_REPO_TOKEN=glpat-xxx python3 scripts/clone_results_repo.py \\
+        redhat/rhel-ai/agentic-ci/rfe-autofixer-results
+    DATA_REPO_TOKEN=glpat-xxx python3 scripts/clone_results_repo.py \\
+        https://gitlab.com/my/repo.git /tmp/data-repo
 
 If repo arg is a bare path (no ://), builds a GitLab HTTPS URL with
 the token embedded. Prints the clone destination to stdout.
@@ -32,22 +34,19 @@ def build_clone_url(repo, token):
         return repo
     if "://" not in repo and "@" not in repo:
         if not token:
-            raise ValueError(
-                "DATA_REPO_TOKEN required for private repos")
+            raise ValueError("DATA_REPO_TOKEN required for private repos")
         return f"https://bot:{token}@gitlab.com/{repo}.git"
     if token and repo.startswith("https://"):
         parsed = urllib.parse.urlparse(repo)
         return parsed._replace(
-            netloc=f"bot:{token}@{parsed.hostname}"
-            + (f":{parsed.port}" if parsed.port else "")
+            netloc=f"bot:{token}@{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")
         ).geturl()
     return repo
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: clone_results_repo.py <repo-path-or-url> [dest]",
-              file=sys.stderr)
+        print("Usage: clone_results_repo.py <repo-path-or-url> [dest]", file=sys.stderr)
         sys.exit(1)
 
     repo = sys.argv[1]
@@ -64,18 +63,27 @@ def main():
 
     # Sparse clone — only download blobs we check out
     subprocess.run(
-        ["git", "clone", "--depth", "1", "--filter=blob:none",
-         "--sparse", clone_url, dest],
-        check=True, capture_output=True, text=True,
+        ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", clone_url, dest],
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
     # Materialize only the symlink and snapshots
     subprocess.run(
-        ["git", "sparse-checkout", "set", "--no-cone",
-         "/latest",
-         "/*/auto-fix-runs/issue-snapshot-*.yaml",
-         "!/test-data/**"],
-        cwd=dest, check=True, capture_output=True, text=True,
+        [
+            "git",
+            "sparse-checkout",
+            "set",
+            "--no-cone",
+            "/latest",
+            "/*/auto-fix-runs/issue-snapshot-*.yaml",
+            "!/test-data/**",
+        ],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
     print(dest)

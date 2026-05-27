@@ -16,7 +16,6 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from artifact_utils import read_frontmatter, update_frontmatter
 
-
 REVIEWS_DIR = "artifacts/rfe-reviews"
 
 
@@ -37,11 +36,10 @@ def extract_revision_history(filepath):
     if content.startswith("---"):
         end = content.find("---", 3)
         if end != -1:
-            content = content[end + 3:].lstrip("\n")
+            content = content[end + 3 :].lstrip("\n")
 
     # Find ## Revision History section
-    match = re.search(r"^## Revision History\s*\n(.*)", content,
-                      re.MULTILINE | re.DOTALL)
+    match = re.search(r"^## Revision History\s*\n(.*)", content, re.MULTILINE | re.DOTALL)
     if not match:
         return ""
 
@@ -50,7 +48,7 @@ def extract_revision_history(filepath):
     # Trim at the next ## heading (if any)
     next_heading = re.search(r"^## ", section, re.MULTILINE)
     if next_heading:
-        section = section[:next_heading.start()]
+        section = section[: next_heading.start()]
 
     return section.strip()
 
@@ -114,8 +112,9 @@ def restore(rfe_id):
             # Get current revision history (new pass content)
             current_after = content[after_marker:]
             # Rebuild: marker + saved history + new content
-            content = (content[:after_marker] + "\n" +
-                       saved_history + "\n" + current_after.lstrip("\n"))
+            content = (
+                content[:after_marker] + "\n" + saved_history + "\n" + current_after.lstrip("\n")
+            )
             with open(rpath, "w") as f:
                 f.write(content)
 
@@ -125,8 +124,7 @@ def restore(rfe_id):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: preserve_review_state.py save|restore <ID> [<ID> ...]",
-              file=sys.stderr)
+        print("Usage: preserve_review_state.py save|restore <ID> [<ID> ...]", file=sys.stderr)
         sys.exit(2)
 
     action = sys.argv[1]

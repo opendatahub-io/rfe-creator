@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for scripts/bootstrap_snapshot.py."""
+
 import hashlib
 import json
 import os
@@ -7,23 +8,21 @@ import subprocess
 import sys
 import threading
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..",
-                      "scripts", "bootstrap_snapshot.py")
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "bootstrap_snapshot.py")
 
-from snapshot_fetch import normalize_for_hash
-from bootstrap_snapshot import (
-    find_latest_run_timestamp,
-    get_description_at_time,
-    _parse_adf,
+from bootstrap_snapshot import (  # noqa: E402
     _description_at_time,
+    _parse_adf,
+    find_latest_run_timestamp,
 )
+from snapshot_fetch import normalize_for_hash  # noqa: E402
 
 
 def _write(path, content):
@@ -40,14 +39,14 @@ def _md_hash(text):
 
 def _text_to_adf(text):
     return {
-        "type": "doc", "version": 1,
-        "content": [{"type": "paragraph", "content": [
-            {"type": "text", "text": text}
-        ]}],
+        "type": "doc",
+        "version": 1,
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
     }
 
 
 # ── Unit Tests ────────────────────────────────────────────────────────────────
+
 
 class TestFindLatestRunTimestamp:
     def test_follows_latest_symlink(self, tmp_path):
@@ -124,17 +123,22 @@ class TestDescriptionAtTime:
     def test_adf_from_to(self):
         """Uses from/to when available (Jira Cloud)."""
         from datetime import datetime, timezone
+
         target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
-        changelog = [{
-            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
-            "items": [{
-                "field": "description",
-                "from": json.dumps(_text_to_adf("before")),
-                "to": json.dumps(_text_to_adf("after")),
-                "fromString": "before",
-                "toString": "after",
-            }],
-        }]
+        changelog = [
+            {
+                "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+                "items": [
+                    {
+                        "field": "description",
+                        "from": json.dumps(_text_to_adf("before")),
+                        "to": json.dumps(_text_to_adf("after")),
+                        "fromString": "before",
+                        "toString": "after",
+                    }
+                ],
+            }
+        ]
         result = _description_at_time(changelog, target)
         # Should use ADF from "from", not fromString
         assert isinstance(result, dict)
@@ -143,49 +147,63 @@ class TestDescriptionAtTime:
     def test_falls_back_to_fromstring(self):
         """Falls back to fromString/toString when from/to are None (Jira Server/DC)."""
         from datetime import datetime, timezone
+
         target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
-        changelog = [{
-            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
-            "items": [{
-                "field": "description",
-                "from": None,
-                "to": None,
-                "fromString": "h2. Before\n\nOriginal text.",
-                "toString": "h2. After\n\nEdited text.",
-            }],
-        }]
+        changelog = [
+            {
+                "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+                "items": [
+                    {
+                        "field": "description",
+                        "from": None,
+                        "to": None,
+                        "fromString": "h2. Before\n\nOriginal text.",
+                        "toString": "h2. After\n\nEdited text.",
+                    }
+                ],
+            }
+        ]
         result = _description_at_time(changelog, target)
         assert result == "h2. Before\n\nOriginal text."
 
     def test_to_value_for_pre_target_change(self):
         """Change before target → uses 'to' value."""
         from datetime import datetime, timezone
+
         target = datetime(2026, 4, 3, 12, 0, tzinfo=timezone.utc)
-        changelog = [{
-            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
-            "items": [{
-                "field": "description",
-                "from": None,
-                "to": None,
-                "fromString": "old wiki",
-                "toString": "new wiki",
-            }],
-        }]
+        changelog = [
+            {
+                "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+                "items": [
+                    {
+                        "field": "description",
+                        "from": None,
+                        "to": None,
+                        "fromString": "old wiki",
+                        "toString": "new wiki",
+                    }
+                ],
+            }
+        ]
         result = _description_at_time(changelog, target)
         assert result == "new wiki"
 
     def test_no_description_changes(self):
         """No description items → returns None."""
         from datetime import datetime, timezone
+
         target = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
-        changelog = [{
-            "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
-            "items": [{"field": "status", "fromString": "New", "toString": "Done"}],
-        }]
+        changelog = [
+            {
+                "created": datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc),
+                "items": [{"field": "status", "fromString": "New", "toString": "Done"}],
+            }
+        ]
         assert _description_at_time(changelog, target) is None
 
 
 # ── Mock Jira Server ─────────────────────────────────────────────────────────
+
 
 class JiraHandler(BaseHTTPRequestHandler):
     """Mock Jira that serves search results and changelogs."""
@@ -213,10 +231,12 @@ class JiraHandler(BaseHTTPRequestHandler):
                 issues.append({"key": key})
             else:
                 adf = _text_to_adf(desc) if desc else None
-                issues.append({
-                    "key": key,
-                    "fields": {"description": adf, "labels": []},
-                })
+                issues.append(
+                    {
+                        "key": key,
+                        "fields": {"description": adf, "labels": []},
+                    }
+                )
         self._json(200, {"issues": issues, "isLast": True})
 
     def _handle_changelog(self, path):
@@ -225,10 +245,13 @@ class JiraHandler(BaseHTTPRequestHandler):
         key = parts.split("?")[0]
 
         histories = self.server.changelogs.get(key, [])
-        self._json(200, {
-            "values": histories,
-            "total": len(histories),
-        })
+        self._json(
+            200,
+            {
+                "values": histories,
+                "total": len(histories),
+            },
+        )
 
     def _handle_v2_issue(self, path):
         # /rest/api/2/issue/RHAIRFE-1234?fields=description
@@ -262,8 +285,7 @@ def mock_jira():
     server.shutdown()
 
 
-def _make_results_dir(tmp_path, run_names, latest=None,
-                      processed_ids=None):
+def _make_results_dir(tmp_path, run_names, latest=None, processed_ids=None):
     """Create a results directory with run dirs.
 
     If processed_ids is provided and latest is set, writes a run report
@@ -278,14 +300,14 @@ def _make_results_dir(tmp_path, run_names, latest=None,
     if processed_ids is not None and latest:
         report_dir = os.path.join(results, latest, "auto-fix-runs")
         os.makedirs(report_dir, exist_ok=True)
-        report = {"per_rfe": [{"id": pid, "recommendation": "submit"}
-                               for pid in processed_ids]}
+        report = {"per_rfe": [{"id": pid, "recommendation": "submit"} for pid in processed_ids]}
         with open(os.path.join(report_dir, f"{latest}.yaml"), "w") as f:
             yaml.dump(report, f)
     return results
 
 
 # ── Integration Tests ─────────────────────────────────────────────────────────
+
 
 class TestBootstrapIntegration:
     def test_dry_run(self, tmp_path, mock_jira):
@@ -296,8 +318,11 @@ class TestBootstrapIntegration:
             "RHAIRFE-5678": "Description 2.",
         }
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"])
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"],
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -308,11 +333,19 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT, "--dry-run",
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--dry-run",
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
         assert "Dry run" in r.stdout
@@ -334,8 +367,11 @@ class TestBootstrapIntegration:
         # for updated >= will still match all, but changelogs are empty
         # so current hashes are used)
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"])
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            processed_ids=["RHAIRFE-1234", "RHAIRFE-5678"],
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -346,17 +382,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         assert len(snapshots) == 1
 
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
@@ -371,8 +413,8 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -383,17 +425,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -408,17 +456,21 @@ class TestBootstrapIntegration:
         # Current description (after someone edited it)
         server.issues = {"RHAIRFE-1": "Edited after run."}
         # Changelog shows description was changed AFTER the run
-        server.changelogs["RHAIRFE-1"] = [{
-            "created": "2026-04-02T10:00:00.000+0000",
-            "items": [{
-                "field": "description",
-                "from": json.dumps(_text_to_adf("Original at run time.")),
-                "to": json.dumps(_text_to_adf("Edited after run.")),
-            }],
-        }]
+        server.changelogs["RHAIRFE-1"] = [
+            {
+                "created": "2026-04-02T10:00:00.000+0000",
+                "items": [
+                    {
+                        "field": "description",
+                        "from": json.dumps(_text_to_adf("Original at run time.")),
+                        "to": json.dumps(_text_to_adf("Edited after run.")),
+                    }
+                ],
+            }
+        ]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -429,17 +481,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -454,17 +512,21 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Updated before run."}
         # Description changed BEFORE the run — 'to' matches current
-        server.changelogs["RHAIRFE-1"] = [{
-            "created": "2026-03-30T10:00:00.000+0000",
-            "items": [{
-                "field": "description",
-                "from": json.dumps(_text_to_adf("Old version.")),
-                "to": json.dumps(_text_to_adf("Updated before run.")),
-            }],
-        }]
+        server.changelogs["RHAIRFE-1"] = [
+            {
+                "created": "2026-03-30T10:00:00.000+0000",
+                "items": [
+                    {
+                        "field": "description",
+                        "from": json.dumps(_text_to_adf("Old version.")),
+                        "to": json.dumps(_text_to_adf("Updated before run.")),
+                    }
+                ],
+            }
+        ]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -475,17 +537,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -498,8 +566,8 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Content."}
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -510,11 +578,18 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
@@ -529,19 +604,23 @@ class TestBootstrapIntegration:
         url, server = mock_jira
         server.issues = {"RHAIRFE-1": "Edited after run."}
         server.wiki_descriptions = {"RHAIRFE-1": "h2. Edited after run."}
-        server.changelogs["RHAIRFE-1"] = [{
-            "created": "2026-04-02T10:00:00.000+0000",
-            "items": [{
-                "field": "description",
-                "from": None,
-                "to": None,
-                "fromString": "h2. Original at run time.",
-                "toString": "h2. Edited after run.",
-            }],
-        }]
+        server.changelogs["RHAIRFE-1"] = [
+            {
+                "created": "2026-04-02T10:00:00.000+0000",
+                "items": [
+                    {
+                        "field": "description",
+                        "from": None,
+                        "to": None,
+                        "fromString": "h2. Original at run time.",
+                        "toString": "h2. Edited after run.",
+                    }
+                ],
+            }
+        ]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -552,17 +631,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -582,19 +667,23 @@ class TestBootstrapIntegration:
         server.issues = {"RHAIRFE-1": "Same description."}
         server.wiki_descriptions = {"RHAIRFE-1": "h2. Same description."}
         # Description was changed BEFORE the run
-        server.changelogs["RHAIRFE-1"] = [{
-            "created": "2026-03-30T10:00:00.000+0000",
-            "items": [{
-                "field": "description",
-                "from": None,
-                "to": None,
-                "fromString": "h2. Old version.",
-                "toString": "h2. Same description.",
-            }],
-        }]
+        server.changelogs["RHAIRFE-1"] = [
+            {
+                "created": "2026-03-30T10:00:00.000+0000",
+                "items": [
+                    {
+                        "field": "description",
+                        "from": None,
+                        "to": None,
+                        "fromString": "h2. Old version.",
+                        "toString": "h2. Same description.",
+                    }
+                ],
+            }
+        ]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1"])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -605,17 +694,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -633,17 +728,24 @@ class TestBootstrapIntegration:
             "RHAIRFE-2": "Was closed, now reopened.",
         }
         # RHAIRFE-2 was Closed at run time, reopened after
-        server.changelogs["RHAIRFE-2"] = [{
-            "created": "2026-04-02T10:00:00.000+0000",
-            "items": [{
-                "field": "status",
-                "fromString": "Closed",
-                "toString": "New",
-            }],
-        }]
+        server.changelogs["RHAIRFE-2"] = [
+            {
+                "created": "2026-04-02T10:00:00.000+0000",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": "Closed",
+                        "toString": "New",
+                    }
+                ],
+            }
+        ]
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1", "RHAIRFE-2"])
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            processed_ids=["RHAIRFE-1", "RHAIRFE-2"],
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -654,17 +756,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -682,8 +790,11 @@ class TestBootstrapIntegration:
         }
         # Run report only contains 2 of the 3 issues
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=["RHAIRFE-1", "RHAIRFE-3"])
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            processed_ids=["RHAIRFE-1", "RHAIRFE-3"],
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -694,18 +805,24 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
         assert "Filtered to 2/3 issues" in r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -722,8 +839,7 @@ class TestBootstrapIntegration:
             "RHAIRFE-2": "Issue two.",
         }
         # No processed_ids → no run report file
-        results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000")
+        results = _make_results_dir(tmp_path, ["20260401-120000"], latest="20260401-120000")
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -734,25 +850,30 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
         assert "no run report" in r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
         assert len(snap["issues"]) == 2
 
-    def test_auto_revised_keeps_historical_hash(
-            self, tmp_path, mock_jira):
+    def test_auto_revised_keeps_historical_hash(self, tmp_path, mock_jira):
         """auto_revised issues keep historical hashes, not current.
 
         The bootstrap should not overwrite historical hashes for
@@ -769,15 +890,18 @@ class TestBootstrapIntegration:
         }
         # All three were updated after the run
         for key in ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]:
-            server.changelogs[key] = [{
-                "created": "2026-04-02T10:00:00.000+0000",
-                "items": [{
-                    "field": "description",
-                    "from": json.dumps(_text_to_adf(f"Original {key}.")),
-                    "to": json.dumps(_text_to_adf(
-                        server.issues[key])),
-                }],
-            }]
+            server.changelogs[key] = [
+                {
+                    "created": "2026-04-02T10:00:00.000+0000",
+                    "items": [
+                        {
+                            "field": "description",
+                            "from": json.dumps(_text_to_adf(f"Original {key}.")),
+                            "to": json.dumps(_text_to_adf(server.issues[key])),
+                        }
+                    ],
+                }
+            ]
 
         # Build run report with mixed recommendations
         results = str(tmp_path / "results")
@@ -785,14 +909,13 @@ class TestBootstrapIntegration:
         report_dir = os.path.join(results, run_name, "auto-fix-runs")
         os.makedirs(report_dir)
         os.symlink(run_name, os.path.join(results, "latest"))
-        report = {"per_rfe": [
-            {"id": "RHAIRFE-1", "recommendation": "revise",
-             "auto_revised": True},
-            {"id": "RHAIRFE-2", "recommendation": "submit",
-             "auto_revised": True},
-            {"id": "RHAIRFE-3", "recommendation": "autorevise_reject",
-             "auto_revised": True},
-        ]}
+        report = {
+            "per_rfe": [
+                {"id": "RHAIRFE-1", "recommendation": "revise", "auto_revised": True},
+                {"id": "RHAIRFE-2", "recommendation": "submit", "auto_revised": True},
+                {"id": "RHAIRFE-3", "recommendation": "autorevise_reject", "auto_revised": True},
+            ]
+        }
         with open(os.path.join(report_dir, f"{run_name}.yaml"), "w") as f:
             yaml.dump(report, f)
 
@@ -806,17 +929,23 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
@@ -838,8 +967,8 @@ class TestBootstrapIntegration:
         }
         # processed_ids=[] → run report exists but per_rfe is empty
         results = _make_results_dir(
-            tmp_path, ["20260401-120000"], latest="20260401-120000",
-            processed_ids=[])
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=[]
+        )
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
@@ -850,18 +979,24 @@ class TestBootstrapIntegration:
             "JIRA_TOKEN": "test-token",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT,
-             "--results-dir", results,
-             "--artifacts-dir", art_dir,
-             "project = RHAIRFE"],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
         assert "no run report" in r.stderr
 
         snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
-        snapshots = [f for f in os.listdir(snapshot_dir)
-                     if f.startswith("issue-snapshot-")]
+        snapshots = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
         with open(os.path.join(snapshot_dir, snapshots[0])) as f:
             snap = yaml.safe_load(f)
 
