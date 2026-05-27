@@ -1,0 +1,30 @@
+clarifying_context: 'Customers: Financial services institutions (FSI segment), government agencies, and regulated industry
+  customers requiring verifiable model provenance for compliance and governance requirements
+
+  Business justification: Strategic investment — model supply chain security is core to RHOAI trust strategy. The ''sign on
+  store'' capability was already delivered via STRAT-101; without ''verify on serve'', that investment doesn''t deliver
+  its intended runtime integrity value. Customers in regulated industries are demanding end-to-end verifiable model provenance.
+  This is also a competitive differentiator in the enterprise AI platform market, with upstream Sigstore ecosystem projects
+  (ImagePolicy controller, Model Validation operator) providing building blocks.
+
+  User problem: Users who carefully sign AI models during storage have no assurance that the model actually being served matches
+  what they signed. Admins have no guidance on how to set up Red Hat Trusted Artifact Signer with OpenShift AI to ensure model
+  signatures are verified for deployed inference workloads. Signatures are completely ignored at serving time, making the
+  existing signing workflow incomplete for runtime integrity guarantees.
+
+  Scope: Single focused need — signature verification enforcement at model serving time. Covers two model source formats:
+  (1) models stored in S3/HuggingFace with model.sig (OpenSSF Model Signature), and (2) OCI ModelCar images with Cosign signatures
+  and embedded OpenSSF Model Signatures. Verification must integrate with KServe and llm-d serving infrastructure. Policy
+  flexibility needed (hard-stop vs. warning-only).
+
+  Success criteria: Admins can configure signature verification policies for model serving. Models from S3/HuggingFace with
+  model.sig are verified before serving. OCI ModelCar images are verified (container image signature and/or embedded OpenSSF
+  Model Signature) before serving. Clear pass/fail feedback is provided to both admins and users when verification fails.
+  Policy-driven enforcement allows admins to choose between blocking deployment or issuing warnings. The end-to-end story
+  — sign on store, verify on serve — provides a complete trust chain for AI model provenance.'
+priority: Critical
+prompt: We already invested in model signing at storage time through AI Hub and Trusted Artifact Signer, but there's no verification
+  happening when those models are actually served via KServe or llm-d. This means the entire signing workflow is basically
+  security theater — users sign their models but have zero assurance that what's being served matches what they signed. We
+  need to close this gap by enforcing signature verification at serving time, supporting both S3-stored models with model.sig
+  files and OCI ModelCar images with Cosign signatures.

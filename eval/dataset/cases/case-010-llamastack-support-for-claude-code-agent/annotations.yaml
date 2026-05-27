@@ -1,0 +1,14 @@
+difficulty: null
+expected_feasibility: null
+expected_pass: null
+expected_recommendation: null
+expected_scores:
+  not_a_task: null
+  open_to_how: null
+  right_sized: null
+  what: null
+  why: null
+expected_total: null
+known_issues: []
+score_tolerance: 1
+tags: []
