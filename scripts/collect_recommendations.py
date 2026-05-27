@@ -5,6 +5,8 @@ import argparse
 import os
 import sys
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter
 
@@ -52,15 +54,18 @@ def collect_reassess(ids):
 
 
 def collect_errors(ids):
-    """Collect IDs with non-null error field."""
+    """Collect IDs with non-null error field or missing review files."""
     error_ids = []
     for rfe_id in ids:
         path = os.path.join(ARTIFACTS_DIR, "rfe-reviews", f"{rfe_id}-review.md")
         if not os.path.exists(path):
+            # Missing review file is an error — the pipeline failed to produce output
+            error_ids.append(rfe_id)
             continue
         try:
             data, _ = read_frontmatter(path)
-        except Exception:
+        except (OSError, UnicodeError, yaml.YAMLError):
+            error_ids.append(rfe_id)
             continue
         if data.get("error"):
             error_ids.append(rfe_id)

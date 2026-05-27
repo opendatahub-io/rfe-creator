@@ -120,6 +120,7 @@ PHASE_CONFIG = {
                 "vars": {"ID": "{ID}"},
             },
         ],
+        "parallel_timeout": 300,
         "pre_script": "python3 scripts/prep_assess.py {ID}",
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-active-ids.txt",
@@ -242,6 +243,7 @@ PHASE_CONFIG = {
                 "vars": {"ID": "{ID}"},
             },
         ],
+        "parallel_timeout": 300,
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
@@ -598,7 +600,7 @@ def advance(state, dry_run=False):
             f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\nERROR_COLLECT → BATCH_START",
         )
 
-    # --- REPORT → DONE (with optional announce) ---
+    # --- REPORT → DONE (optional announce) ---
     if phase == "REPORT":
         if not dry_run and state.get("announce_complete"):
             _run_script("python3 scripts/finish.py")
