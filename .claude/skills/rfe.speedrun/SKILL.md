@@ -113,7 +113,7 @@ python3 scripts/check_autofix_complete.py
 
 If incomplete (exit code 1), the output shows `MISSING_IDS=RFE-006,RFE-007,...`. Re-invoke auto-fix with only the missing IDs:
 
-```
+```text
 /rfe.auto-fix [--headless] [--batch-size N] <missing_IDs>
 ```
 
