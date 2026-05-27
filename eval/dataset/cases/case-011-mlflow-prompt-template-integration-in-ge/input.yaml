@@ -1,0 +1,32 @@
+clarifying_context: 'Customers: Credit Alliance (named customer commitment — migration to RHOAI is conditioned on this feature),
+  multiple existing prompt lab customers waiting on RHOAI feature parity before migrating, AI Engineers building generative
+  AI applications within RHOAI
+
+  Business justification: Credit Alliance has explicitly conditioned their RHOAI adoption on this capability, making it a direct
+  retention and migration risk. wx.ai PromptLab currently offers this end-to-end prompt management experience, and the lack
+  of parity is a documented reason customers choose competing platforms. Multiple existing prompt lab customers are waiting
+  on this feature, making it a broad migration enabler. Gen AI studio is a strategic investment area and needs full MLFlow
+  prompt management to be a credible alternative.
+
+  User problem: AI Engineers cannot work with parameterized text prompt templates or multi-role chat prompt templates from
+  gen AI studio. They cannot load templates with {{variable}} placeholders, view or fill in variables, run inference with
+  substituted values, or create and save new templates back to the MLFlow registry. They must switch to the MLFlow UI directly
+  or use competing tools like wx.ai PromptLab, breaking their workflow within RHOAI.
+
+  Scope: Single focused need — extending the existing MLFlow prompt integration in gen AI studio to cover the full prompt
+  template experience (text and chat template types with variable management). Out of scope: changes to MLFlow internals,
+  prompt evaluation/batch testing pipelines, prompt optimization (DSPy-based), and capabilities not supported by MLFlow''s
+  prompt registry.
+
+  Success criteria: Users can browse and search the MLFlow prompt registry for all template types (text and chat) from gen
+  AI studio. Users can load text and chat prompt templates, view their variables, fill in values, and run inference. Users
+  can create new text or chat prompt templates and save them as versioned entries in the MLFlow registry. Users can attach
+  registered MLFlow models to prompt template sessions. Credit Alliance''s stated prerequisite for RHOAI adoption is met. Feature
+  parity with wx.ai PromptLab prompt management capabilities is achieved. Existing system prompt loading behavior from RHOAI
+  3.4 is preserved.'
+priority: Major
+prompt: We need to extend the MLFlow integration in gen AI studio to support full prompt template capabilities — not just
+  system prompts. Right now AI Engineers can only load and save simple system prompts, but MLFlow supports parameterized text
+  templates with {{variable}} placeholders and multi-role chat templates with multiple turns. Credit Alliance has explicitly
+  told us this is a prerequisite for their RHOAI migration, and we're losing competitive ground to wx.ai PromptLab which already
+  offers this end-to-end. We need browsing, loading, variable substitution, inference, and saving for both template types.

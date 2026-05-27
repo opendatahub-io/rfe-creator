@@ -120,6 +120,10 @@ When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 3. Do not wait for agent-completion notifications — the wait-for-wave command
    is unrelated to the Agent tool's notification system.
 
+## Eval Dataset Policy
+
+Files under `eval/dataset/` must be anonymized before commit. Never commit real customer names, individual names, email addresses, or other personally identifiable information (PII). Replace them with fictional equivalents (e.g., "Acme Corp", "Example Industries"). This applies to test inputs, annotations, and any reference files.
+
 ## Architecture Context
 
 `/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.

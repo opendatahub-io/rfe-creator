@@ -1,0 +1,23 @@
+clarifying_context: 'Customers: Red Hat OpenShift AI (RHOAI) users, enterprise data science teams using the CodeFlare stack,
+  partners leveraging distributed training on OpenShift
+
+  Business justification: This is a strategic investment to improve the CodeFlare SDK user experience and reduce cloud resource
+  waste from orphaned Ray Clusters. Aligns RHOAI''s distributed compute story with the simplified job-centric paradigm already
+  adopted by KFTO, strengthening competitive positioning for enterprise AI/ML platform deals.
+
+  User problem: Data scientists currently must create a Ray Cluster, submit a job to it, and then manually tear it down after
+  completion. This multi-step process is confusing, error-prone, and leads to idle Ray Clusters consuming resources long after
+  jobs have completed. Users want a simple submit-and-forget workflow.
+
+  Scope: Single focused need — adding RayJob CR support to the CodeFlare SDK. Key work areas include: (1) SDK changes to support
+  RayJob creation and lifecycle management, (2) leveraging existing Kueue/RHOAI integration with the RayJob CR, and (3) providing
+  default scripts/configurations so users don''t need to build custom Ray images if they don''t want to.
+
+  Success criteria: Users can create and manage RayJobs directly through the CodeFlare SDK without manually provisioning Ray
+  Clusters. The job lifecycle follows a simple Job created -> Run -> Completed pattern. Ray Clusters are automatically cleaned
+  up after job completion, eliminating resource waste from orphaned clusters.'
+priority: Critical
+prompt: We need to add RayJob support to the CodeFlare SDK so that data scientists don't have to manually create and manage
+  Ray Clusters just to run a job. Right now users create a Ray Cluster, submit a job, and then often forget to tear down the
+  cluster afterwards, wasting resources. We want a simpler workflow where they just submit a job and it handles the cluster
+  lifecycle automatically, similar to how KFTO works.
