@@ -20,8 +20,6 @@ Usage:
 import argparse
 import glob
 import os
-import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -602,28 +600,10 @@ def advance(state, dry_run=False):
             f"ERROR_COLLECT: retry batch {batch} with {n} error IDs\nERROR_COLLECT → BATCH_START",
         )
 
-    # --- REPORT → DONE (generate report, then optional announce) ---
+    # --- REPORT → DONE (optional announce) ---
     if phase == "REPORT":
-        if not dry_run:
-            start_time = state.get("start_time", "")
-            batch_size = state.get("batch_size", 5)
-            if not re.match(r'^[\w\-:.+]+$', str(start_time)):
-                print(f"WARNING: invalid start_time '{start_time}', "
-                      "skipping report", file=sys.stderr)
-            elif not isinstance(batch_size, int):
-                print(f"WARNING: invalid batch_size '{batch_size}', "
-                      "skipping report", file=sys.stderr)
-            else:
-                try:
-                    _run_script(
-                        f"python3 scripts/generate_run_report.py"
-                        f" --start-time {shlex.quote(str(start_time))}"
-                        f" --batch-size {int(batch_size)}")
-                except SystemExit:
-                    print("WARNING: report generation failed, continuing",
-                          file=sys.stderr)
-            if state.get("announce_complete"):
-                _run_script("python3 scripts/finish.py")
+        if not dry_run and state.get("announce_complete"):
+            _run_script("python3 scripts/finish.py")
         return "DONE", "REPORT → DONE"
 
     print(f"No transition defined for phase: {phase}", file=sys.stderr)
