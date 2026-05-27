@@ -77,10 +77,11 @@ inputs:
         requests to a Jira server.
       prompt: |
         The skill runs with --dry-run so Jira writes are skipped.
-        For reads/fetches: the test case input.yaml contains the full
-        RFE content in rfe_content, so Jira fetches should not be needed.
-        If a Jira fetch is attempted, return the rfe_content from the
-        test case input.yaml as the issue description.
+        For reads/fetches: use input.yaml fields `prompt` and
+        `clarifying_context` to synthesize the issue description.
+        Jira fetches should not be needed in batch mode.
+        If a Jira fetch is attempted, return a merged description
+        built from `prompt` + `clarifying_context`.
 
 
 outputs:
@@ -130,7 +131,7 @@ outputs:
       YYYYMMDD-HHMMSS.yaml: Structured YAML with run_id, started,
         completed timestamps, batch_size, per_rfe list (each with id,
         recommendation, revision_cycles), before_scores_avg,
-        after_scores_avg, counts (passed/failed/split/errors).
+        after_scores_avg, results (passed/failed/split/errors/retried/retry_successes).
 
   - path: artifacts/review-report.html
     batch_pattern: "*"
@@ -295,20 +296,24 @@ judges:
           re.DOTALL
       )
       non_fatal_patterns = [
-          'PermissionError', 'hook', 'tool_handlers',
-          'mcp__atlassian', 'JIRA_SERVER', 'FileNotFoundError:.*\.context/',
-          'ModuleNotFoundError',
+          re.compile(r'PermissionError'),
+          re.compile(r'\bhook\b'),
+          re.compile(r'tool_handlers'),
+          re.compile(r'mcp__atlassian'),
+          re.compile(r'JIRA_SERVER'),
+          re.compile(r'FileNotFoundError:.*\.context/'),
+          re.compile(r'ModuleNotFoundError'),
       ]
       for tb in fatal_tb_pattern.finditer(stdout):
           tb_text = tb.group()
-          if not any(p in tb_text for p in non_fatal_patterns):
+          if not any(p.search(tb_text) for p in non_fatal_patterns):
               # Extract last line (the actual error) for the rationale
               last_line = tb_text.strip().split('\n')[-1]
               errors.append(f"Fatal traceback: {last_line[:120]}")
       if "rm artifacts/rfe-tasks/" in stdout:
           errors.append("RFE task file deleted during execution")
       phases_found = []
-      if "Phase 1" in stdout or "Phase 1:" in stdout or "create" in stdout.lower()[:500]:
+      if "Phase 1" in stdout or "Phase 1:" in stdout or "rfe.create" in stdout.lower():
           phases_found.append("create")
       if "auto-fix" in stdout.lower() or "AUTOFIX" in stdout or "Batch " in stdout:
           phases_found.append("auto-fix")

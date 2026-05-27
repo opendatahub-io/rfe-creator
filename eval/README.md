@@ -57,9 +57,7 @@ The evaluation runs the `rfe.speedrun` skill headlessly against 20 test cases de
 | File | Purpose |
 |------|---------|
 | `input.yaml` | Skill input: `prompt`, `priority`, `clarifying_context` |
-| `reference-rfe.md` | Gold standard RFE (with YAML frontmatter) |
-| `reference-review.md` | Gold standard review (with rubric scores) |
-| `annotations.yaml` | Expected scores, source metadata, test tags |
+| `annotations.yaml` | Expected scores, feasibility/recommendation expectations, test tags |
 
 Input files contain only the fields the skill needs in batch Mode A — no Jira keys or existing RFE content.
 
@@ -72,6 +70,7 @@ Input files contain only the fields the skill needs in batch Mode A — no Jira 
 | `run_report_exists` | check | Auto-fix YAML run report with required fields |
 | `recommendation_consistency` | check | pass/fail aligns with recommendation, infeasible != submit |
 | `pipeline_flow` | check | Phases ran, no tracebacks, no Phase 1 deletions |
+| `architecture_context_used` | check | Feasibility files must not indicate missing architecture context |
 | `rfe_quality` | LLM | RFE quality (WHAT/WHY/HOW/task/scope) + calibration accuracy |
 | `revision_quality` | LLM | Revision improvement + content preservation |
 | `pairwise` | LLM | Blind A/B comparison (only with `--baseline`) |

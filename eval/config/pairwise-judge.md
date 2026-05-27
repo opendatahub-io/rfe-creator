@@ -44,7 +44,7 @@ Return a single JSON object and nothing else.
 
 Schema:
 
-```
+```json
 {
   "dimensions": {
     "rfe_quality": {"preferred": "A" or "B" or "tie", "reasoning": "..."},
