@@ -5,6 +5,8 @@ import argparse
 import os
 import sys
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter
 
@@ -62,7 +64,7 @@ def collect_errors(ids):
             continue
         try:
             data, _ = read_frontmatter(path)
-        except Exception:
+        except (OSError, UnicodeError, yaml.YAMLError):
             error_ids.append(rfe_id)
             continue
         if data.get("error"):

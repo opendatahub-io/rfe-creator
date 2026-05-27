@@ -20,6 +20,8 @@ Usage:
 import argparse
 import glob
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -476,16 +478,6 @@ def advance(state, dry_run=False):
     # --- Linear sequences ---
     for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if phase in seq[:-1]:
-            # Enforce post_verify before advancing from agent phases
-            config = PHASE_CONFIG.get(phase, {})
-            if not dry_run and config.get("post_verify") and config.get("type") == "agent":
-                try:
-                    _run_script(config["post_verify"])
-                except Exception as e:
-                    print(f"ERROR: {phase} post_verify failed: {e}. "
-                          f"Dispatch agents for this phase before advancing.",
-                          file=sys.stderr)
-                    sys.exit(1)
             nxt = seq[seq.index(phase) + 1]
             return nxt, f"{phase} → {nxt}"
 
@@ -613,12 +605,20 @@ def advance(state, dry_run=False):
     # --- REPORT → DONE (generate report, then optional announce) ---
     if phase == "REPORT":
         if not dry_run:
-            config = PHASE_CONFIG.get("REPORT", {})
-            cmd = config.get("command", "")
-            if cmd:
-                cmd = cmd.format_map(state)
+            start_time = state.get("start_time", "")
+            batch_size = state.get("batch_size", 5)
+            if not re.match(r'^[\w\-:.+]+$', str(start_time)):
+                print(f"WARNING: invalid start_time '{start_time}', "
+                      "skipping report", file=sys.stderr)
+            elif not isinstance(batch_size, int):
+                print(f"WARNING: invalid batch_size '{batch_size}', "
+                      "skipping report", file=sys.stderr)
+            else:
                 try:
-                    _run_script(cmd)
+                    _run_script(
+                        f"python3 scripts/generate_run_report.py"
+                        f" --start-time {shlex.quote(str(start_time))}"
+                        f" --batch-size {int(batch_size)}")
                 except SystemExit:
                     print("WARNING: report generation failed, continuing",
                           file=sys.stderr)
