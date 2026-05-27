@@ -1,5 +1,5 @@
 clarifying_context: 'Customers: Orion Travel Systems (400+ AI initiatives, explicitly stated ''OpenTelemetry is really important — to trace
-  between agent and LLM''), Nova Wireless (needs comprehensive observability for agents, token usage, performance metrics), Keystone Financial (requires comprehensive observability and monitoring of entire LLM inferencing pipeline), Posta Nazionale (needs
+  between agent and LLM''), Nova Wireless (needs comprehensive observability for agents, token usage, performance metrics), Cornerstone Fintech (requires comprehensive observability and monitoring of entire LLM inferencing pipeline), Posta Nazionale (needs
   real-time model performance visibility across operations)
 
   Business justification: Four named enterprise customers with large-scale AI deployments require GenAI-specific observability

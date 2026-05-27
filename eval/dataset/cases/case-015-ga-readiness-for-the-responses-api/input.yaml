@@ -1,11 +1,11 @@
-clarifying_context: 'Customers: Southern European Public Sector (7 accounts: NARC, AGRI, NPSI, Posta Nazionale, PTI, ENER, GASI), Keystone Financial (MaaS deployment), Nexus Semiconductor (provider portability), Meridian Bank (Backstage plugin integration), Aegean Mobile (pluggable
+clarifying_context: 'Customers: Southern European Public Sector (7 accounts: NARC, AGRI, NPSI, Posta Nazionale, PTI, ENER, GASI), Cornerstone Fintech (MaaS deployment), Nexus Semiconductor (provider portability), Cobalt National Bank (Backstage plugin integration), Aegean Mobile (pluggable
   RAG/agent stack), Bosphorus Bank (OpenAI-compatible standard interface), VAS (migrating from Watsonx for better OpenAI compatibility),
   15+ validated customers across financial services, public sector, telecom, and manufacturing
 
   Business justification: OpenAI compatibility is the top adoption driver validated across customer discovery. 7 Italian public
-  sector accounts position Red Hat AI as ''Private OpenAI'' — API parity is the entire value proposition. Keystone requires OpenAI-compatible
+  sector accounts position Red Hat AI as ''Private OpenAI'' — API parity is the entire value proposition. Cornerstone requires OpenAI-compatible
   endpoints for Model-as-a-Service. Nexus Semiconductor explicitly wants to ''interface via OpenAI API standard to easily switch models.''
-  Meridian Bank''s Backstage integration depends on endpoint parity. VAS is migrating from Watsonx specifically because of OpenAI-style
+  Cobalt National Bank''s Backstage integration depends on endpoint parity. VAS is migrating from Watsonx specifically because of OpenAI-style
   API limitations. Incomplete API parity directly blocks the largest revenue opportunity in the pipeline. This is the single
   highest-leverage action to convert TP users into GA production customers.
 

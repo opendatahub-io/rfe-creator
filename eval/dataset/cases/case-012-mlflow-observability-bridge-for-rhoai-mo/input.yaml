@@ -1,4 +1,4 @@
-clarifying_context: 'Customers: Enterprise RHOAI customers running shared multi-tenant clusters, such as Sterling Bank Group ML
+clarifying_context: 'Customers: Enterprise RHOAI customers running shared multi-tenant clusters, such as Ironforge Bank Group ML
   Platform team, Kronos AI Factory, Central Telco data science division
 
   Business justification: Core platform observability gap blocking enterprise RHOAI adoption at scale — multiple large accounts
