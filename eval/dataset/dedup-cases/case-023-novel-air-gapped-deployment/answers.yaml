@@ -1,0 +1,11 @@
+# Dedup question guidance for LLM answerer:
+# This case is about air-gapped/disconnected deployment — a novel topic.
+# The emulator's ILIKE search may return false-positive matches on broad
+# keywords like "deployment" or "serving". These are NOT real duplicates.
+dedup_is_duplicate: false
+dedup_guidance: >
+  This RFE is about air-gapped/disconnected deployment for model serving.
+  It is NOT a duplicate of any existing RFE. Any matches the dedup search
+  finds are false positives from broad keyword overlap (e.g., "serving",
+  "deployment"). Answer "no" or "No, mine is different" to any question
+  asking whether existing RFEs cover this need.

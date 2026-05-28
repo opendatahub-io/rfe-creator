@@ -1,0 +1,34 @@
+clarifying_context: 'Customers: Defense contractors, intelligence community partners, and sovereign
+  cloud operators deploying RHOAI in air-gapped (disconnected) environments with no internet
+  access.
+
+  Business justification: A growing segment of high-value enterprise customers operate in
+  fully air-gapped environments due to security classification requirements. These customers
+  cannot pull model artifacts, container images, or dependency packages from public registries
+  at deployment time. Without a supported disconnected deployment workflow, these customers
+  either cannot adopt RHOAI or must build fragile custom mirroring solutions that break on
+  every upgrade.
+
+  User problem: Deploying AI models on RHOAI in air-gapped environments requires manually
+  mirroring container images, model artifacts, Python packages, and serving runtime dependencies
+  to internal registries. There is no documented or supported workflow for this. Each RHOAI
+  upgrade breaks the mirroring setup because new dependencies are introduced without a manifest.
+  Customers spend weeks on each upgrade cycle resolving missing dependencies in their
+  disconnected environments.
+
+  Scope: End-to-end disconnected deployment support for model serving on RHOAI. Covers artifact
+  mirroring (container images, model files, Python packages), dependency manifests for each
+  release, offline installation tooling, and validation of disconnected deployments. Does not
+  cover training workloads or notebook environments in disconnected mode.
+
+  Success criteria: Each RHOAI release ships a complete dependency manifest for disconnected
+  deployments. A supported mirroring tool can pre-stage all required artifacts to internal
+  registries. Model serving deployments succeed without any internet access after mirroring.
+  Upgrade paths are documented with delta manifests showing new dependencies.'
+priority: Major
+prompt: We need supported disconnected deployment for AI model serving on RHOAI. Our defense
+  and sovereign cloud customers operate in fully air-gapped environments and currently have
+  no reliable way to deploy or upgrade model serving infrastructure without internet access.
+  Every RHOAI upgrade breaks their manually-built mirroring pipelines because new dependencies
+  appear without a manifest. We need dependency manifests, mirroring tooling, and validated
+  disconnected deployment workflows.

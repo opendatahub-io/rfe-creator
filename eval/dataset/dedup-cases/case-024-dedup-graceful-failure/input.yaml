@@ -1,0 +1,28 @@
+clarifying_context: 'Customers: Data science teams at Example Industries and Acme Corp running
+  distributed training jobs on RHOAI with PyTorch and Ray.
+
+  Business justification: GPU costs for distributed training are the largest line item in
+  AI platform budgets. Without visibility into GPU utilization during training jobs, teams
+  cannot identify waste (idle GPUs during data loading, unbalanced sharding, communication
+  bottlenecks). Customers report 30-50% GPU idle time during distributed training but have
+  no tooling to diagnose or reduce it.
+
+  User problem: When running distributed training jobs via Ray on RHOAI, there is no
+  integrated GPU utilization monitoring. Users cannot see per-GPU utilization, memory usage,
+  or communication overhead across training workers. They must SSH into individual nodes and
+  run nvidia-smi manually, which is impractical for jobs spanning dozens of GPUs. Training
+  jobs that appear to run for hours may be wasting significant GPU time on data loading or
+  synchronization barriers.
+
+  Scope: GPU utilization monitoring for distributed training workloads on RHOAI. Covers
+  per-worker GPU metrics collection, aggregated dashboards, and idle-time alerts. Does not
+  cover inference serving GPU monitoring or cost allocation.
+
+  Success criteria: Per-GPU utilization metrics are automatically collected for Ray training
+  jobs. An integrated dashboard shows GPU utilization, memory, and communication overhead
+  across all workers in a training job. Alerts fire when GPU utilization drops below
+  configurable thresholds during active training.'
+priority: Normal
+prompt: We need GPU utilization monitoring for distributed training jobs running on Ray
+  through RHOAI. Teams are wasting significant GPU time but have no visibility into per-worker
+  GPU utilization, memory usage, or communication bottlenecks during training runs.

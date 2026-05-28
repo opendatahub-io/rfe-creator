@@ -1,0 +1,30 @@
+clarifying_context: 'Customers: Acme Financial ML platform team, Example Industries data science
+  group, and enterprise customers managing large model inventories (100+ registered models)
+  across multiple RHOAI environments.
+
+  Business justification: As enterprise adoption of RHOAI grows, customers accumulate hundreds
+  of registered models in their MLflow model registries. Without lifecycle management capabilities,
+  registries become cluttered with obsolete, deprecated, or superseded models. This creates
+  confusion for data scientists selecting models for deployment and compliance risks when
+  deprecated models remain deployable.
+
+  User problem: Data scientists and ML engineers have no structured way to manage the lifecycle
+  of registered models in the MLflow model registry on RHOAI. There is no mechanism to mark
+  models as deprecated, archive old versions, set retention policies, or prevent deployment
+  of end-of-life models. Teams resort to manual documentation and naming conventions to track
+  model status, which is error-prone and does not scale.
+
+  Scope: Model lifecycle management within the MLflow model registry. Covers model deprecation
+  workflows, version archival, retention policies, and deployment guards. Does not include
+  model training pipeline management or experiment lifecycle.
+
+  Success criteria: Users can mark model versions as deprecated with a reason and sunset date.
+  Deprecated models display warnings in the registry UI and API responses. Archived models
+  are hidden from default views but remain accessible. Deployment of deprecated models requires
+  explicit override. Retention policies can automatically archive models past their sunset date.'
+priority: Major
+prompt: We need lifecycle management for models in the MLflow model registry on RHOAI. Right
+  now there is no way to deprecate, archive, or sunset registered models. Our model registry
+  has over 200 models and teams cannot tell which ones are still actively maintained versus
+  obsolete. We need deprecation workflows, archival policies, and deployment guards to prevent
+  serving end-of-life models.

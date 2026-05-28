@@ -1,0 +1,87 @@
+name: Eval — rfe.create dedup
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Skill model'
+        default: 'claude-opus-4-6'
+        type: choice
+        options:
+          - claude-opus-4-6
+          - claude-sonnet-4-6
+      run-id:
+        description: 'Run identifier (default: auto-generated)'
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      JIRA_SERVER: http://localhost:8080
+      JIRA_USER: admin
+      JIRA_TOKEN: admin
+      AGENT_EVAL_RUNS_DIR: eval/runs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install agent-eval-harness plugin
+        run: claude plugin install agent-eval-harness@opendatahub-skills
+
+      - name: Start jira-emulator
+        run: |
+          git clone --depth 1 https://github.com/jctanner/jira-emulator.git /tmp/jira-emulator
+          cd /tmp/jira-emulator
+          pip install -e .
+          python -m jira_emulator serve --port 8080 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/rest/api/2/priority > /dev/null 2>&1; then
+              echo "jira-emulator ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Seed jira-emulator
+        run: bash eval/fixtures/seed-jira-emulator.sh
+
+      - name: Determine run ID
+        id: run-id
+        run: |
+          MODEL="${{ inputs.model || 'claude-opus-4-6' }}"
+          SHORT_MODEL=$(echo "$MODEL" | sed 's/claude-//' | sed 's/-[0-9]*$//')
+          RUN_ID="${{ inputs.run-id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID="$(date -u +%Y-%m-%d)-${SHORT_MODEL}-ci"
+          fi
+          echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+
+      - name: Run evaluation
+        run: |
+          claude -p \
+            --model ${{ steps.run-id.outputs.model }} \
+            "/eval-run --config eval-rfe-create.yaml --model ${{ steps.run-id.outputs.model }} --run-id ${{ steps.run-id.outputs.id }}"
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-dedup-${{ steps.run-id.outputs.id }}
+          path: eval/runs/${{ steps.run-id.outputs.id }}/
+          retention-days: 30

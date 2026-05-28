@@ -32,6 +32,63 @@ If `artifacts/rfe-rubric.md` exists (either already present or just exported), r
 
 If the rubric is still not available after the bootstrap attempt, proceed with the built-in question flow below.
 
+## Step 1.5: Check for Potential Duplicates
+
+Before asking clarifying questions, check whether similar RFEs already exist in Jira. This prevents duplicate work and helps the PM connect to existing efforts.
+
+> **Design reference**: see `docs/duplicate-detection.md` for the full design (two-tier cache, opt-in build rationale, `source` output values, known gaps). The skill instructions below are the operational flow — the design doc explains *why*.
+
+1. Extract 3-5 key phrases from the problem statement that capture the core need. Focus on domain-specific terms (product names, capabilities, user actions) rather than generic words like "support", "enable", "improve". (`--keywords` is optional — the script has a stopword-filtered fallback — but explicit phrases produce much better matches.)
+
+2. **Choose a search mode.** The duplicate search uses a local cache of open RFE summaries for speed. Building that cache from scratch paginates the full Jira project and can take 10+ seconds on large projects, so we let the user opt in:
+
+   First, probe cache state:
+
+   ```bash
+   python3 scripts/dedup_search.py cache-info --json
+   ```
+
+   - **Headless mode (`--headless`)**: skip the probe. Always pass `--headless --recent-only` to the search in step 3 so CI never blocks on a full cache build.
+   - **Interactive mode, cache is "fresh"** (per the JSON `fresh: true` field): silently use it. Skip the opt-in prompt.
+   - **Interactive mode, cache is missing or stale**: ask the user via `AskUserQuestion`:
+     > "I can build a local cache of open RFEs for duplicate detection. First-time build takes a moment but makes future checks instant.
+     > - **Build full cache** (recommended)
+     > - **Just check recent issues** (fast, only catches duplicates created in the last 30 days)"
+     - If **Build full cache**: run step 3 with no extra flag.
+     - If **Just check recent issues**: run step 3 with `--recent-only`.
+
+3. Run the duplicate search:
+
+   ```bash
+   # Interactive, user opted to build the cache
+   python3 scripts/dedup_search.py search "<problem statement text>" --keywords "phrase1,phrase2,phrase3" --max-results 10
+
+   # Interactive, user opted for fast recent-only
+   python3 scripts/dedup_search.py search "..." --keywords "..." --max-results 10 --recent-only
+
+   # Headless / CI
+   python3 scripts/dedup_search.py search "..." --keywords "..." --max-results 10 --headless --recent-only
+   ```
+
+4. Parse the JSON output. If matches were found:
+
+   **Interactive mode**: Use AskUserQuestion to present matches AND ask in one call — do NOT output matches as a text response (a text-only response ends the conversation without asking). Include the matches table in the question text:
+
+   > "I found existing RFEs that may overlap with your idea:
+   > - RHAIRFE-1234: Example summary (http://...)
+   > - RHAIRFE-5678: Another summary (http://...)
+   >
+   > Do any of these already cover what you need?"
+   >
+   > Options: "Yes, already covered" / "No, mine is different" / "Not sure"
+
+   - If **"Yes, already covered"**: Suggest they comment on the existing RFE instead. Offer to continue creating a new RFE anyway if they want.
+   - If **"No, mine is different"** or **"Not sure"**: Continue to Step 2.
+
+   **Headless mode (`--headless`)**: Log the matches to stderr but do not block. Proceed directly to Step 3.
+
+5. If the search fails (error in JSON output) or returns no matches, proceed silently to Step 2. Never block RFE creation due to a search failure.
+
 ## Step 2: Clarifying Questions
 
 Before generating RFEs, ask the PM clarifying questions to fill gaps. Ask 2-5 questions maximum — only ask what you cannot reasonably infer from the input. Focus on:

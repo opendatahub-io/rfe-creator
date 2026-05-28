@@ -1,0 +1,9 @@
+# Dedup question guidance for LLM answerer:
+# This case IS a duplicate of existing RFEs about model signature verification.
+# When asked if existing RFEs cover this need, answer "yes".
+# When asked about cache building, choose "Just check recent issues" (fast).
+dedup_is_duplicate: true
+dedup_guidance: >
+  This RFE is intentionally a rephrased version of an existing RFE about
+  model signature verification at serving time. If asked whether existing
+  RFEs cover this need, the answer is yes — RHAIRFE-27 already covers it.
