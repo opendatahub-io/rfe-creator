@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Tests for scripts/dedup_search.py — cache management, keyword matching,
 search logic, and graceful failure modes."""
+
 import json
 import os
 import subprocess
 import sys
 import urllib.parse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from dedup_search import (
     _build_text_query_jql,
@@ -26,11 +27,9 @@ from dedup_search import (
     _search_cache,
     _search_jql,
     search,
-    CACHE_TTL_HOURS,
 )
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts",
-                      "dedup_search.py")
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "dedup_search.py")
 
 
 def run_dedup(*args, env_override=None):
@@ -40,7 +39,9 @@ def run_dedup(*args, env_override=None):
         env.update(env_override)
     result = subprocess.run(
         ["python3", SCRIPT, *args],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
     return result.stdout, result.stderr, result.returncode
 
@@ -52,8 +53,8 @@ def tmp_dir(tmp_path, monkeypatch):
     os.chdir(tmp_path)
     # Point CACHE_PATH to temp dir
     import dedup_search
-    monkeypatch.setattr(dedup_search, "CACHE_PATH",
-                        str(tmp_path / "tmp" / "dedup-cache.json"))
+
+    monkeypatch.setattr(dedup_search, "CACHE_PATH", str(tmp_path / "tmp" / "dedup-cache.json"))
     yield tmp_path
     os.chdir(orig)
 
@@ -61,7 +62,6 @@ def tmp_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def sample_cache(tmp_dir):
     """Write a fresh sample cache and return its path."""
-    import dedup_search
     cache = {
         "refreshed_at": datetime.now(timezone.utc).isoformat(),
         "server": os.environ.get("JIRA_SERVER", "https://test.atlassian.net"),
@@ -79,6 +79,7 @@ def sample_cache(tmp_dir):
 
 
 # ─── Cache Age ────────────────────────────────────────────────────────────────
+
 
 class TestCacheAge:
     def test_fresh_cache(self):
@@ -142,6 +143,7 @@ class TestCacheFreshness:
 
 # ─── Cache Load/Save ──────────────────────────────────────────────────────────
 
+
 class TestCacheIO:
     def test_roundtrip(self, tmp_dir):
         data = {
@@ -163,6 +165,7 @@ class TestCacheIO:
 
     def test_load_corrupt(self, tmp_dir):
         import dedup_search
+
         os.makedirs(os.path.dirname(dedup_search.CACHE_PATH), exist_ok=True)
         with open(dedup_search.CACHE_PATH, "w") as f:
             f.write("{{invalid json::")
@@ -170,6 +173,7 @@ class TestCacheIO:
 
 
 # ─── Keyword Matching ─────────────────────────────────────────────────────────
+
 
 class TestSearchCache:
     def test_single_keyword(self, sample_cache):
@@ -207,10 +211,10 @@ class TestSearchCache:
 
 # ─── Fallback Keyword Extraction ──────────────────────────────────────────────
 
+
 class TestFallbackKeywords:
     def test_extracts_meaningful_words(self):
-        kws = _extract_fallback_keywords(
-            "I want RHOAI AI Hub to have model fine-tuning")
+        kws = _extract_fallback_keywords("I want RHOAI AI Hub to have model fine-tuning")
         assert "rhoai" in kws
         assert "hub" in kws
         assert "fine-tuning" in kws
@@ -220,8 +224,7 @@ class TestFallbackKeywords:
         assert "have" not in kws
 
     def test_max_five(self):
-        kws = _extract_fallback_keywords(
-            "alpha bravo charlie delta echo foxtrot golf hotel")
+        kws = _extract_fallback_keywords("alpha bravo charlie delta echo foxtrot golf hotel")
         assert len(kws) <= 5
 
     def test_deduplication(self):
@@ -236,6 +239,7 @@ class TestFallbackKeywords:
 
 # ─── CLI Integration ──────────────────────────────────────────────────────────
 
+
 class TestCLI:
     def test_search_no_creds(self, tmp_dir):
         """Search without credentials returns graceful error."""
@@ -247,8 +251,8 @@ class TestCLI:
             "HOME": os.environ.get("HOME", ""),
         }
         out, err, rc = run_dedup(
-            "search", "model fine-tuning", "--keywords", "model,fine-tuning",
-            env_override=env)
+            "search", "model fine-tuning", "--keywords", "model,fine-tuning", env_override=env
+        )
         assert rc == 0
         result = json.loads(out)
         assert result["error"] is not None
@@ -267,6 +271,7 @@ class TestCLI:
 
 
 # ─── JQL / Lucene Escaping ───────────────────────────────────────────────────
+
 
 class TestLuceneEscape:
     def test_plain_term(self):
@@ -307,11 +312,10 @@ class TestBuildTextQueryJql:
     ``text ~ "keyword"`` clause joined with OR."""
 
     def test_single_word_keywords(self):
-        clause = _build_text_query_jql(
-            ["mlflow", "registry", "sync", "integration"])
+        clause = _build_text_query_jql(["mlflow", "registry", "sync", "integration"])
         assert clause == (
-            '(text ~ "mlflow" OR text ~ "registry"'
-            ' OR text ~ "sync" OR text ~ "integration")')
+            '(text ~ "mlflow" OR text ~ "registry" OR text ~ "sync" OR text ~ "integration")'
+        )
 
     def test_multi_word_phrase(self):
         # Multi-word keywords stay as one text ~ clause (no Lucene quoting)
@@ -347,11 +351,9 @@ class TestSearchJqlEndToEnd:
     @patch("dedup_search.api_call_with_retry")
     def test_generated_jql_is_parseable(self, mock_api):
         mock_api.return_value = {"issues": []}
-        _search_jql("https://s", "u", "t",
-                    ["mlflow", "registry", "sync", "integration"], 10)
+        _search_jql("https://s", "u", "t", ["mlflow", "registry", "sync", "integration"], 10)
         call_path = mock_api.call_args[0][1]
-        decoded_jql = urllib.parse.unquote(
-            call_path.split("jql=", 1)[1].split("&", 1)[0])
+        decoded_jql = urllib.parse.unquote(call_path.split("jql=", 1)[1].split("&", 1)[0])
         assert '""' not in decoded_jql
         assert 'text ~ "mlflow"' in decoded_jql
         assert 'text ~ "registry"' in decoded_jql
@@ -360,24 +362,24 @@ class TestSearchJqlEndToEnd:
     @patch("dedup_search.api_call_with_retry")
     def test_generated_jql_with_phrase(self, mock_api):
         mock_api.return_value = {"issues": []}
-        _search_jql("https://s", "u", "t",
-                    ["mlflow", "model registry"], 10)
+        _search_jql("https://s", "u", "t", ["mlflow", "model registry"], 10)
         call_path = mock_api.call_args[0][1]
-        decoded_jql = urllib.parse.unquote(
-            call_path.split("jql=", 1)[1].split("&", 1)[0])
+        decoded_jql = urllib.parse.unquote(call_path.split("jql=", 1)[1].split("&", 1)[0])
         assert 'text ~ "model registry"' in decoded_jql
         assert 'text ~ "mlflow"' in decoded_jql
 
 
 # ─── _search_jql (mocked HTTP) ──────────────────────────────────────────────
 
+
 class TestSearchJql:
     def _mock_api(self, issues):
         """Return a mock that simulates api_call_with_retry."""
-        return MagicMock(return_value={
-            "issues": [{"key": k, "fields": {"summary": s}}
-                       for k, s in issues],
-        })
+        return MagicMock(
+            return_value={
+                "issues": [{"key": k, "fields": {"summary": s}} for k, s in issues],
+            }
+        )
 
     @patch("dedup_search.api_call_with_retry")
     def test_returns_results(self, mock_api):
@@ -412,11 +414,11 @@ class TestSearchJql:
 
 # ─── search() (mocked internals) ────────────────────────────────────────────
 
+
 class TestSearch:
     """Tests for the top-level search() function with mocked dependencies."""
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search._ensure_fresh_cache")
     @patch("dedup_search._search_jql", return_value=[])
     def test_cache_only_when_enough_results(self, mock_jql, mock_cache, mock_env):
@@ -436,8 +438,7 @@ class TestSearch:
         assert len(result["matches"]) == 4
         mock_jql.assert_not_called()
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search._ensure_fresh_cache")
     @patch("dedup_search._search_jql")
     def test_jql_fallback_when_sparse_cache(self, mock_jql, mock_cache, mock_env):
@@ -461,8 +462,7 @@ class TestSearch:
         assert keys.count("T-1") == 1
         assert "T-50" in keys
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search._ensure_fresh_cache")
     @patch("dedup_search._search_jql")
     def test_jql_only_when_no_cache_results(self, mock_jql, mock_cache, mock_env):
@@ -495,16 +495,14 @@ class TestSearch:
         assert result["error"] == "no_credentials_using_stale_cache"
         assert len(result["matches"]) == 1
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     def test_empty_input(self, mock_env):
         result = search("", [])
         assert result["source"] == "none"
         assert result["matches"] == []
         assert result["error"] is None
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search._ensure_fresh_cache")
     @patch("dedup_search._search_jql", return_value=[])
     def test_max_results_respected(self, mock_jql, mock_cache, mock_env):
@@ -521,14 +519,13 @@ class TestSearch:
 
 # ─── --headless and --recent-only modes ──────────────────────────────────────
 
+
 class TestHeadlessMode:
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search.refresh_cache")
     @patch("dedup_search._load_cache", return_value=None)
     @patch("dedup_search._search_jql")
-    def test_headless_skips_cache_build(self, mock_jql, mock_load,
-                                         mock_refresh, mock_env):
+    def test_headless_skips_cache_build(self, mock_jql, mock_load, mock_refresh, mock_env):
         """Headless mode must never call refresh_cache, even if cache missing."""
         mock_jql.return_value = [("T-50", "model fine-tuning")]
         result = search("model", ["model"], headless=True)
@@ -541,13 +538,11 @@ class TestHeadlessMode:
         assert result["source"] == "jira"
         assert len(result["matches"]) == 1
 
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search.refresh_cache")
     @patch("dedup_search._load_cache")
     @patch("dedup_search._search_jql", return_value=[])
-    def test_headless_uses_fresh_cache(self, mock_jql, mock_load,
-                                        mock_refresh, mock_env):
+    def test_headless_uses_fresh_cache(self, mock_jql, mock_load, mock_refresh, mock_env):
         """Headless mode uses a fresh cache normally — no refresh, no narrowed JQL."""
         mock_load.return_value = {
             "refreshed_at": datetime.now(timezone.utc).isoformat(),
@@ -566,8 +561,7 @@ class TestHeadlessMode:
 
 
 class TestRecentOnlyMode:
-    @patch("dedup_search.require_env",
-           return_value=("https://s", "u", "t"))
+    @patch("dedup_search.require_env", return_value=("https://s", "u", "t"))
     @patch("dedup_search._ensure_fresh_cache")
     @patch("dedup_search._search_jql")
     def test_recent_only_bypasses_cache(self, mock_jql, mock_cache, mock_env):

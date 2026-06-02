@@ -6,8 +6,10 @@ with JQL text search as fallback.
 
 Usage:
     python3 scripts/dedup_search.py search "problem text" --keywords "kw1,kw2" [--max-results 10]
-    python3 scripts/dedup_search.py search "..." --keywords "..." --headless      # CI: never block on cache build
-    python3 scripts/dedup_search.py search "..." --keywords "..." --recent-only   # Skip cache, narrow JQL only
+    # --headless:    CI mode — never block on cache build
+    python3 scripts/dedup_search.py search "..." --keywords "..." --headless
+    # --recent-only: skip cache, narrow JQL only
+    python3 scripts/dedup_search.py search "..." --keywords "..." --recent-only
     python3 scripts/dedup_search.py refresh-cache [--force]
     python3 scripts/dedup_search.py cache-info [--json]
 """
@@ -21,33 +23,146 @@ from datetime import datetime, timedelta, timezone
 
 # Add parent directory so we can import jira_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from jira_utils import require_env, api_call_with_retry
+from jira_utils import api_call_with_retry, require_env
 
-CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "..", "tmp", "dedup-cache.json")
+CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "dedup-cache.json"
+)
 CACHE_TTL_HOURS = 4
 JQL_BASE = "project = RHAIRFE AND statusCategory != Done"
 RECENT_ONLY_DAYS = 30
 
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "can", "shall", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "out", "off", "over",
-    "under", "again", "further", "then", "once", "and", "but", "or",
-    "nor", "not", "so", "yet", "both", "either", "neither", "each",
-    "every", "all", "any", "few", "more", "most", "other", "some", "such",
-    "no", "only", "own", "same", "than", "too", "very", "just", "because",
-    "if", "when", "where", "how", "what", "which", "who", "whom", "this",
-    "that", "these", "those", "i", "me", "my", "we", "our", "you", "your",
-    "he", "him", "his", "she", "her", "it", "its", "they", "them", "their",
-    "want", "need", "like", "use", "using", "support", "enable", "allow",
-    "make", "get", "set", "add", "new", "also", "about",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "shall",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "out",
+        "off",
+        "over",
+        "under",
+        "again",
+        "further",
+        "then",
+        "once",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "yet",
+        "both",
+        "either",
+        "neither",
+        "each",
+        "every",
+        "all",
+        "any",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "only",
+        "own",
+        "same",
+        "than",
+        "too",
+        "very",
+        "just",
+        "because",
+        "if",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
+        "want",
+        "need",
+        "like",
+        "use",
+        "using",
+        "support",
+        "enable",
+        "allow",
+        "make",
+        "get",
+        "set",
+        "add",
+        "new",
+        "also",
+        "about",
+    }
+)
 
 
 # ─── Cache Management ────────────────────────────────────────────────────────
+
 
 def _load_cache():
     """Load cache from disk. Returns dict or None if unavailable/corrupt."""
@@ -100,8 +215,7 @@ def refresh_cache(server, user, token):
 
     while True:
         jql = urllib.parse.quote(JQL_BASE, safe="")
-        path = (f"/search/jql?jql={jql}"
-                f"&maxResults={page_size}&fields=key,summary")
+        path = f"/search/jql?jql={jql}&maxResults={page_size}&fields=key,summary"
         if next_page_token:
             path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
         data = api_call_with_retry(server, path, user, token)
@@ -146,12 +260,13 @@ def _ensure_fresh_cache(server, user, token, allow_build=True):
         return cache  # Return stale cache (or None) if no creds
     # Let the user know why there's a pause
     if cache is None:
-        print("Building duplicate-detection cache (first run, "
-              "this may take a moment)...", file=sys.stderr)
+        print(
+            "Building duplicate-detection cache (first run, this may take a moment)...",
+            file=sys.stderr,
+        )
     else:
         age = _cache_age_hours(cache)
-        print(f"Refreshing duplicate-detection cache "
-              f"(last built {age}h ago)...", file=sys.stderr)
+        print(f"Refreshing duplicate-detection cache (last built {age}h ago)...", file=sys.stderr)
     try:
         return refresh_cache(server, user, token)
     except Exception as e:
@@ -160,6 +275,7 @@ def _ensure_fresh_cache(server, user, token, allow_build=True):
 
 
 # ─── Search ───────────────────────────────────────────────────────────────────
+
 
 def _search_cache(cache, keywords, max_results):
     """Search local cache by keyword substring matching. Returns matches."""
@@ -235,14 +351,14 @@ def _search_jql(server, user, token, keywords, max_results, recent_days=None):
     if text_clause is None:
         return []
 
-    jql = f'{JQL_BASE} AND {text_clause}'
+    jql = f"{JQL_BASE} AND {text_clause}"
     if recent_days:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(recent_days))
-                  ).strftime("%Y-%m-%d")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=int(recent_days))).strftime(
+            "%Y-%m-%d"
+        )
         jql += f' AND created >= "{cutoff}"'
     jql_encoded = urllib.parse.quote(jql, safe="")
-    path = (f"/search/jql?jql={jql_encoded}&maxResults={max_results}"
-            f"&fields=key,summary")
+    path = f"/search/jql?jql={jql_encoded}&maxResults={max_results}&fields=key,summary"
 
     try:
         data = api_call_with_retry(server, path, user, token)
@@ -271,13 +387,21 @@ def search(text, keywords, max_results=10, headless=False, recent_only=False):
     has_creds = all([server, user, token])
 
     if not text.strip() and not keywords:
-        return {"source": "none", "cache_age_hours": None,
-                "keywords_used": [], "matches": [], "error": None}
+        return {
+            "source": "none",
+            "cache_age_hours": None,
+            "keywords_used": [],
+            "matches": [],
+            "error": None,
+        }
 
     # Recent-only: skip the cache entirely
     if recent_only:
-        jql_results = _search_jql(server, user, token, keywords, max_results,
-                                  recent_days=RECENT_ONLY_DAYS) if has_creds else []
+        jql_results = (
+            _search_jql(server, user, token, keywords, max_results, recent_days=RECENT_ONLY_DAYS)
+            if has_creds
+            else []
+        )
         matches = []
         seen = set()
         for key, summary in jql_results:
@@ -296,8 +420,7 @@ def search(text, keywords, max_results=10, headless=False, recent_only=False):
 
     # Normal path: cache + JQL fallback.
     # In headless mode, don't trigger a blocking cache build.
-    cache = _ensure_fresh_cache(server, user, token,
-                                allow_build=not headless)
+    cache = _ensure_fresh_cache(server, user, token, allow_build=not headless)
     age = _cache_age_hours(cache)
 
     # Tier 1: local cache search
@@ -310,8 +433,9 @@ def search(text, keywords, max_results=10, headless=False, recent_only=False):
     jql_results = []
     if has_creds and len(cache_results) < 3:
         recent_days = RECENT_ONLY_DAYS if (headless and not cache) else None
-        jql_results = _search_jql(server, user, token, keywords, max_results,
-                                  recent_days=recent_days)
+        jql_results = _search_jql(
+            server, user, token, keywords, max_results, recent_days=recent_days
+        )
         source = "cache+jira" if cache_results else "jira"
 
     # Merge and deduplicate
@@ -351,25 +475,31 @@ def search(text, keywords, max_results=10, headless=False, recent_only=False):
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 
+
 def cmd_search(args):
-    keywords = [k.strip() for k in args.keywords.split(",") if k.strip()] \
-        if args.keywords else _extract_fallback_keywords(args.text)
-    result = search(args.text, keywords, args.max_results,
-                    headless=args.headless, recent_only=args.recent_only)
+    keywords = (
+        [k.strip() for k in args.keywords.split(",") if k.strip()]
+        if args.keywords
+        else _extract_fallback_keywords(args.text)
+    )
+    result = search(
+        args.text, keywords, args.max_results, headless=args.headless, recent_only=args.recent_only
+    )
     print(json.dumps(result, indent=2))
 
 
 def cmd_refresh_cache(args):
     server, user, token = require_env()
     if not all([server, user, token]):
-        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set",
-              file=sys.stderr)
+        print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set", file=sys.stderr)
         sys.exit(1)
     cache = _load_cache()
     if not args.force and _cache_is_fresh(cache, server):
         age = _cache_age_hours(cache)
-        print(f"Cache is fresh ({age}h old, TTL={CACHE_TTL_HOURS}h). "
-              f"Use --force to override.", file=sys.stderr)
+        print(
+            f"Cache is fresh ({age}h old, TTL={CACHE_TTL_HOURS}h). Use --force to override.",
+            file=sys.stderr,
+        )
         return
     refresh_cache(server, user, token)
 
@@ -396,8 +526,10 @@ def cmd_cache_info(args):
     else:
         print(f"Cache file: {info['cache_file']}")
         print(f"Refreshed: {info['refreshed_at']}")
-        print(f"Age: {info['age_hours']}h (TTL: {info['ttl_hours']}h, "
-              f"{'fresh' if info['fresh'] else 'stale'})")
+        print(
+            f"Age: {info['age_hours']}h (TTL: {info['ttl_hours']}h, "
+            f"{'fresh' if info['fresh'] else 'stale'})"
+        )
         print(f"Server: {info['server']}")
         print(f"Issues: {info['issue_count']}")
 
@@ -417,40 +549,44 @@ def _extract_fallback_keywords(text):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Search for potential duplicate RFEs in Jira.")
+    parser = argparse.ArgumentParser(description="Search for potential duplicate RFEs in Jira.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     # search
     p_search = sub.add_parser("search", help="Search for duplicates")
     p_search.add_argument("text", help="Problem statement text")
-    p_search.add_argument("--keywords",
-                          help="Comma-separated key phrases (LLM-extracted). "
-                               "Optional — a simple stopword-filtered fallback "
-                               "is used if omitted.")
-    p_search.add_argument("--max-results", type=int, default=10,
-                          help="Maximum matches to return")
-    p_search.add_argument("--headless", action="store_true",
-                          help="Never trigger a blocking cache build. If the "
-                               "cache is missing/stale, fall through to a "
-                               "narrow JQL query scoped to recent issues.")
-    p_search.add_argument("--recent-only", action="store_true",
-                          help="Skip the cache entirely and run a targeted "
-                               f"JQL scoped to issues created in the last "
-                               f"{RECENT_ONLY_DAYS} days. Fast, but only "
-                               f"catches recent duplicates.")
+    p_search.add_argument(
+        "--keywords",
+        help="Comma-separated key phrases (LLM-extracted). "
+        "Optional — a simple stopword-filtered fallback "
+        "is used if omitted.",
+    )
+    p_search.add_argument("--max-results", type=int, default=10, help="Maximum matches to return")
+    p_search.add_argument(
+        "--headless",
+        action="store_true",
+        help="Never trigger a blocking cache build. If the "
+        "cache is missing/stale, fall through to a "
+        "narrow JQL query scoped to recent issues.",
+    )
+    p_search.add_argument(
+        "--recent-only",
+        action="store_true",
+        help="Skip the cache entirely and run a targeted "
+        f"JQL scoped to issues created in the last "
+        f"{RECENT_ONLY_DAYS} days. Fast, but only "
+        f"catches recent duplicates.",
+    )
     p_search.set_defaults(func=cmd_search)
 
     # refresh-cache
     p_refresh = sub.add_parser("refresh-cache", help="Refresh the local cache")
-    p_refresh.add_argument("--force", action="store_true",
-                           help="Ignore TTL and force refresh")
+    p_refresh.add_argument("--force", action="store_true", help="Ignore TTL and force refresh")
     p_refresh.set_defaults(func=cmd_refresh_cache)
 
     # cache-info
     p_info = sub.add_parser("cache-info", help="Show cache status")
-    p_info.add_argument("--json", action="store_true",
-                        help="Output as JSON for scripting")
+    p_info.add_argument("--json", action="store_true", help="Output as JSON for scripting")
     p_info.set_defaults(func=cmd_cache_info)
 
     args = parser.parse_args()
