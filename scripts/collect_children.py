@@ -7,28 +7,36 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from artifact_utils import scan_task_files
+from artifact_utils import resolve_ids, scan_task_files
 
 
 def main():
     parser = argparse.ArgumentParser(description="Find child RFEs by parent_key")
     parser.add_argument(
-        "parent_ids", nargs="+", help="One or more parent RFE IDs (e.g. RHAIRFE-100)"
+        "parent_ids", nargs="*", help="One or more parent RFE IDs (e.g. RHAIRFE-100)"
+    )
+    parser.add_argument(
+        "--ids-file",
+        help="Read parent RFE IDs from a file (one per line) instead of positional args",
     )
     args = parser.parse_args()
+
+    parent_ids = resolve_ids(args.parent_ids, args.ids_file)
+    if not parent_ids:
+        parser.error("no parent RFE IDs provided (pass positionally or via --ids-file)")
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
     tasks = scan_task_files(artifacts_dir)
 
     # Build parent -> children mapping
-    children_by_parent = {pid: [] for pid in args.parent_ids}
+    children_by_parent = {pid: [] for pid in parent_ids}
     for _path, data in tasks:
         parent = data.get("parent_key")
         if parent and parent in children_by_parent:
             if data.get("status") != "Archived":
                 children_by_parent[parent].append(data["rfe_id"])
 
-    for pid in args.parent_ids:
+    for pid in parent_ids:
         kids = ",".join(children_by_parent[pid])
         print(f"{pid}:{kids}")
 
