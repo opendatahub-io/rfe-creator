@@ -220,16 +220,17 @@ def refresh_cache(server, user, token):
             path += f"&nextPageToken={urllib.parse.quote(next_page_token, safe='')}"
         data = api_call_with_retry(server, path, user, token)
 
-        for issue in data.get("issues", []):
+        page_issues = data.get("issues", [])
+        for issue in page_issues:
             key = issue["key"]
             summary = issue.get("fields", {}).get("summary", "")
             issues[key] = summary
 
-        if not data.get("issues") or data.get("isLast", True):
-            break
-
+        # Jira Cloud /rest/api/3/search/jql is cursor-based: stop when there's
+        # no nextPageToken. Don't trust `isLast` — it can be inconsistent on
+        # the new endpoint, and defaulting it to True under-fetches pages.
         next_page_token = data.get("nextPageToken")
-        if not next_page_token:
+        if not page_issues or not next_page_token:
             break
 
     cache = {
@@ -477,13 +478,39 @@ def search(text, keywords, max_results=10, headless=False, recent_only=False):
 
 
 def cmd_search(args):
+    text = args.text
+    if args.problem_file:
+        if text:
+            print("Error: pass either positional text or --problem-file, not both", file=sys.stderr)
+            sys.exit(2)
+        try:
+            with open(args.problem_file) as f:
+                text = f.read().strip()
+        except OSError as e:
+            print(f"Could not read --problem-file {args.problem_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    if not text:
+        print(
+            "Error: provide a problem statement positionally or via --problem-file", file=sys.stderr
+        )
+        sys.exit(2)
+
+    keywords_str = args.keywords
+    if args.keywords_file:
+        try:
+            with open(args.keywords_file) as f:
+                keywords_str = f.read().strip()
+        except OSError as e:
+            print(f"Could not read --keywords-file {args.keywords_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+
     keywords = (
-        [k.strip() for k in args.keywords.split(",") if k.strip()]
-        if args.keywords
-        else _extract_fallback_keywords(args.text)
+        [k.strip() for k in keywords_str.split(",") if k.strip()]
+        if keywords_str
+        else _extract_fallback_keywords(text)
     )
     result = search(
-        args.text, keywords, args.max_results, headless=args.headless, recent_only=args.recent_only
+        text, keywords, args.max_results, headless=args.headless, recent_only=args.recent_only
     )
     print(json.dumps(result, indent=2))
 
@@ -554,12 +581,26 @@ def main():
 
     # search
     p_search = sub.add_parser("search", help="Search for duplicates")
-    p_search.add_argument("text", help="Problem statement text")
+    p_search.add_argument(
+        "text",
+        nargs="?",
+        help="Problem statement text. Prefer --problem-file for untrusted input to avoid "
+        "shell quoting/injection when callers build the command line.",
+    )
+    p_search.add_argument(
+        "--problem-file",
+        help="Read the problem statement from a file (one block of text). Use this when "
+        "the problem statement is user-controlled to avoid shell-quoting risks.",
+    )
     p_search.add_argument(
         "--keywords",
         help="Comma-separated key phrases (LLM-extracted). "
         "Optional — a simple stopword-filtered fallback "
         "is used if omitted.",
+    )
+    p_search.add_argument(
+        "--keywords-file",
+        help="Read comma-separated keywords from a file (overrides --keywords).",
     )
     p_search.add_argument("--max-results", type=int, default=10, help="Maximum matches to return")
     p_search.add_argument(

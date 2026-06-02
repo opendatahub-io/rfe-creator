@@ -57,17 +57,21 @@ Before asking clarifying questions, check whether similar RFEs already exist in 
      - If **Build full cache**: run step 3 with no extra flag.
      - If **Just check recent issues**: run step 3 with `--recent-only`.
 
-3. Run the duplicate search:
+3. Run the duplicate search. **Never embed the problem statement or keywords directly into the Bash command** — the text is user-controlled and can break out of shell quoting (CWE-78). Write them to `tmp/` files first with the Write tool, then pass `--problem-file` / `--keywords-file`:
 
    ```bash
+   # Files prepared via the Write tool first:
+   #   tmp/dedup-problem.txt   ← the raw problem statement text
+   #   tmp/dedup-keywords.txt  ← comma-separated phrase1,phrase2,phrase3
+
    # Interactive, user opted to build the cache
-   python3 scripts/dedup_search.py search "<problem statement text>" --keywords "phrase1,phrase2,phrase3" --max-results 10
+   python3 scripts/dedup_search.py search --problem-file tmp/dedup-problem.txt --keywords-file tmp/dedup-keywords.txt --max-results 10
 
    # Interactive, user opted for fast recent-only
-   python3 scripts/dedup_search.py search "..." --keywords "..." --max-results 10 --recent-only
+   python3 scripts/dedup_search.py search --problem-file tmp/dedup-problem.txt --keywords-file tmp/dedup-keywords.txt --max-results 10 --recent-only
 
    # Headless / CI
-   python3 scripts/dedup_search.py search "..." --keywords "..." --max-results 10 --headless --recent-only
+   python3 scripts/dedup_search.py search --problem-file tmp/dedup-problem.txt --keywords-file tmp/dedup-keywords.txt --max-results 10 --headless --recent-only
    ```
 
 4. Parse the JSON output. If matches were found:

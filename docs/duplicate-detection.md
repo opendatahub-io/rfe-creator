@@ -53,7 +53,7 @@ as a subprocess and has no meaningful stdin for `AskUserQuestion`.
 | Interactive | Stale | Silent refresh (user already opted in previously). |
 | Interactive | Missing | Prompt: "Build full cache (recommended)" vs. "Just check recent issues". |
 | Headless | Fresh | Silent use. |
-| Headless | Stale or missing | Skip refresh. Fall through to narrow JQL scoped to `created >= -30d`. |
+| Headless | Stale or missing | Skip refresh. Fall through to narrow JQL scoped to `created >= "YYYY-MM-DD"` (last 30 days). |
 
 The narrow JQL path trades recall (only catches duplicates created in
 the last 30 days) for speed (no pagination, one API call). That's the

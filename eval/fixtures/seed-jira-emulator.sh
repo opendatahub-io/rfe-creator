@@ -25,13 +25,19 @@ RUNS_DIR="${AGENT_EVAL_RUNS_DIR:-eval/runs}"
 echo "Seeding jira-emulator at $SERVER from run $RUN_ID..."
 
 # Wait for server to be ready
+ready=false
 for i in $(seq 1 30); do
     if curl -sf "$SERVER/rest/api/2/priority" > /dev/null 2>&1; then
+        ready=true
         break
     fi
     echo "  Waiting for server... ($i/30)"
     sleep 1
 done
+if [ "$ready" != "true" ]; then
+    echo "ERROR: jira-emulator at $SERVER did not become ready after 30s" >&2
+    exit 1
+fi
 
 python3 - "$SERVER" "$RUNS_DIR/$RUN_ID" << 'SEED_EOF'
 import json, urllib.request, base64, sys, os, re
@@ -95,7 +101,7 @@ for case_dir in sorted(cases_dir.iterdir()):
         req = urllib.request.Request(f"{server}/rest/api/2/issue",
                                     data=payload, headers=headers, method="POST")
         try:
-            resp = urllib.request.urlopen(req)
+            resp = urllib.request.urlopen(req, timeout=10)
             key = json.loads(resp.read())["key"]
             print(f"  {key}: {title}")
             created += 1

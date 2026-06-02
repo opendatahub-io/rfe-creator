@@ -11,6 +11,6 @@ expected_scores:
 expected_total: null
 dedup_is_duplicate: true
 known_issues:
-  - dedup should flag this as overlapping with RHAIRFE-1001 (model signature verification)
+  - dedup should flag this as overlapping with RHAIRFE-27 (model signature verification)
 score_tolerance: 1
 tags: [dedup, high-overlap]
