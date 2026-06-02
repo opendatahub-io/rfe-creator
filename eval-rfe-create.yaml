@@ -1,0 +1,278 @@
+name: rfe-create-dedup
+description: Test rfe.create with duplicate detection against jira-emulator
+
+skill: rfe.create
+
+# Per-case execution — each test case gets its own workspace and skill invocation
+execution:
+  mode: case
+  arguments: >-
+    --priority {priority}
+    "{prompt}
+
+    Clarifying context: {clarifying_context}"
+  timeout: 600             # 10 min per case — rfe.create is single-phase
+  max_budget_usd: 5.0
+  env:
+    JIRA_SERVER: http://localhost:8080
+    JIRA_USER: admin
+    JIRA_TOKEN: admin
+
+runner:
+  type: claude-code
+  effort: high
+
+models:
+  skill: claude-opus-4-6
+  subagent: claude-opus-4-6
+  judge: claude-opus-4-6
+  hook: claude-sonnet-4-6
+
+permissions:
+  allow:
+    - "Skill"
+    - "Write(/tmp/rfe-assess/**)"
+    - "Write(/private/tmp/rfe-assess/**)"
+    - "Edit(/tmp/rfe-assess/**)"
+    - "Edit(/private/tmp/rfe-assess/**)"
+  deny: []
+
+dataset:
+  path: eval/dataset/dedup-cases
+  schema: |
+    Each case directory contains:
+
+    - input.yaml: Test input with fields:
+      - prompt (string): Problem statement (1-2 sentences)
+      - priority (string): Blocker/Critical/Major/Normal/Minor
+      - clarifying_context (string): Extended business context
+
+    - annotations.yaml: Test metadata with:
+      - tags (list): includes 'dedup' plus scenario tag
+      - known_issues (list): expected dedup behavior
+
+inputs:
+  tools:
+    - match: |
+        Questions asked to the user via AskUserQuestion — typically
+        clarifying questions during rfe.create.
+      prompt: |
+        Answer based on the test case context in input.yaml and answers.yaml.
+        Use 'clarifying_context' from input.yaml for customer/scope details.
+        Use 'dedup_guidance' from answers.yaml for duplicate detection decisions
+        (whether to confirm or deny that existing RFEs cover this need).
+        For general clarifying questions, use the input context to give
+        informed answers. For confirmations, default to "yes".
+
+    - match: |
+        Any interaction with Jira — whether via MCP tools, Bash scripts
+        calling the Jira REST API, or dedup_search.py.
+      prompt: |
+        Allow dedup_search.py to execute — it talks to the jira-emulator
+        at JIRA_SERVER. The emulator is pre-seeded with test issues.
+        For other Jira scripts (submit.py, fetch_issue.py): block unless
+        JIRA_SERVER points to the emulator (localhost or test instance).
+
+outputs:
+  - path: artifacts/rfe-tasks
+    schema: |
+      RFE task files in Markdown with YAML frontmatter.
+      Naming: RFE-001.md (per-case mode creates one RFE per case).
+      Frontmatter: rfe_id, title, priority, size, status.
+      Body: Summary, Problem Statement, Affected Customers,
+      Business Justification, Acceptance Criteria, Success Criteria.
+
+traces:
+  stdout: true
+  stderr: true
+  metrics: true
+
+judges:
+  # --- Inline checks ---
+
+  - name: rfe_outcome_correct
+    description: |
+      Verify the RFE creation outcome matches expectations from annotations.
+      If dedup_is_duplicate is true, no RFE should be created AND stdout
+      should show the skill acknowledged the duplicate (not a silent crash).
+      Otherwise, an RFE task file must be produced.
+    check: |
+      annotations = outputs.get("annotations", {})
+      is_duplicate = annotations.get("dedup_is_duplicate", False)
+      files = outputs.get("files", {})
+      stdout = outputs.get("stdout", "")
+      tasks = [k for k in files if k.startswith("artifacts/rfe-tasks/") and k.endswith(".md")]
+      if is_duplicate:
+          if tasks:
+              return (False, f"Expected no RFE (duplicate), but {len(tasks)} task files produced")
+          # Verify the skill stopped intentionally, not due to a crash
+          has_dedup_signal = any(w in stdout.lower() for w in [
+              "already cover", "duplicate", "existing rfe", "overlap"])
+          if not has_dedup_signal:
+              return (False, "No RFE produced but no dedup signal in stdout — may be a crash")
+          return (True, "Correctly did not create RFE — duplicate acknowledged in stdout")
+      else:
+          if not tasks:
+              return (False, "Expected RFE to be created, but no task files found")
+          return (True, f"{len(tasks)} task files produced")
+
+  - name: dedup_search_executed
+    description: |
+      Verify dedup_search.py was called AND returned valid JSON results
+      (not blocked by hook, not an HTTP error). Checks the Bash tool_result
+      for the dedup_search command contains parseable JSON with a "source" field.
+    check: |
+      import json
+      stdout = outputs.get("stdout", "")
+      if not stdout:
+          return (True, "No stdout — skipping")
+      # Find dedup_search Bash call and its result
+      bash_calls = {}
+      for line in stdout.splitlines():
+          try:
+              obj = json.loads(line)
+          except (json.JSONDecodeError, ValueError):
+              continue
+          if obj.get("parent_tool_use_id"):
+              continue
+          if obj.get("type") == "assistant":
+              for b in obj.get("message", {}).get("content", []):
+                  if (b.get("type") == "tool_use" and b.get("name") == "Bash"
+                          and "dedup_search.py search" in b.get("input", {}).get("command", "")):
+                      bash_calls[b["id"]] = b.get("input", {}).get("command", "")
+          elif obj.get("type") == "user":
+              for b in (obj.get("message", {}).get("content") or []):
+                  if isinstance(b, dict) and b.get("type") == "tool_result":
+                      tuid = b.get("tool_use_id", "")
+                      if tuid in bash_calls:
+                          bash_calls[tuid] = b.get("content", "")
+      if not bash_calls:
+          return (False, "dedup_search.py search was never called")
+      # Check if any result contains valid JSON with "source"
+      for tuid, result in bash_calls.items():
+          if not isinstance(result, str):
+              continue
+          if "Hook PreToolUse" in result and "denied" in result:
+              return (False, f"dedup_search was blocked by hook: {result[:100]}")
+          # The result has stderr mixed in — find the JSON object by
+          # locating the first { and trying to parse from there
+          brace_idx = result.find("{")
+          if brace_idx >= 0:
+              try:
+                  data = json.loads(result[brace_idx:])
+                  if isinstance(data, dict) and "source" in data:
+                      matches = len(data.get("matches", []))
+                      error = data.get("error")
+                      if error:
+                          return (False, f"dedup_search returned error: {error}")
+                      return (True, f"dedup_search OK: source={data['source']}, {matches} matches")
+              except (json.JSONDecodeError, ValueError):
+                  pass
+          # Fallback: look for "source" anywhere — at least it ran
+          if '"source"' in result:
+              return (True, "dedup_search returned results (JSON partially parsed)")
+      return (False, "dedup_search called but no valid JSON result found")
+
+  - name: no_crash
+    description: |
+      Verify the skill exited cleanly — exit code 0 and no fatal
+      tracebacks in stderr.
+    check: |
+      exit_code = outputs.get("exit_code")
+      if exit_code is not None and exit_code != 0:
+          return (False, f"Non-zero exit code: {exit_code}")
+      stderr = outputs.get("stderr", "")
+      if "Traceback (most recent call last)" in stderr:
+          last_line = stderr.strip().split("\n")[-1]
+          return (False, f"Fatal traceback: {last_line[:120]}")
+      return (True, "Clean exit")
+
+  - name: dedup_question_answered_correctly
+    description: |
+      Verify the dedup confirmation question was asked and answered
+      correctly based on annotations. For duplicate cases, the answer
+      should be "yes". For non-duplicate cases, "no" or no question.
+    check: |
+      import json
+      stdout = outputs.get("stdout", "")
+      if not stdout:
+          return (True, "No stdout — skipping")
+      annotations = outputs.get("annotations", {})
+      is_dup = annotations.get("dedup_is_duplicate", False)
+      # Parse AskUserQuestion tool_use calls and their tool_result answers
+      ask_calls = {}
+      for line in stdout.splitlines():
+          try:
+              obj = json.loads(line)
+          except (json.JSONDecodeError, ValueError):
+              continue
+          if obj.get("parent_tool_use_id"):
+              continue
+          if obj.get("type") == "assistant":
+              for b in obj.get("message", {}).get("content", []):
+                  if (b.get("type") == "tool_use"
+                          and b.get("name") == "AskUserQuestion"):
+                      ask_calls[b["id"]] = b.get("input", {})
+          elif obj.get("type") == "user":
+              for b in (obj.get("message", {}).get("content") or []):
+                  if isinstance(b, dict) and b.get("type") == "tool_result":
+                      tuid = b.get("tool_use_id", "")
+                      if tuid in ask_calls:
+                          ask_calls[tuid]["_result"] = b.get("content", "")
+      # Find dedup confirmation questions (not cache-build questions)
+      dedup_qs = []
+      for tid, q in ask_calls.items():
+          for qq in q.get("questions", []):
+              text = qq.get("question", "").lower()
+              if any(w in text for w in ["cover what you need", "already cover",
+                                         "overlap with your idea"]):
+                  dedup_qs.append(q)
+                  break
+      if not dedup_qs:
+          if is_dup:
+              return (False, "Duplicate case but no dedup question was asked")
+          return (True, "No dedup question — not expected for this case")
+      result_text = dedup_qs[0].get("_result", "").lower()
+      if is_dup and "yes" not in result_text:
+          return (False, f"Duplicate but answer was not 'yes': {result_text[:100]}")
+      if not is_dup and "yes" in result_text:
+          return (False, f"Not a duplicate but answer was 'yes': {result_text[:100]}")
+      return (True, f"Dedup question answered correctly: {result_text[:80]}")
+
+  # --- LLM judges ---
+
+  - name: rfe_quality
+    if: "not annotations.get('dedup_is_duplicate', False)"
+    description: |
+      Assess the quality of the produced RFE against the 5 rubric criteria.
+      Skipped for duplicate cases (no RFE to assess).
+    prompt: |
+      You are an independent evaluator assessing an RFE (Request for Enhancement).
+
+      {{ outputs }}
+
+      Assess quality across these criteria, then provide a score 1-5:
+      - Describes a clear business need (WHAT)
+      - Justified with evidence (WHY)
+      - Does not prescribe implementation (no HOW)
+      - Describes a need, not an activity (Not a Task)
+      - Right-sized for a single strategy feature
+
+      Score 1-5:
+      - **5**: Exemplary — all criteria strong
+      - **4**: Good — meets most criteria
+      - **3**: Adequate — noticeable issues
+      - **2**: Below standard — multiple issues
+      - **1**: Poor — fails basic standards
+
+thresholds:
+  rfe_outcome_correct:
+    min_pass_rate: 1.0
+  dedup_search_executed:
+    min_pass_rate: 1.0
+  dedup_question_answered_correctly:
+    min_pass_rate: 1.0
+  no_crash:
+    min_pass_rate: 1.0
+  rfe_quality:
+    min_mean: 3.5

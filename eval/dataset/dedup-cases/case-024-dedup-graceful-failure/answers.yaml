@@ -1,0 +1,10 @@
+# Dedup question guidance for LLM answerer:
+# This case is about GPU utilization monitoring — a completely different
+# topic from any existing RFEs. Any matches found are false positives.
+dedup_is_duplicate: false
+dedup_guidance: >
+  This RFE is about GPU utilization monitoring for distributed training.
+  It is NOT a duplicate of any existing RFE. Any matches the dedup search
+  finds are false positives from keyword overlap (e.g., "Ray", "training").
+  Answer "no" or "No, mine is different" to any question asking whether
+  existing RFEs cover this need.
