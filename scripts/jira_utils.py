@@ -131,6 +131,7 @@ def create_issue(
     labels=None,
     components=None,
     parent_key=None,
+    reporter_account_id=None,
 ):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
@@ -148,6 +149,8 @@ def create_issue(
         body["fields"]["components"] = [{"name": c} for c in components]
     if parent_key:
         body["fields"]["parent"] = {"key": parent_key}
+    if reporter_account_id:
+        body["fields"]["reporter"] = {"accountId": reporter_account_id}
     result = api_call_with_retry(server, "/issue", user, token, body=body)
     return result["key"]
 
