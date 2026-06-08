@@ -51,6 +51,7 @@ from jira_utils import (  # noqa: E402
     normalize_for_compare,
     require_env,
     text_to_adf_paragraph,
+    transition_issue,
 )
 
 MAX_LEAF_CHILDREN = 6
@@ -189,7 +190,9 @@ def phase1_persist(server, user, token, parent_key, children, state, dry_run):
         print(f"  Phase 1: Posted content for child {idx}/{total}: {title}")
 
 
-def phase2_create_link(server, user, token, parent_key, children, state, artifacts_dir, dry_run):
+def phase2_create_link(
+    server, user, token, parent_key, children, state, artifacts_dir, dry_run, auto_approve=False
+):
     """Create tickets, link to parent, and post confirmation comments."""
     total = len(children)
     for idx, (rfe_id, title, priority, artifact_path) in enumerate(children, 1):
@@ -249,6 +252,14 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
                 print(f"           Parent: {state.parent_parent_key}")
             if state.parent_reporter_id:
                 print(f"           Reporter: {state.parent_reporter_id}")
+            qualifies = (
+                auto_approve
+                and review_path
+                and review_rec == "submit"
+                and feas_label == "rfe-creator-feasibility-pass"
+            )
+            if qualifies:
+                print("           Would transition to Approved")
             print(f"           Would link to {parent_key} via 'Issue split'")
             if attn_reason:
                 print("           Would post needs-attention comment")
@@ -292,6 +303,36 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
             )
             add_comment(server, user, token, child_key, markdown_to_adf(attn_md))
             print("           Posted needs-attention comment")
+
+        # 5. Auto-approve if qualifying
+        qualifies_for_approve = (
+            auto_approve
+            and review_path
+            and review_rec == "submit"
+            and feas_label == "rfe-creator-feasibility-pass"
+        )
+        if qualifies_for_approve:
+            if transition_issue(
+                server, user, token, child_key, "Approved"
+            ):
+                approve_comment = (
+                    "*[RFE Creator]* This RFE has been automatically "
+                    "transitioned to Approved status based on passing "
+                    "rubric scoring and technical feasibility checks. "
+                    "Approval does not constitute a commitment to "
+                    "customers until this RFE is prioritized into a "
+                    "product release by product management."
+                )
+                add_comment(
+                    server,
+                    user,
+                    token,
+                    child_key,
+                    markdown_to_adf(approve_comment),
+                )
+                print(
+                    f"           Transitioned {child_key} to Approved"
+                )
 
         state.phase2_done[idx] = child_key
 
@@ -406,6 +447,12 @@ def main():
     )
     parser.add_argument(
         "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
+    )
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Transition qualifying child RFEs to Approved status "
+        "(pass=true + feasibility=feasible)",
     )
     args = parser.parse_args()
 
@@ -542,7 +589,8 @@ def main():
 
     print("Phase 2: Creating tickets and linking...")
     phase2_create_link(
-        server, user, token, args.parent_key, children, state, args.artifacts_dir, args.dry_run
+        server, user, token, args.parent_key, children, state,
+        args.artifacts_dir, args.dry_run, auto_approve=args.auto_approve,
     )
     print()
 
