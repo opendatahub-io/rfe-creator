@@ -6,7 +6,7 @@ The RFE Creator integrates with the Red Hat AI Jobs-to-be-Done (JTBD) knowledge 
 
 ## Architecture
 
-```
+```text
                     ┌─────────────────────────────────────┐
                     │          rfe.create skill            │
                     │                                     │

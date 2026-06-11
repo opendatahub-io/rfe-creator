@@ -15,14 +15,14 @@ Usage:
 
 JTBD_TASK_FIELDS = {
     "jtbd_mapping": {
-        "type": "object",
+        "type": "dict",
         "required": False,
         "fields": {
             "jobs": {
                 "type": "list",
                 "required": False,
                 "items": {
-                    "type": "object",
+                    "type": "dict",
                     "fields": {
                         "id": {
                             "type": "string",
@@ -34,7 +34,7 @@ JTBD_TASK_FIELDS = {
                             "required": True,
                         },
                         "opportunity_score": {
-                            "type": "float",
+                            "type": "int",
                             "required": False,
                         },
                         "lifecycle_phase": {
@@ -43,7 +43,7 @@ JTBD_TASK_FIELDS = {
                             "enum": ["build", "deploy", "production"],
                         },
                         "alignment_rank": {
-                            "type": "integer",
+                            "type": "int",
                             "required": False,
                             "min": 1,
                             "max": 4,
@@ -81,7 +81,7 @@ JTBD_TASK_FIELDS = {
 
 JTBD_REVIEW_FIELDS = {
     "jtbd_alignment": {
-        "type": "integer",
+        "type": "int",
         "required": False,
         "nullable": True,
         "min": 0,

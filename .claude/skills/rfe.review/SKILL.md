@@ -287,7 +287,7 @@ python3 scripts/state.py read-ids tmp/review-reassess-ids.txt
 For each reassess ID, launch a **review agent** (model: opus, run_in_background: true):
 
 ```
-Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=false
+Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {JTBD_PATH}=artifacts/rfe-reviews/<ID>-jtbd.md, {FIRST_PASS}=false
 ```
 
 Launch all review agents in parallel.

@@ -76,10 +76,38 @@ SCHEMAS = {
                 "jobs": {
                     "type": "list",
                     "required": False,
+                    "items": {
+                        "type": "dict",
+                        "fields": {
+                            "id": {"type": "string", "required": True},
+                            "name": {"type": "string", "required": True},
+                            "opportunity_score": {"type": "int", "required": False},
+                            "lifecycle_phase": {
+                                "type": "string",
+                                "required": False,
+                                "enum": ["build", "deploy", "production"],
+                            },
+                            "alignment_rank": {
+                                "type": "int",
+                                "required": False,
+                                "min": 1,
+                                "max": 4,
+                            },
+                            "alignment_strength": {
+                                "type": "string",
+                                "required": False,
+                                "enum": ["strong", "moderate", "weak"],
+                            },
+                        },
+                    },
                 },
                 "personas": {
                     "type": "list",
                     "required": False,
+                    "items": {
+                        "type": "string",
+                        "enum": ["dana", "alex", "maldi"],
+                    },
                 },
             },
         },
@@ -268,6 +296,13 @@ def _validate_field(name, value, spec, path=""):
         if not isinstance(value, int) or isinstance(value, bool):
             errors.append(
                 f"{full_name}: expected int, got {type(value).__name__}")
+        else:
+            if "min" in spec and value < spec["min"]:
+                errors.append(
+                    f"{full_name}: {value} < min {spec['min']}")
+            if "max" in spec and value > spec["max"]:
+                errors.append(
+                    f"{full_name}: {value} > max {spec['max']}")
 
     elif expected_type == "bool":
         if not isinstance(value, bool):
@@ -278,6 +313,12 @@ def _validate_field(name, value, spec, path=""):
         if not isinstance(value, list):
             errors.append(
                 f"{full_name}: expected list, got {type(value).__name__}")
+            return errors
+        item_spec = spec.get("items")
+        if item_spec:
+            for idx, item in enumerate(value):
+                errors.extend(_validate_field(
+                    str(idx), item, item_spec, full_name))
 
     elif expected_type == "dict":
         if not isinstance(value, dict):

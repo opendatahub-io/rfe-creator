@@ -189,8 +189,12 @@ def cmd_set(args):
                 if cur_spec is None:
                     break
                 if seg.isdigit():
-                    leaf_spec = {"type": "string"}
-                    cur_spec = None
+                    if cur_spec.get("type") == "list":
+                        cur_spec = cur_spec.get("items")
+                        if cur_spec:
+                            leaf_spec = cur_spec
+                    else:
+                        cur_spec = None
                 elif cur_spec.get("type") == "dict":
                     nested = cur_spec.get("fields", {})
                     cur_spec = nested.get(seg)

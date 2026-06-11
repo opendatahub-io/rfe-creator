@@ -14,7 +14,7 @@ else
   echo "Cloning JTBD registry..."
   mkdir -p "$(dirname "$TARGET_DIR")"
   git clone "$REGISTRY_URL" "$TARGET_DIR" 2>/dev/null || {
-    echo "Error: failed to clone JTBD registry from $REGISTRY_URL"
+    echo "Error: failed to clone JTBD registry (URL redacted)"
     echo "JTBD enrichment will be unavailable for this run."
     exit 0
   }
