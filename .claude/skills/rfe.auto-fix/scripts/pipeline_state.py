@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 
 import yaml
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 STATE_FILE = "tmp/pipeline-state.yaml"
 WAVE_IDS_FILE = "tmp/pipeline-wave-ids.txt"
 DISPATCH_MARKER = "tmp/.dispatch-marker"
@@ -378,6 +380,9 @@ def _copy_ids(src, dst):
 
 def _run_script(cmd):
     """Run a script and return stdout lines."""
+    import re
+    cmd = re.sub(r'(?<=\s)scripts/', f'{SCRIPTS_DIR}/', cmd)
+    cmd = re.sub(r'^scripts/', f'{SCRIPTS_DIR}/', cmd)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Script failed (exit code {result.returncode})", file=sys.stderr)

@@ -16,6 +16,8 @@ import os
 import subprocess
 import sys
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def main():
     ids_file = "tmp/pipeline-reassess-ids.txt"
@@ -31,7 +33,7 @@ def main():
         return
 
     # Step 1: Save review state
-    subprocess.run(["python3", "scripts/preserve_review_state.py", "save"] + ids, check=True)
+    subprocess.run(["python3", f"{SCRIPTS_DIR}/preserve_review_state.py", "save"] + ids, check=True)
 
     # Step 2: Delete stale files
     deleted = 0

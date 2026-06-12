@@ -14,7 +14,7 @@ Read the assessment result file and the feasibility file.
 ## Step 2: Read Schema
 
 ```bash
-python3 scripts/frontmatter.py schema rfe-review
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py schema rfe-review
 ```
 
 ## Step 3: Write Review File
@@ -45,7 +45,7 @@ Do NOT recommend split when capabilities are delivery-coupled.
 Set `needs_attention=true` when the RFE needs human review despite its score — e.g., feasibility is indeterminate/infeasible, references non-existent components, or has concerns the rubric doesn't capture. When true, also set `needs_attention_reason` to a concise explanation (1-2 sentences) of what needs human attention. When false, set `needs_attention_reason=null`.
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
     rfe_id={ID} score=<total> pass=<true/false> recommendation=<rec> \
     feasibility=<feasible/infeasible/indeterminate> needs_attention=<true/false> \
     needs_attention_reason="<reason or null>" \
@@ -55,7 +55,7 @@ python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
 If first pass ({FIRST_PASS}=true), also set before_score and before_scores.* with the same values:
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md \
     before_score=<total> \
     before_scores.what=<n> before_scores.why=<n> before_scores.open_to_how=<n> before_scores.not_a_task=<n> before_scores.right_sized=<n>
 ```

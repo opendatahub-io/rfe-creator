@@ -31,6 +31,8 @@ import shutil
 import subprocess
 import sys
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 from jira_utils import adf_to_markdown, get_comments, get_issue, require_env
 
 
@@ -92,7 +94,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     # Set frontmatter via frontmatter.py
     fm_args = [
         sys.executable,
-        "scripts/frontmatter.py",
+        f"{SCRIPTS_DIR}/frontmatter.py",
         "set",
         task_path,
         f"rfe_id={issue_key}",

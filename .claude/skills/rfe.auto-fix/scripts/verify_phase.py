@@ -14,7 +14,8 @@ import os
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPTS_DIR)
 from artifact_utils import read_frontmatter
 
 PHASE_OUTPUT = {
@@ -64,7 +65,7 @@ def verify(phase, ids_file):
                 subprocess.run(
                     [
                         "python3",
-                        "scripts/frontmatter.py",
+                        f"{SCRIPTS_DIR}/frontmatter.py",
                         "set",
                         review_path,
                         f"rfe_id={rfe_id}",

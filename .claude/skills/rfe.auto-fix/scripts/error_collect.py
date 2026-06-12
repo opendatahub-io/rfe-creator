@@ -17,6 +17,8 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 STATE_FILE = "tmp/pipeline-state.yaml"
 RETRY_ERRORS_FILE = "tmp/pipeline-retry-errors.yaml"
 RETRY_IDS_FILE = "tmp/pipeline-retry-ids.txt"
@@ -60,7 +62,7 @@ def main():
         sys.exit(1)
 
     result = subprocess.run(
-        ["python3", "scripts/collect_recommendations.py", "--errors"] + all_ids,
+        ["python3", f"{SCRIPTS_DIR}/collect_recommendations.py", "--errors"] + all_ids,
         capture_output=True,
         text=True,
     )
@@ -116,7 +118,7 @@ def main():
                 shutil.copy2(orig, tmp)
                 if fm:
                     subprocess.run(
-                        ["python3", "scripts/frontmatter.py", "set", tmp]
+                        ["python3", f"{SCRIPTS_DIR}/frontmatter.py", "set", tmp]
                         + [f"{k}={v}" for k, v in fm.items() if k != "content"],
                         capture_output=True,
                     )
@@ -145,7 +147,7 @@ def main():
                 os.remove(split_status)
             # Clean children via cleanup_partial_split.py
             subprocess.run(
-                ["python3", "scripts/cleanup_partial_split.py", rfe_id], capture_output=True
+                ["python3", f"{SCRIPTS_DIR}/cleanup_partial_split.py", rfe_id], capture_output=True
             )
 
     # Step 6: Post-cleanup verification

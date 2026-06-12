@@ -28,7 +28,7 @@ Check if `JIRA_SERVER`, `JIRA_USER`, and `JIRA_TOKEN` environment variables are 
 ## Step 1: Run Submission
 
 ```bash
-python3 scripts/submit.py [--dry-run] [--artifacts-dir artifacts]
+python3 ${CLAUDE_SKILL_DIR}/scripts/submit.py [--dry-run] [--artifacts-dir artifacts]
 ```
 
 ## Step 2: Report Results

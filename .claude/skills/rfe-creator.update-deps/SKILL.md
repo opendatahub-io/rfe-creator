@@ -14,14 +14,14 @@ Force update all vendored dependencies by removing cached copies and re-fetching
 
 ```bash
 rm -rf .context/assess-rfe .claude/skills/assess-rfe .claude/skills/export-rubric
-bash scripts/bootstrap-assess-rfe.sh
+bash ${CLAUDE_SKILL_DIR}/scripts/bootstrap-assess-rfe.sh
 ```
 
 ### 2. Update architecture context
 
 ```bash
 rm -rf .context/architecture-context
-bash scripts/fetch-architecture-context.sh
+bash ${CLAUDE_SKILL_DIR}/scripts/fetch-architecture-context.sh
 ```
 
 ### 3. Report

@@ -19,6 +19,8 @@ import sys
 
 import yaml
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import update_frontmatter
 
@@ -59,7 +61,7 @@ def main():
     # Collect children for all split parents at once
     if split_parents:
         result = subprocess.run(
-            ["python3", "scripts/collect_children.py"] + split_parents,
+            ["python3", f"{SCRIPTS_DIR}/collect_children.py"] + split_parents,
             capture_output=True,
             text=True,
         )

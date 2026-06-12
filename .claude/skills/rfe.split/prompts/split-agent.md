@@ -19,7 +19,7 @@ If the 1/2 score reflects delivery-coupled capabilities, write the split-status 
 ## Step 1.5: Load Right-sizing Rubric
 
 ```bash
-bash scripts/bootstrap-assess-rfe.sh
+bash ${CLAUDE_SKILL_DIR}/scripts/bootstrap-assess-rfe.sh
 ```
 
 Read the scoring rubric from `.context/assess-rfe/scripts/agent_prompt.md`. Find the **Right-sized** criterion and its calibration examples. This defines what "right-sized" means — use it to guide split proposals and verify each child RFE would score 2/2.
@@ -102,7 +102,7 @@ Using the recommended decomposition:
 4. Allocate IDs atomically (prevents collisions with parallel split agents):
 
 ```bash
-python3 scripts/next_rfe_id.py <number_of_children>
+python3 ${CLAUDE_SKILL_DIR}/scripts/next_rfe_id.py <number_of_children>
 ```
 
 This prints one RFE-NNN ID per line. Use these IDs in order for your children. The script locks to prevent races — do NOT scan the directory yourself.
@@ -111,7 +111,7 @@ This prints one RFE-NNN ID per line. Use these IDs in order for your children. T
 6. Set frontmatter on each child:
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/rfe-tasks/<child_filename>.md \
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set artifacts/rfe-tasks/<child_filename>.md \
     rfe_id=<child_rfe_id> \
     title="<child_title>" \
     priority=<priority> \
@@ -123,7 +123,7 @@ python3 scripts/frontmatter.py set artifacts/rfe-tasks/<child_filename>.md \
 7. Archive the original:
 
 ```bash
-python3 scripts/frontmatter.py set {TASK_FILE} \
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set {TASK_FILE} \
     status=Archived
 ```
 

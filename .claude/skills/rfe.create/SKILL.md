@@ -22,7 +22,7 @@ If `--headless` is present, skip Step 2 entirely and proceed directly from Step 
 
 If `artifacts/rfe-rubric.md` does not exist, bootstrap and export it:
 
-1. Run `bash scripts/bootstrap-assess-rfe.sh` to fetch the assess-rfe skills
+1. Run `bash ${CLAUDE_SKILL_DIR}/scripts/bootstrap-assess-rfe.sh` to fetch the assess-rfe skills
 2. When any assess-rfe skill resolves its `{PLUGIN_ROOT}`, it should use the absolute path of `.context/assess-rfe/` in the project working directory.
 3. Invoke `/export-rubric` to export the rubric to `artifacts/rfe-rubric.md`
 
@@ -70,7 +70,7 @@ For each RFE, determine its ID, then write the markdown body and set frontmatter
 If `--rfe-id` was provided, use that ID (the placeholder file already exists). Otherwise, allocate IDs atomically:
 
 ```bash
-python3 scripts/next_rfe_id.py <count>
+python3 ${CLAUDE_SKILL_DIR}/scripts/next_rfe_id.py <count>
 ```
 
 This prints one `RFE-NNN` per line. Use these IDs for filenames: `artifacts/rfe-tasks/RFE-NNN.md`.
@@ -78,13 +78,13 @@ This prints one `RFE-NNN` per line. Use these IDs for filenames: `artifacts/rfe-
 Read the schema to know exact field names and allowed values:
 
 ```bash
-python3 scripts/frontmatter.py schema rfe-task
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py schema rfe-task
 ```
 
 Then set frontmatter on each RFE file, using the actual values for this RFE:
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
     rfe_id=<rfe_id> \
     title="<title>" \
     priority=<priority> \
@@ -95,7 +95,7 @@ python3 scripts/frontmatter.py set artifacts/rfe-tasks/<filename>.md \
 After all RFE files are written, rebuild the index:
 
 ```bash
-python3 scripts/frontmatter.py rebuild-index
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py rebuild-index
 ```
 
 Create the `artifacts/`, `artifacts/rfe-tasks/`, and `artifacts/rfe-reviews/` directories if they don't exist.
