@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from scripts.jira_utils import add_labels, remove_labels, swap_labels
+from jira_utils import add_labels, remove_labels, swap_labels
 
 SERVER = "https://jira.example.com"
 USER = "u"
@@ -12,7 +12,7 @@ KEY = "PROJ-1"
 
 def _capture_body(func, *args, **kwargs):
     """Call a label function and return the JSON body sent to api_call_with_retry."""
-    with patch("scripts.jira_utils.api_call_with_retry") as mock:
+    with patch("jira_utils.api_call_with_retry") as mock:
         func(SERVER, USER, TOKEN, KEY, *args, **kwargs)
         mock.assert_called_once()
         return mock.call_args
