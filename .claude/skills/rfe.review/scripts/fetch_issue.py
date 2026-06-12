@@ -31,9 +31,9 @@ import shutil
 import subprocess
 import sys
 
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-
 from jira_utils import adf_to_markdown, get_comments, get_issue, require_env
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _desc_to_markdown(desc_raw):

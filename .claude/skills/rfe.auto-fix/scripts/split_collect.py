@@ -19,10 +19,10 @@ import sys
 
 import yaml
 
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import update_frontmatter
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():

@@ -14,9 +14,10 @@ import os
 import subprocess
 import sys
 
-SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPTS_DIR)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter
+
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 PHASE_OUTPUT = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
