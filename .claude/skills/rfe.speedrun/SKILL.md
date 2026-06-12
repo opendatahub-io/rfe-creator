@@ -20,9 +20,9 @@ Parse `$ARGUMENTS` for:
 Clean temp state and persist parsed flags. `batch_size` MUST always be a concrete integer — if the user did not pass `--batch-size`, substitute the speedrun default of `5`. Do not write `<N>`, `null`, or omit the field.
 
 ```bash
-python3 scripts/state.py clean
-python3 scripts/prep_assess.py --clean-all
-python3 scripts/state.py init tmp/speedrun-config.yaml headless=<true/false> announce_complete=<true/false> dry_run=<true/false> batch_size=<N or 5> input_file=<path or null>
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py clean
+python3 ${CLAUDE_SKILL_DIR}/scripts/prep_assess.py --clean-all
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py init tmp/speedrun-config.yaml headless=<true/false> announce_complete=<true/false> dry_run=<true/false> batch_size=<N or 5> input_file=<path or null>
 ```
 
 Determine pipeline mode:
@@ -56,7 +56,7 @@ Count entries and pre-allocate all IDs upfront:
 
 ```bash
 N=$(python3 -c "import yaml; print(len(yaml.safe_load(open('batch.yaml'))))")
-python3 scripts/next_rfe_id.py $N   # prints RFE-001 through RFE-<N>
+python3 ${CLAUDE_SKILL_DIR}/scripts/next_rfe_id.py $N   # prints RFE-001 through RFE-<N>
 ```
 
 For each entry, launch an Agent to invoke `/rfe.create`. Pass the pre-assigned ID so each Agent knows which ID to use:
@@ -83,7 +83,7 @@ If not headless, `/rfe.create` will ask clarifying questions. Collect created RF
 After Phase 1 (all modes), persist the ID list to disk:
 
 ```bash
-python3 scripts/state.py write-ids tmp/speedrun-all-ids.txt <all_IDs>
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids tmp/speedrun-all-ids.txt <all_IDs>
 ```
 
 ## Phase 2: Auto-fix
@@ -91,8 +91,8 @@ python3 scripts/state.py write-ids tmp/speedrun-all-ids.txt <all_IDs>
 Re-read config and ID list from disk (in case context was compressed during Phase 1):
 
 ```bash
-python3 scripts/state.py read tmp/speedrun-config.yaml
-python3 scripts/state.py read-ids tmp/speedrun-all-ids.txt
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read tmp/speedrun-config.yaml
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read-ids tmp/speedrun-all-ids.txt
 ```
 
 Build the auto-fix command using flags from the config file:
@@ -108,7 +108,7 @@ Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-asse
 After auto-fix returns, verify all RFEs were processed:
 
 ```bash
-python3 scripts/check_autofix_complete.py
+python3 ${CLAUDE_SKILL_DIR}/scripts/check_autofix_complete.py
 ```
 
 If incomplete (exit code 1), the output shows `MISSING_IDS=RFE-006,RFE-007,...`. Re-invoke auto-fix with only the missing IDs:
@@ -124,19 +124,19 @@ Repeat the verify+retry cycle until all RFEs have reviews or 3 retries have been
 Re-read flags (in case context was compressed):
 
 ```bash
-python3 scripts/state.py read tmp/speedrun-config.yaml
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read tmp/speedrun-config.yaml
 ```
 
 Re-read ID list from disk:
 
 ```bash
-python3 scripts/state.py read-ids tmp/speedrun-all-ids.txt
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read-ids tmp/speedrun-all-ids.txt
 ```
 
 Collect passing IDs:
 
 ```bash
-python3 scripts/collect_recommendations.py <all_IDs_from_file>
+python3 ${CLAUDE_SKILL_DIR}/scripts/collect_recommendations.py <all_IDs_from_file>
 ```
 
 Parse the `SUBMIT=` line for IDs ready to submit.
@@ -158,7 +158,7 @@ If headless: pass `--headless` so submit skips confirmation.
 Re-read flags:
 
 ```bash
-python3 scripts/state.py read tmp/speedrun-config.yaml
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read tmp/speedrun-config.yaml
 ```
 
 If headless, output a brief machine-readable summary. If interactive, output:

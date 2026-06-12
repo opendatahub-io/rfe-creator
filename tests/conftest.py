@@ -4,11 +4,20 @@ import base64
 import json
 import os
 import socket
+import sys
 import threading
 import time
 import urllib.request
 
 import pytest
+
+# Scripts moved from root scripts/ into skill directories.
+# Add directories that contain modules imported by tests.
+_test_root = os.path.dirname(__file__)
+for _skill in ("rfe.auto-fix", "rfe.submit"):
+    _d = os.path.join(_test_root, "..", ".claude", "skills", _skill, "scripts")
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
 
 
 def _find_free_port():

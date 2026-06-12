@@ -6,8 +6,6 @@ import os
 import sys
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 from check_review_progress import (  # noqa: E402
     _check_phase,
     _detect_fast,

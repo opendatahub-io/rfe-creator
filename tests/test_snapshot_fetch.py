@@ -4,13 +4,9 @@ ID file writing, and snapshot loading from results directories."""
 
 import hashlib
 import os
-import sys
 
 import pytest
 import yaml
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 from snapshot_fetch import (
     cmd_fetch,
     compute_content_hash,

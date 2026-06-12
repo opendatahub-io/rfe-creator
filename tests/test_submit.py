@@ -7,9 +7,9 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", ".claude", "skills", "rfe.submit", "scripts", "submit.py"
+)
 
 
 def _write(path, content):

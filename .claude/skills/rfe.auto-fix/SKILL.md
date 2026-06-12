@@ -17,7 +17,7 @@ Parse `$ARGUMENTS` for:
 ### 1. Init
 
 ```bash
-python3 scripts/pipeline_state.py init [--batch-size N] [--headless] [--announce-complete]
+python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py init [--batch-size N] [--headless] [--announce-complete]
 ```
 
 ### 2. IDs
@@ -25,7 +25,7 @@ python3 scripts/pipeline_state.py init [--batch-size N] [--headless] [--announce
 **JQL mode** (`--jql`):
 
 ```bash
-python3 scripts/snapshot_fetch.py fetch "<query>" --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt [--limit N] [--data-dir "<path>"] [--reprocess] [--random N]
+python3 ${CLAUDE_SKILL_DIR}/scripts/snapshot_fetch.py fetch "<query>" --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt [--limit N] [--data-dir "<path>"] [--reprocess] [--random N]
 ```
 
 Print `[AUTOFIX] JQL: <jql>` from stderr output. Pass `--reprocess` if set.
@@ -33,14 +33,14 @@ Print `[AUTOFIX] JQL: <jql>` from stderr output. Pass `--reprocess` if set.
 **Reprocess-only mode** (`--reprocess` without `--jql`):
 
 ```bash
-python3 scripts/snapshot_fetch.py fetch --reprocess --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt
+python3 ${CLAUDE_SKILL_DIR}/scripts/snapshot_fetch.py fetch --reprocess --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt
 ```
 
 **Explicit mode**:
 
 ```bash
-python3 scripts/state.py write-ids tmp/pipeline-all-ids.txt <IDs>
-python3 scripts/state.py write-ids tmp/pipeline-changed-ids.txt
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids tmp/pipeline-all-ids.txt <IDs>
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids tmp/pipeline-changed-ids.txt
 ```
 
 If no IDs and no JQL and not `--reprocess`, stop with usage instructions.
@@ -48,7 +48,7 @@ If no IDs and no JQL and not `--reprocess`, stop with usage instructions.
 ### 3. Bootstrap
 
 ```bash
-bash scripts/bootstrap-assess-rfe.sh
+bash ${CLAUDE_SKILL_DIR}/scripts/bootstrap-assess-rfe.sh
 ```
 
 Retry once on failure. If retry fails, stop: "bootstrap failed."
@@ -56,23 +56,23 @@ Retry once on failure. If retry fails, stop: "bootstrap failed."
 ### 4. Resume check + batch
 
 ```bash
-python3 scripts/check_resume.py --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt --output-file tmp/pipeline-process-ids.txt
+python3 ${CLAUDE_SKILL_DIR}/scripts/check_resume.py --ids-file tmp/pipeline-all-ids.txt --changed-file tmp/pipeline-changed-ids.txt --output-file tmp/pipeline-process-ids.txt
 ```
 
-Read process IDs: `python3 scripts/state.py read-ids tmp/pipeline-process-ids.txt`
+Read process IDs: `python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read-ids tmp/pipeline-process-ids.txt`
 
 Split into batches of `batch_size`. Write each:
 
 ```bash
-python3 scripts/state.py write-ids tmp/pipeline-batch-1-ids.txt <batch_1_IDs>
-python3 scripts/state.py write-ids tmp/pipeline-batch-2-ids.txt <batch_2_IDs>
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids tmp/pipeline-batch-1-ids.txt <batch_1_IDs>
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids tmp/pipeline-batch-2-ids.txt <batch_2_IDs>
 ```
 
 Start the pipeline:
 
 ```bash
-python3 scripts/pipeline_state.py set total_batches=<M>
-python3 scripts/pipeline_state.py set-phase BATCH_START
+python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py set total_batches=<M>
+python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py set-phase BATCH_START
 ```
 
 ## Dispatch Loop
@@ -84,7 +84,7 @@ Repeat until phase is `DONE`:
 ### Step 1: Get next action
 
 ```bash
-python3 scripts/pipeline_state.py next-action
+python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py next-action
 ```
 
 Parse the YAML output for: `action`, `phase`, `message`, `agents`.
@@ -93,7 +93,7 @@ Parse the YAML output for: `action`, `phase`, `message`, `agents`.
 
 **done**: Exit loop. Run teardown.
 
-**run_script**: Run `python3 scripts/pipeline_state.py run-phase`. Go to step 1.
+**run_script**: Run `python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py run-phase`. Go to step 1.
 
 **launch_wave**: For each agent in the `agents` list:
 - Build prompt: `"<vars>\n\nRead <prompt_file> and follow all instructions exactly."`
@@ -103,11 +103,11 @@ Parse the YAML output for: `action`, `phase`, `message`, `agents`.
 Then wait for completion:
 
 ```bash
-python3 scripts/pipeline_state.py wait-for-wave
+python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py wait-for-wave
 ```
 
 On exit 0 (complete): go to step 1.
-On exit 3 (still pending): re-run `python3 scripts/pipeline_state.py wait-for-wave`.
+On exit 3 (still pending): re-run `python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py wait-for-wave`.
 Any other exit code is an error.
 
 ### Example `launch_wave` output
@@ -133,7 +133,7 @@ agents:
 After phase reaches `DONE`:
 
 ```bash
-python3 scripts/batch_summary.py --counts-only $(python3 scripts/state.py read-ids tmp/pipeline-all-ids.txt)
+python3 ${CLAUDE_SKILL_DIR}/scripts/batch_summary.py --counts-only $(python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read-ids tmp/pipeline-all-ids.txt)
 ```
 
 $ARGUMENTS

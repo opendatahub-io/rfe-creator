@@ -17,6 +17,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import read_frontmatter
 
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
 PHASE_OUTPUT = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
     "assess": lambda id: f"/tmp/rfe-assess/single/{id}.result.md",
@@ -64,7 +66,7 @@ def verify(phase, ids_file):
                 subprocess.run(
                     [
                         "python3",
-                        "scripts/frontmatter.py",
+                        f"{SCRIPTS_DIR}/frontmatter.py",
                         "set",
                         review_path,
                         f"rfe_id={rfe_id}",

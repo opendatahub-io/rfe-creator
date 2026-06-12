@@ -5,9 +5,6 @@ import os
 import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 from generate_run_report import _parse_run_id, build_report
 
 TASK_TEMPLATE = """\
@@ -273,7 +270,15 @@ class TestScanReviewFiles:
         result = subprocess.run(
             [
                 sys.executable,
-                os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_run_report.py"),
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    ".claude",
+                    "skills",
+                    "rfe.auto-fix",
+                    "scripts",
+                    "generate_run_report.py",
+                ),
                 "--start-time",
                 "20260404-170041",
                 "--artifacts-dir",
@@ -320,7 +325,15 @@ class TestGenerateReviewPdfArtifactsDir:
         result = subprocess.run(
             [
                 sys.executable,
-                os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_review_pdf.py"),
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    ".claude",
+                    "skills",
+                    "rfe.submit",
+                    "scripts",
+                    "generate_review_pdf.py",
+                ),
                 "--artifacts-dir",
                 art,
                 "--output",

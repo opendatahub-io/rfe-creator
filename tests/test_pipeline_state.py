@@ -7,13 +7,10 @@ revision is followed by a review.
 
 import os
 import subprocess
-import sys
-
-import pytest
 
 # Import advance() and helpers directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import pipeline_state as ps
+import pytest
 
 
 @pytest.fixture

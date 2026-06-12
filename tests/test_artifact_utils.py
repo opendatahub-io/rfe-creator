@@ -2,12 +2,8 @@
 """Tests for scripts/artifact_utils.py — schema validation, frontmatter I/O, migration."""
 
 import os
-import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 from artifact_utils import (
     SCHEMAS,
     ValidationError,

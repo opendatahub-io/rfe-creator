@@ -29,36 +29,36 @@ artifacts/
 
 ### Frontmatter
 
-All task and review files use YAML frontmatter for structured metadata. Skills must use `scripts/frontmatter.py` to read schemas, set fields, and read validated data — never write YAML by hand.
+All task and review files use YAML frontmatter for structured metadata. Skills must use `frontmatter.py` (in each skill's `scripts/` directory) to read schemas, set fields, and read validated data -- never write YAML by hand.
 
 ```bash
 # Get schema for a file type
-python3 scripts/frontmatter.py schema rfe-task
-python3 scripts/frontmatter.py schema rfe-review
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py schema rfe-task
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py schema rfe-review
 
 # Set/update frontmatter on a file
-python3 scripts/frontmatter.py set <path> field=value field=value ...
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py set <path> field=value field=value ...
 
 # Read validated frontmatter as JSON
-python3 scripts/frontmatter.py read <path>
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py read <path>
 
 # Rebuild rfes.md index from all frontmatter
-python3 scripts/frontmatter.py rebuild-index
+python3 ${CLAUDE_SKILL_DIR}/scripts/frontmatter.py rebuild-index
 ```
 
 ### State Persistence
 
-Long-running skills use `scripts/state.py` to persist state to `tmp/` files so it survives context compression. All skills must use this utility instead of inline bash commands (cat, echo, mkdir) to avoid unnecessary auth prompts.
+Long-running skills use `state.py` (in each skill's `scripts/` directory) to persist state to `tmp/` files so it survives context compression. All skills must use this utility instead of inline bash commands (cat, echo, mkdir) to avoid unnecessary auth prompts.
 
 ```bash
-python3 scripts/state.py init <file> key=value ...    # Create config file
-python3 scripts/state.py set <file> key=value ...     # Update keys in place
-python3 scripts/state.py set-default <file> key=value ...  # Set only if key absent (cycle counters)
-python3 scripts/state.py read <file>                  # Print file contents
-python3 scripts/state.py write-ids <file> ID ...      # Write ID list (one per line, deduped)
-python3 scripts/state.py read-ids <file>              # Print IDs space-separated
-python3 scripts/state.py timestamp                    # Print current UTC time (ISO 8601)
-python3 scripts/state.py clean                        # Reset tmp/ directory
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py init <file> key=value ...    # Create config file
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py set <file> key=value ...     # Update keys in place
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py set-default <file> key=value ...  # Set only if key absent (cycle counters)
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read <file>                  # Print file contents
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py write-ids <file> ID ...      # Write ID list (one per line, deduped)
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py read-ids <file>              # Print IDs space-separated
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py timestamp                    # Print current UTC time (ISO 8601)
+python3 ${CLAUDE_SKILL_DIR}/scripts/state.py clean                        # Reset tmp/ directory
 ```
 
 Each skill uses distinct file prefixes to avoid collisions during nested calls: `autofix-`, `review-`, `split-`, `speedrun-`.
@@ -75,7 +75,7 @@ Each skill uses distinct file prefixes to avoid collisions during nested calls: 
 
 ### Write Operations (submit, update, comment)
 
-All write operations use the Jira REST API directly via Python scripts (`scripts/submit.py`, `scripts/split_submit.py`). This ensures the exact sequence of Jira API calls is deterministic and not dependent on LLM tool-calling decisions — critical for operations like split submissions that require multi-step transactional workflows (archive, create, link, close).
+All write operations use the Jira REST API directly via Python scripts (e.g., `submit.py` in each skill's `scripts/` directory). This ensures the exact sequence of Jira API calls is deterministic and not dependent on LLM tool-calling decisions, which is critical for operations like split submissions that require multi-step transactional workflows (archive, create, link, close).
 
 Required environment variables:
 
@@ -92,7 +92,7 @@ To create an API token: https://id.atlassian.com/manage-profile/security/api-tok
 Read operations support two modes:
 
 1. **Atlassian MCP server** (preferred when available) — used by `/rfe.review` and `/rfe.split` when fetching issues from Jira
-2. **REST API fallback** — if the MCP server is unavailable, skills fall back to `python3 scripts/fetch_issue.py` using the same `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` env vars
+2. **REST API fallback** -- if the MCP server is unavailable, skills fall back to `python3 ${CLAUDE_SKILL_DIR}/scripts/fetch_issue.py` using the same `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` env vars
 
 Skills that only work with local artifacts (`/rfe.create`) do not require Jira access.
 
@@ -106,7 +106,7 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 
 ## Snapshot System
 
-Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all invariants.
+Before modifying snapshot-related scripts (`snapshot_fetch.py`, `bootstrap_snapshot.py`, `submit.py` in the relevant skill `scripts/` directories), read `docs/snapshot-incremental-fetch.md`, especially the **Design Invariants** section. Changes must preserve all invariants. Since shared scripts are duplicated across skill directories, apply changes to all copies.
 
 ## Pipeline Execution Constraint
 
@@ -114,7 +114,7 @@ When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 
 1. A text-only response (no tool call) during pipeline execution terminates the CI process.
 2. After launching each wave of agents, your next Bash call MUST be
-   `python3 scripts/pipeline_state.py wait-for-wave`. This is a blocking
+   `python3 ${CLAUDE_SKILL_DIR}/scripts/pipeline_state.py wait-for-wave`. This is a blocking
    synchronization barrier that reads artifact files on disk. On exit 3,
    re-run the same command.
 3. Do not wait for agent-completion notifications — the wait-for-wave command
