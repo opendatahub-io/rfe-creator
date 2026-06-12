@@ -16,9 +16,15 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-CLONE_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "clone_results_repo.py")
+CLONE_SCRIPT = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    ".claude",
+    "skills",
+    "rfe.auto-fix",
+    "scripts",
+    "clone_results_repo.py",
+)
 
 import snapshot_fetch  # noqa: E402
 from snapshot_fetch import cmd_fetch, compute_content_hash, update_snapshot_hashes  # noqa: E402

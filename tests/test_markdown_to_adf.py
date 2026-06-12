@@ -7,14 +7,9 @@ because they were excluded from both the heading handler AND the paragraph
 accumulator, so `i` never advanced.
 """
 
-import os
 import signal
-import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
 from jira_utils import adf_to_markdown, markdown_to_adf  # noqa: E402
 
 # ── Timeout helper ──────────────────────────────────────────────────────────

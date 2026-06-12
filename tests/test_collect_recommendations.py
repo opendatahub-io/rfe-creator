@@ -6,7 +6,15 @@ import subprocess
 
 import pytest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "collect_recommendations.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    ".claude",
+    "skills",
+    "rfe.auto-fix",
+    "scripts",
+    "collect_recommendations.py",
+)
 
 
 def _write(path, content):

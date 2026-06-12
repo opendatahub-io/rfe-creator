@@ -6,11 +6,11 @@ import subprocess
 import sys
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from split_submit import SubmissionState, build_split_summary_adf
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "split_submit.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", ".claude", "skills", "rfe.submit", "scripts", "split_submit.py"
+)
 
 
 def _write(path, content):

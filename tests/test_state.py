@@ -6,7 +6,9 @@ import subprocess
 
 import pytest
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "state.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", ".claude", "skills", "rfe.auto-fix", "scripts", "state.py"
+)
 
 
 def run_state(*args):

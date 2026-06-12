@@ -13,7 +13,9 @@ import sys
 import pytest
 import yaml
 
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", ".claude", "skills", "rfe.submit", "scripts", "submit.py"
+)
 
 
 def _write(path, content):
@@ -683,7 +685,15 @@ class TestSnapshotUpdate:
 class TestSplitConflictDetection:
     """Integration test: split_submit.py detects parent conflict."""
 
-    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "split_submit.py")
+    SPLIT_SCRIPT = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        ".claude",
+        "skills",
+        "rfe.submit",
+        "scripts",
+        "split_submit.py",
+    )
 
     PARENT_TASK = (
         "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
@@ -767,7 +777,15 @@ class TestSplitConflictDetection:
 class TestSplitFieldInheritance:
     """Integration test: children inherit parent's components and labels."""
 
-    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "split_submit.py")
+    SPLIT_SCRIPT = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        ".claude",
+        "skills",
+        "rfe.submit",
+        "scripts",
+        "split_submit.py",
+    )
 
     PARENT_TASK = (
         "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"

@@ -4,13 +4,18 @@ and file-based I/O."""
 
 import os
 import subprocess
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_resume.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    ".claude",
+    "skills",
+    "rfe.auto-fix",
+    "scripts",
+    "check_resume.py",
+)
 
 from check_resume import check_resume, read_ids_from_file  # noqa: E402
 

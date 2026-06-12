@@ -8,9 +8,15 @@ import sys
 import pytest
 import yaml
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-
-SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "clone_results_repo.py")
+SCRIPT = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    ".claude",
+    "skills",
+    "rfe.auto-fix",
+    "scripts",
+    "clone_results_repo.py",
+)
 
 from clone_results_repo import build_clone_url  # noqa: E402
 
