@@ -1,0 +1,61 @@
+# GitHub Actions workflow to add to opendatahub-io/rfe-creator.
+#
+# Place this file at: .github/workflows/rfe-creator-eval.yml
+#
+# Required GitHub secrets (Settings → Secrets and variables → Actions):
+#   GITLAB_TRIGGER_TOKEN  — GitLab pipeline trigger token
+#   GITLAB_TRIGGER_URL    — https://gitlab.com/api/v4/projects/<project-id>/trigger/pipeline
+#
+# Manually triggered by a maintainer from the Actions tab. Enter the PR
+# number to evaluate. Only users with write access can run this workflow.
+#
+# The GitLab pipeline posts eval results back to the PR as a comment.
+# GITHUB_TOKEN is used by the GitLab pipeline for posting — it is configured
+# as a GitLab CI/CD variable and is NOT passed into the OpenShell sandbox.
+
+name: rfe-creator-eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to evaluate"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  trigger-eval:
+    name: Trigger GitLab eval pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch PR details
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_JSON=$(gh api "repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}")
+          echo "sha=$(echo "$PR_JSON" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          echo "ref=$(echo "$PR_JSON" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger rfe-creator-eval on GitLab
+        env:
+          GITLAB_TRIGGER_TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
+          GITLAB_TRIGGER_URL: ${{ secrets.GITLAB_TRIGGER_URL }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_SHA: ${{ steps.pr.outputs.sha }}
+          PR_REF: ${{ steps.pr.outputs.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          curl --fail-with-body \
+            --request POST \
+            --form "token=${GITLAB_TRIGGER_TOKEN}" \
+            --form "ref=main" \
+            --form "variables[GITHUB_PR_NUMBER]=${PR_NUMBER}" \
+            --form "variables[GITHUB_SHA]=${PR_SHA}" \
+            --form "variables[GITHUB_HEAD_REF]=${PR_REF}" \
+            --form "variables[GITHUB_REPO]=${REPO}" \
+            "${GITLAB_TRIGGER_URL}"
