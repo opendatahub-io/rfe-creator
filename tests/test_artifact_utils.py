@@ -110,7 +110,13 @@ class TestValidate:
         data = {**VALID_REVIEW_FM}
         data["scores"] = {**data["scores"], "jtbd_alignment": 3}
         errors = validate(data, "rfe-review")
-        assert any("jtbd_alignment" in e and "max" in e for e in errors)
+        assert any("scores.jtbd_alignment: 3 > max 2" == e for e in errors)
+
+    def test_jtbd_alignment_rejects_below_min(self):
+        data = {**VALID_REVIEW_FM}
+        data["scores"] = {**data["scores"], "jtbd_alignment": -1}
+        errors = validate(data, "rfe-review")
+        assert any("scores.jtbd_alignment: -1 < min 0" == e for e in errors)
 
     def test_jtbd_alignment_accepts_null(self):
         data = {**VALID_REVIEW_FM}
