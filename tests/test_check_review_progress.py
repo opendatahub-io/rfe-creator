@@ -115,6 +115,26 @@ class TestCheckId:
         ):
             assert check_id("revise", "RHAIRFE-1") == "error"
 
+    def test_jtbd_phase_valid_yaml(self, tmp_path):
+        """JTBD phase: file with jtbd_review block → completed."""
+        f = tmp_path / "RHAIRFE-1-jtbd.md"
+        f.write_text("jtbd_review:\n  score: 0\n")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"jtbd": lambda id: str(tmp_path / f"{id}-jtbd.md")},
+        ):
+            assert check_id("jtbd", "RHAIRFE-1") == "completed"
+
+    def test_jtbd_phase_missing_block(self, tmp_path):
+        """JTBD phase: file without jtbd_review → pending."""
+        f = tmp_path / "RHAIRFE-1-jtbd.md"
+        f.write_text("# incomplete\n")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"jtbd": lambda id: str(tmp_path / f"{id}-jtbd.md")},
+        ):
+            assert check_id("jtbd", "RHAIRFE-1") == "pending"
+
     def test_review_phase_missing_closing_delimiter(self, tmp_path):
         """Review phase: missing closing --- → error (CI #128 regression)."""
         f = tmp_path / "RHAIRFE-1-review.md"

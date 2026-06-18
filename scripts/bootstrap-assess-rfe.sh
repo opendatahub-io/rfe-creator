@@ -8,7 +8,8 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
 fi
 
 CONTEXT_DIR=".context/assess-rfe"
-RUBRIC_FILE="$CONTEXT_DIR/scripts/agent_prompt.md"
+RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
+LEGACY_RUBRIC_LINK="$CONTEXT_DIR/scripts/agent_prompt.md"
 
 if [ ! -d "$CONTEXT_DIR" ]; then
   git clone https://github.com/opendatahub-io/assess-rfe "$CONTEXT_DIR" 2>&1
@@ -21,6 +22,10 @@ if [ ! -f "$RUBRIC_FILE" ]; then
   echo "ERROR: Rubric file not found at $RUBRIC_FILE after bootstrap" >&2
   exit 1
 fi
+
+# Backward-compat symlink for callers using the pre-restructure path
+mkdir -p "$CONTEXT_DIR/scripts"
+ln -sfn ../skills/assess-rfe/scripts/agent_prompt.md "$LEGACY_RUBRIC_LINK"
 
 # Copy all skills from the plugin
 for skill_dir in "$CONTEXT_DIR"/skills/*/; do
@@ -45,5 +50,8 @@ if [ -d "$CONTEXT_DIR/agents" ]; then
   cp "$CONTEXT_DIR"/agents/*.md .claude/agents/
 fi
 
-# Export rubric to artifacts
-python3 "$CONTEXT_DIR/scripts/export_rubric.py" 2>/dev/null || true
+# Export rubric to artifacts (path moved in upstream restructure)
+EXPORT_RUBRIC="$CONTEXT_DIR/skills/export-rubric/scripts/export_rubric.py"
+if [ -f "$EXPORT_RUBRIC" ]; then
+  python3 "$EXPORT_RUBRIC" 2>/dev/null || true
+fi

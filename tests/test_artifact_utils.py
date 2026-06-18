@@ -106,6 +106,66 @@ class TestValidate:
         errors = validate(data, "rfe-review")
         assert any("expected int" in e for e in errors)
 
+    def test_jtbd_alignment_rejects_out_of_range(self):
+        data = {**VALID_REVIEW_FM}
+        data["scores"] = {**data["scores"], "jtbd_alignment": 3}
+        errors = validate(data, "rfe-review")
+        assert any("scores.jtbd_alignment: 3 > max 2" == e for e in errors)
+
+    def test_jtbd_alignment_rejects_below_min(self):
+        data = {**VALID_REVIEW_FM}
+        data["scores"] = {**data["scores"], "jtbd_alignment": -1}
+        errors = validate(data, "rfe-review")
+        assert any("scores.jtbd_alignment: -1 < min 0" == e for e in errors)
+
+    def test_jtbd_alignment_accepts_null(self):
+        data = {**VALID_REVIEW_FM}
+        data["scores"] = {**data["scores"], "jtbd_alignment": None}
+        errors = validate(data, "rfe-review")
+        assert errors == []
+
+    def test_jtbd_mapping_validates_job_items(self):
+        data = {
+            "rfe_id": "RFE-001",
+            "title": "Test RFE",
+            "priority": "Normal",
+            "status": "Draft",
+            "jtbd_mapping": {
+                "confidence": "high",
+                "jobs": [{"id": "build.train", "name": "Train models"}],
+            },
+        }
+        errors = validate(data, "rfe-task")
+        assert errors == []
+
+    def test_jtbd_mapping_rejects_malformed_job(self):
+        data = {
+            "rfe_id": "RFE-001",
+            "title": "Test RFE",
+            "priority": "Normal",
+            "status": "Draft",
+            "jtbd_mapping": {
+                "confidence": "high",
+                "jobs": [{"name": "Missing id field"}],
+            },
+        }
+        errors = validate(data, "rfe-task")
+        assert any("id" in e for e in errors)
+
+    def test_jtbd_mapping_rejects_invalid_persona(self):
+        data = {
+            "rfe_id": "RFE-001",
+            "title": "Test RFE",
+            "priority": "Normal",
+            "status": "Draft",
+            "jtbd_mapping": {
+                "confidence": "high",
+                "personas": ["unknown_persona"],
+            },
+        }
+        errors = validate(data, "rfe-task")
+        assert any("personas" in e for e in errors)
+
     def test_unknown_schema_type(self):
         with pytest.raises(ValueError, match="Unknown schema type"):
             validate({}, "nonexistent")
