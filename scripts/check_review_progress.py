@@ -19,10 +19,21 @@ PHASE_CHECKS = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
     "assess": lambda id: f"/tmp/rfe-assess/single/{id}.result.md",
     "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
+    "jtbd": lambda id: f"artifacts/rfe-reviews/{id}-jtbd.md",
     "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
     "revise": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
     "split": lambda id: f"artifacts/rfe-reviews/{id}-split-status.yaml",
 }
+
+
+def _jtbd_output_valid(path):
+    """Return True if a JTBD review file contains jtbd_review YAML."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return False
+    return "jtbd_review:" in content
 
 
 def check_id(phase, rfe_id):
@@ -30,6 +41,9 @@ def check_id(phase, rfe_id):
     path = PHASE_CHECKS[phase](rfe_id)
     if not os.path.exists(path):
         return "pending"
+    if phase == "jtbd":
+        if not _jtbd_output_valid(path):
+            return "pending"
     if phase == "review":
         try:
             data, _ = read_frontmatter(path)

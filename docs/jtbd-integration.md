@@ -106,6 +106,8 @@ This is enforced by the JTBD agent prompts, which explicitly order the navigatio
 
 The `jtbd_alignment` score is a **parallel signal** — it does NOT affect the existing pass/fail threshold (total ≥7, no zeros on what/why/open_to_how/not_a_task/right_sized). It is informational in the initial deployment.
 
+**Interpreting scores on legacy RFEs:** RFEs fetched from Jira that predate JTBD integration typically score **0** — meaning the WHY lacks registry evidence, not that the review pipeline is broken. Score **null** means JTBD does not apply (internal/infra work). New RFEs created via `rfe.create` with `jtbd_mapping` populated should score 1–2 when the WHY cites research data.
+
 ## Bootstrap Script
 
 `scripts/bootstrap-jtbd-registry.sh` follows the same pattern as `bootstrap-assess-rfe.sh`:

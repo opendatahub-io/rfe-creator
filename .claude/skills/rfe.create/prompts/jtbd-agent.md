@@ -89,6 +89,16 @@ jtbd_match:
   unmatched_note: "<if confidence is 'none', explain why no match was found>"
 ```
 
+### Step 7: Write output file
+
+Write your complete YAML output (from Step 6) to:
+
+```
+tmp/jtbd-match.yaml
+```
+
+Do not return a summary. Your work is complete when that file exists and contains valid `jtbd_match:` YAML.
+
 ## Confidence Levels
 
 - **high**: The problem statement clearly maps to a specific JTBD — the language, scope, and intent align directly.

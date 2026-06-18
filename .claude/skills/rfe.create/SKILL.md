@@ -52,7 +52,7 @@ The JTBD agent navigates the registry using progressive disclosure:
 4. Reads only the matched job files for full detail (pain points, scores, user quotes)
 5. Returns structured match data with confidence level and per-job alignment rank
 
-Store the agent's output for use in Steps 2 and 3.
+The JTBD agent writes its output to `tmp/jtbd-match.yaml`. After the agent completes, read that file for use in Steps 2 and 3.
 
 If the JTBD agent returns `confidence: none` (no match found), proceed normally — not every RFE maps to a known JTBD. If the registry is unavailable, skip this step entirely.
 

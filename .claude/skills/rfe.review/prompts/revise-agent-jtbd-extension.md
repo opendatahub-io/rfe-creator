@@ -10,6 +10,22 @@ This document extends the existing `revise-agent.md` behavior. When the JTBD ali
 - `.context/jtbd-registry/index.yaml` exists (registry is available)
 - The RFE is user-facing (score is not `null`)
 
+## Legacy / Fetched RFE Guard
+
+Before applying body revisions, read the task frontmatter via `python3 scripts/frontmatter.py read artifacts/rfe-tasks/{ID}.md`.
+
+If **all** of the following are true:
+- `jtbd_mapping` is null or absent
+- The RFE ID is a Jira key (`RHAIRFE-*`), not a pre-create `RFE-*` draft
+- The rubric review already passes (`pass: true` in the review frontmatter)
+
+Then **do not rewrite the RFE body** for JTBD grounding. Instead:
+- Update `jtbd_mapping` frontmatter only if you can establish a confident match
+- Add JTBD improvement notes to the review file's JTBD Alignment section
+- Leave priority unchanged
+
+This prevents aggressive rewrites of approved stakeholder RFEs fetched from Jira solely because JTBD alignment scored 0.
+
 ## Registry Navigation (Progressive Disclosure)
 
 Follow this sequence — same protocol as the JTBD review agent:
@@ -59,14 +75,15 @@ Follow this sequence — same protocol as the JTBD review agent:
 
 ### If Opportunity Justification scored 0:
 
-- Insert opportunity score from the matched job file
-- If priority is Critical/Major but score is <7, flag the mismatch (do NOT auto-change priority)
-- If score contradicts priority, add a note recommending priority re-evaluation
+- Insert opportunity score from the matched job file into the WHY section
+- If priority is Critical/Major but the matched job's opportunity score is moderate (<11), flag the tension in the review — do NOT change the `priority` frontmatter field
+- If score contradicts priority, add a note recommending the author reconcile; never unilaterally downgrade or upgrade priority on fetched Jira RFEs
 
 ### If Opportunity Justification scored 1:
 
-- Make the connection between opportunity score and priority explicit
+- Make the connection between opportunity score and priority explicit in prose
 - Add a sentence explaining why this investment level is justified given the data
+- Do NOT change the `priority` frontmatter field unless the RFE is a new pre-submit `RFE-*` draft
 
 ## Constraints
 

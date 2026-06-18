@@ -91,7 +91,16 @@ Evaluate the RFE across four dimensions and assign a single composite score (0â€
 
 ### Step 6: Check for not-applicable cases
 
-If the RFE is legitimately outside JTBD scope (pure infrastructure, internal tooling, no external user), set `score: null`, set `dimensions: null`, and populate `not_applicable_reason`. Do NOT force a score of 0 on RFEs that are genuinely non-user-facing.
+If the RFE is legitimately outside JTBD scope, set `score: null`, set `dimensions: null`, and populate `not_applicable_reason`. Do NOT force a score of 0 on RFEs that are genuinely non-user-facing.
+
+**Use `null` when any of these apply:**
+- Pure internal tooling or vendor-side compliance (no external user job)
+- Platform/architecture enablement (multi-arch parity, ppc64le validation, internal build pipeline) where the registry has no validated research for the primary scope
+- The closest registry jobs are only tangential (weak fit) and forcing a mapping would misrepresent the research
+
+**Use score 0** when the RFE is user-facing and should have been grounded in JTBD research but was not (missing mapping, evidence, persona, or opportunity data).
+
+When scoring `null` for platform enablement, note `registry gap: <topic>` in `not_applicable_reason` rather than force-fitting a tangential job as a strong match.
 
 ### Step 7: Return structured output
 
@@ -130,6 +139,18 @@ jtbd_review:
   dimensions: null
   not_applicable_reason: "<explain why JTBD scoring does not apply>"
 ```
+
+### Step 8: Write output file
+
+Write your complete YAML output (from Step 7) to:
+
+```
+artifacts/rfe-reviews/{ID}-jtbd.md
+```
+
+Replace `{ID}` with the RFE ID you were given (e.g., `RHAIRFE-2444` or `RFE-001`).
+
+Do not return a summary. Your work is complete when that file exists and contains valid `jtbd_review:` YAML.
 
 ## Rules
 
