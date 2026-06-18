@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for scripts/submit.py — content-diff guard and skip logic."""
+
 import os
 import subprocess
 import sys
@@ -107,15 +108,18 @@ class TestContentDiffGuard:
     def test_existing_rfe_no_changes_label_only(self, art_dir):
         """Existing RFE with identical content and passing review → Label only."""
         body = "## Problem\n\nSame content.\n"
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234") )
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
         # Make task body match original (strip_metadata removes frontmatter)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\n{body}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="false"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="false"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -124,14 +128,17 @@ class TestContentDiffGuard:
 
     def test_existing_rfe_with_changes_submitted(self, art_dir):
         """Existing RFE with different content → update."""
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md",
-               "## Problem\n\nOriginal content.\n")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\n"
-               f"## Problem\n\nRevised content with improvements.\n")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"))
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "## Problem\n\nOriginal content.\n")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\n"
+            "## Problem\n\nRevised content with improvements.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -140,10 +147,11 @@ class TestContentDiffGuard:
 
     def test_existing_rfe_no_original_file_submitted(self, art_dir):
         """Existing RFE with no original file → submit (no guard)."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="false"),
+        )
         # No file in rfe-originals/
 
         stdout, _, rc = _run_submit(art_dir)
@@ -152,10 +160,11 @@ class TestContentDiffGuard:
 
     def test_new_rfe_always_created(self, art_dir):
         """New RFE (RFE-NNN) → always create, no content-diff check."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -165,11 +174,13 @@ class TestContentDiffGuard:
 class TestSkipLogic:
     def test_rejected_rfe_skipped(self, art_dir):
         """RFE with recommendation=reject → SKIP rejected."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false")
-               .replace("recommendation: submit", "recommendation: reject"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false").replace(
+                "recommendation: submit", "recommendation: reject"
+            ),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -178,29 +189,35 @@ class TestSkipLogic:
 
     def test_archived_rfe_excluded(self, art_dir):
         """Archived RFE → not in plan at all."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001").replace(
-                   "status: Ready", "status: Archived"))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            TASK_FM.format(rfe_id="RFE-001").replace("status: Ready", "status: Archived"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir)
         # Should error because no submittable RFEs found
         assert rc == 1
         assert "No submittable" in stderr or "No RFE task" in stderr
 
-
     def test_children_of_local_parent_submitted(self, art_dir):
         """Children of local RFE-NNN parent → included in Phase 2 as creates."""
         # Archived local parent
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001").replace(
-                   "status: Ready", "status: Archived"))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            TASK_FM.format(rfe_id="RFE-001").replace("status: Ready", "status: Archived"),
+        )
         # Children with local parent_key
         for i, child_id in enumerate(["RFE-002", "RFE-003"], start=2):
-            _write(f"{art_dir}/rfe-tasks/{child_id}.md",
-                   TASK_FM.format(rfe_id=child_id).replace(
-                       "status: Ready", "status: Ready\nparent_key: RFE-001"))
-            _write(f"{art_dir}/rfe-reviews/{child_id}-review.md",
-                   REVIEW_FM.format(rfe_id=child_id, auto_revised="false"))
+            _write(
+                f"{art_dir}/rfe-tasks/{child_id}.md",
+                TASK_FM.format(rfe_id=child_id).replace(
+                    "status: Ready", "status: Ready\nparent_key: RFE-001"
+                ),
+            )
+            _write(
+                f"{art_dir}/rfe-reviews/{child_id}-review.md",
+                REVIEW_FM.format(rfe_id=child_id, auto_revised="false"),
+            )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -211,11 +228,16 @@ class TestSkipLogic:
     def test_children_of_jira_parent_excluded(self, art_dir):
         """Children of RHAIRFE parent → excluded from Phase 2 (Phase 1 handles)."""
         # Child with Jira parent_key
-        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
-               TASK_FM.format(rfe_id="RFE-002").replace(
-                   "status: Ready", "status: Ready\nparent_key: RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md",
-               REVIEW_FM.format(rfe_id="RFE-002", auto_revised="false"))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-002.md",
+            TASK_FM.format(rfe_id="RFE-002").replace(
+                "status: Ready", "status: Ready\nparent_key: RHAIRFE-1234"
+            ),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-002-review.md",
+            REVIEW_FM.format(rfe_id="RFE-002", auto_revised="false"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir)
         assert rc == 1
@@ -231,23 +253,30 @@ class TestSkipLogic:
         A standalone RFE-020 is included so Phase 2 has work to do.
         """
         # Archived local intermediary whose parent_key traces to Jira
-        _write(f"{art_dir}/rfe-tasks/RFE-010.md",
-               TASK_FM.format(rfe_id="RFE-010").replace(
-                   "status: Ready",
-                   "status: Archived\nparent_key: RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-010.md",
+            TASK_FM.format(rfe_id="RFE-010").replace(
+                "status: Ready", "status: Archived\nparent_key: RHAIRFE-1234"
+            ),
+        )
         # Grandchildren — parent_key points to local intermediary
         for child_id in ["RFE-011", "RFE-012"]:
-            _write(f"{art_dir}/rfe-tasks/{child_id}.md",
-                   TASK_FM.format(rfe_id=child_id).replace(
-                       "status: Ready",
-                       "status: Ready\nparent_key: RFE-010"))
-            _write(f"{art_dir}/rfe-reviews/{child_id}-review.md",
-                   REVIEW_FM.format(rfe_id=child_id, auto_revised="false"))
+            _write(
+                f"{art_dir}/rfe-tasks/{child_id}.md",
+                TASK_FM.format(rfe_id=child_id).replace(
+                    "status: Ready", "status: Ready\nparent_key: RFE-010"
+                ),
+            )
+            _write(
+                f"{art_dir}/rfe-reviews/{child_id}-review.md",
+                REVIEW_FM.format(rfe_id=child_id, auto_revised="false"),
+            )
         # Standalone RFE so Phase 2 runs (rc == 0)
-        _write(f"{art_dir}/rfe-tasks/RFE-020.md",
-               TASK_FM.format(rfe_id="RFE-020"))
-        _write(f"{art_dir}/rfe-reviews/RFE-020-review.md",
-               REVIEW_FM.format(rfe_id="RFE-020", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-020.md", TASK_FM.format(rfe_id="RFE-020"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-020-review.md",
+            REVIEW_FM.format(rfe_id="RFE-020", auto_revised="false"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -262,10 +291,11 @@ class TestSkipLogic:
 class TestAutoRevisedLabel:
     def test_auto_revised_label_applied(self, art_dir):
         """auto_revised=true → rfe-creator-auto-revised label."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="true"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="true"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -273,10 +303,11 @@ class TestAutoRevisedLabel:
 
     def test_no_label_when_not_revised(self, art_dir):
         """auto_revised=false → no auto-revised label."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -288,19 +319,24 @@ class TestRemoveLabels:
 
     def _task_with_labels(self, rfe_id, labels):
         """Task frontmatter with original_labels set."""
-        labels_yaml = "\n".join(f"- {l}" for l in labels) if labels else "[]"
-        return (f"---\nrfe_id: {rfe_id}\ntitle: Test RFE\n"
-                f"priority: Major\nstatus: Ready\n"
-                f"original_labels:\n{labels_yaml}\n---\n\n"
-                f"## Problem\n\nContent here.\n")
+        labels_yaml = "\n".join(f"- {label}" for label in labels) if labels else "[]"
+        return (
+            f"---\nrfe_id: {rfe_id}\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n"
+            f"original_labels:\n{labels_yaml}\n---\n\n"
+            f"## Problem\n\nContent here.\n"
+        )
 
     def test_rejected_with_rubric_pass_removes_label(self, art_dir):
         """Rejected RFE that had rubric-pass → Remove labels action."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               self._task_with_labels("RHAIRFE-1234",
-                                      ["rfe-creator-autofix-rubric-pass"]))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            self._task_with_labels("RHAIRFE-1234", ["rfe-creator-autofix-rubric-pass"]),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -310,10 +346,11 @@ class TestRemoveLabels:
 
     def test_rejected_without_rubric_pass_skips(self, art_dir):
         """Rejected RFE without rubric-pass → plain SKIP."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -323,10 +360,10 @@ class TestRemoveLabels:
 
     def test_rejected_new_rfe_skips(self, art_dir):
         """Rejected new RFE (RFE-NNN) → SKIP, no label removal."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md", REJECT_REVIEW_FM.format(rfe_id="RFE-001")
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -335,11 +372,13 @@ class TestRemoveLabels:
 
     def test_autorevise_reject_removes_rubric_pass(self, art_dir):
         """autorevise_reject with rubric-pass → Remove labels."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               self._task_with_labels("RHAIRFE-1234",
-                                      ["rfe-creator-autofix-rubric-pass"]))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            self._task_with_labels("RHAIRFE-1234", ["rfe-creator-autofix-rubric-pass"]),
+        )
         review = REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234").replace(
-            "recommendation: reject", "recommendation: autorevise_reject")
+            "recommendation: reject", "recommendation: autorevise_reject"
+        )
         _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", review)
 
         stdout, _, rc = _run_submit(art_dir)
@@ -357,14 +396,18 @@ class TestFeasibilityLabelHelper:
             FEASIBILITY_LABELS,
             feasibility_label_changes,
         )
+
         self.LABELS = FEASIBILITY_LABELS
         self.fn = feasibility_label_changes
 
-    @pytest.mark.parametrize("verdict,expected_label", [
-        ("feasible", "rfe-creator-feasibility-pass"),
-        ("infeasible", "rfe-creator-feasibility-fail"),
-        ("indeterminate", "rfe-creator-feasibility-unknown"),
-    ])
+    @pytest.mark.parametrize(
+        "verdict,expected_label",
+        [
+            ("feasible", "rfe-creator-feasibility-pass"),
+            ("infeasible", "rfe-creator-feasibility-fail"),
+            ("indeterminate", "rfe-creator-feasibility-unknown"),
+        ],
+    )
     def test_each_verdict_no_existing_labels(self, verdict, expected_label):
         add, remove = self.fn(verdict, is_reject=False, original_labels=None)
         assert add == expected_label
@@ -372,43 +415,38 @@ class TestFeasibilityLabelHelper:
 
     def test_each_verdict_with_matching_label_already_present(self):
         for verdict, label in self.LABELS.items():
-            add, remove = self.fn(
-                verdict, is_reject=False, original_labels=[label])
-            assert add == label, (
-                f"{verdict}: matching label is added (Jira no-ops)")
+            add, remove = self.fn(verdict, is_reject=False, original_labels=[label])
+            assert add == label, f"{verdict}: matching label is added (Jira no-ops)"
             assert remove == []
 
     def test_flip_removes_only_present_stale(self):
         # original has fail; new verdict feasible
         add, remove = self.fn(
-            "feasible", is_reject=False,
-            original_labels=["rfe-creator-feasibility-fail"])
+            "feasible", is_reject=False, original_labels=["rfe-creator-feasibility-fail"]
+        )
         assert add == "rfe-creator-feasibility-pass"
         assert remove == ["rfe-creator-feasibility-fail"]
 
     def test_reject_with_no_feasibility_labels(self):
-        add, remove = self.fn(
-            None, is_reject=True, original_labels=["unrelated-label"])
+        add, remove = self.fn(None, is_reject=True, original_labels=["unrelated-label"])
         assert add is None
         assert remove == []
 
     def test_reject_with_one_feasibility_label(self):
         add, remove = self.fn(
-            None, is_reject=True,
-            original_labels=["rfe-creator-feasibility-pass", "other"])
+            None, is_reject=True, original_labels=["rfe-creator-feasibility-pass", "other"]
+        )
         assert add is None
         assert remove == ["rfe-creator-feasibility-pass"]
 
     def test_missing_verdict(self):
         for verdict in (None, "", "yes", "TBD"):
-            add, remove = self.fn(
-                verdict, is_reject=False, original_labels=None)
+            add, remove = self.fn(verdict, is_reject=False, original_labels=None)
             assert add is None
             assert remove == []
 
     def test_original_labels_none_treated_as_empty(self):
-        add, remove = self.fn(
-            "feasible", is_reject=False, original_labels=None)
+        add, remove = self.fn("feasible", is_reject=False, original_labels=None)
         assert add == "rfe-creator-feasibility-pass"
         assert remove == []
 
@@ -461,36 +499,42 @@ class TestFeasibilityLabelOnSubmit:
         if original_labels is None:
             extra = ""
         else:
-            labels_yaml = "\n".join(f"- {l}" for l in original_labels)
+            labels_yaml = "\n".join(f"- {label}" for label in original_labels)
             extra = f"original_labels:\n{labels_yaml}\n"
         return FEAS_TASK_FM.format(rfe_id=rfe_id, extra=extra)
 
-    @pytest.mark.parametrize("verdict,label", [
-        ("feasible", "rfe-creator-feasibility-pass"),
-        ("infeasible", "rfe-creator-feasibility-fail"),
-        ("indeterminate", "rfe-creator-feasibility-unknown"),
-    ])
+    @pytest.mark.parametrize(
+        "verdict,label",
+        [
+            ("feasible", "rfe-creator-feasibility-pass"),
+            ("infeasible", "rfe-creator-feasibility-fail"),
+            ("indeterminate", "rfe-creator-feasibility-unknown"),
+        ],
+    )
     def test_feasibility_label_on_create(self, art_dir, verdict, label):
         """Each verdict applies the matching label on a new RFE."""
         _write(f"{art_dir}/rfe-tasks/RFE-001.md", self._task("RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _feas_review("RFE-001", verdict))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _feas_review("RFE-001", verdict))
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert label in stdout
 
     def test_feasibility_label_flip_on_update(self, art_dir):
         """Existing RHAIRFE with stale label → flip adds new, removes stale."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               self._task("RHAIRFE-1234",
-                          original_labels=["rfe-creator-feasibility-fail"]))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            self._task("RHAIRFE-1234", original_labels=["rfe-creator-feasibility-fail"]),
+        )
         # Original snapshot identical to current body for "no content change"
         # path exercising remove + add via Label only.
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md",
-               self._task("RHAIRFE-1234",
-                          original_labels=["rfe-creator-feasibility-fail"]))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _feas_review("RHAIRFE-1234", "feasible"))
+        _write(
+            f"{art_dir}/rfe-originals/RHAIRFE-1234.md",
+            self._task("RHAIRFE-1234", original_labels=["rfe-creator-feasibility-fail"]),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _feas_review("RHAIRFE-1234", "feasible"),
+        )
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "rfe-creator-feasibility-pass" in stdout
@@ -499,12 +543,14 @@ class TestFeasibilityLabelOnSubmit:
 
     def test_reject_strips_present_feasibility_label(self, art_dir):
         """Rejected RFE with stale feasibility label → Remove labels."""
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               self._task("RHAIRFE-1234",
-                          original_labels=["rfe-creator-feasibility-pass"]))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _feas_review("RHAIRFE-1234", "feasible",
-                            recommendation="reject"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            self._task("RHAIRFE-1234", original_labels=["rfe-creator-feasibility-pass"]),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _feas_review("RHAIRFE-1234", "feasible", recommendation="reject"),
+        )
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "Remove labels" in stdout
@@ -516,11 +562,11 @@ class TestFeasibilityLabelOnSubmit:
         Locks the conditional-removal behavior so a future "blind self-healing"
         refactor can't silently shift this case to Remove labels.
         """
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               self._task("RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _feas_review("RHAIRFE-1234", "feasible",
-                            recommendation="reject"))
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", self._task("RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _feas_review("RHAIRFE-1234", "feasible", recommendation="reject"),
+        )
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "SKIP" in stdout
@@ -566,8 +612,7 @@ class TestSplitRefusal:
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
         _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", self.REVIEW)
         for i in range(1, num_children + 1):
-            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md",
-                   self.CHILD_TASK_TPL.format(num=i))
+            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", self.CHILD_TASK_TPL.format(num=i))
 
     def test_refusal_sets_frontmatter_fields(self, art_dir):
         """Exit code 2 → needs_attention + reason + error in review."""
@@ -580,6 +625,7 @@ class TestSplitRefusal:
 
         # Check review frontmatter was updated
         import yaml
+
         review_path = f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md"
         with open(review_path) as f:
             content = f.read()
@@ -602,10 +648,11 @@ class TestSplitRefusal:
         self._setup_oversized_split(art_dir)
 
         # Add a regular (non-split) RFE that should still be processed
-        _write(f"{art_dir}/rfe-tasks/RFE-099.md",
-               TASK_FM.format(rfe_id="RFE-099"))
-        _write(f"{art_dir}/rfe-reviews/RFE-099-review.md",
-               REVIEW_FM.format(rfe_id="RFE-099", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-099.md", TASK_FM.format(rfe_id="RFE-099"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-099-review.md",
+            REVIEW_FM.format(rfe_id="RFE-099", auto_revised="false"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir)
         assert rc == 0
@@ -618,10 +665,11 @@ class TestSnapshotUpdate:
 
     def test_dry_run_does_not_update_snapshot(self, art_dir):
         """Dry-run does not update snapshot."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
 
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
@@ -643,17 +691,20 @@ class TestGenerateReportFlag:
         }
         result = subprocess.run(
             [sys.executable, SCRIPT, "--dry-run", "--generate-report"],
-            capture_output=True, text=True, env=env,
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert result.returncode != 0
         assert "--report-timestamp is required" in result.stderr
 
     def test_generate_report_with_timestamp_accepted(self, art_dir):
         """--generate-report with --report-timestamp → no validation error."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
 
         env = {
             **os.environ,
@@ -662,10 +713,19 @@ class TestGenerateReportFlag:
             "JIRA_TOKEN": "fake-token",
         }
         result = subprocess.run(
-            [sys.executable, SCRIPT, "--dry-run",
-             "--generate-report", "--report-timestamp", "20260404-170041",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                SCRIPT,
+                "--dry-run",
+                "--generate-report",
+                "--report-timestamp",
+                "20260404-170041",
+                "--artifacts-dir",
+                art_dir,
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert result.returncode == 0
         assert "--report-timestamp is required" not in result.stderr
@@ -676,11 +736,15 @@ class TestApprovedTransition:
         """--auto-approve + passing review → prints would-transition."""
         body = "Original.\n"
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
         assert rc == 0, stderr
@@ -690,11 +754,15 @@ class TestApprovedTransition:
         """--auto-approve + failing review → no transition message."""
         body = "Original.\n"
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
         assert rc == 0, stderr
@@ -702,10 +770,11 @@ class TestApprovedTransition:
 
     def test_new_rfe_prints_would_transition(self, art_dir):
         """--auto-approve + new RFE with passing review → would-transition."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir, ["--auto-approve"])
         assert rc == 0, stderr
@@ -715,11 +784,15 @@ class TestApprovedTransition:
         """Without --auto-approve → no transition even if review passes."""
         body = "Original.\n"
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
 
         stdout, stderr, rc = _run_submit(art_dir)
         assert rc == 0, stderr

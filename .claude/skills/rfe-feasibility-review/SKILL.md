@@ -20,9 +20,9 @@ Review a single RFE specified by ID. Read the task file at `artifacts/rfe-tasks/
 
 ## Architecture Context
 
-Check for architecture context in `.context/architecture-context/architecture/`. Look for a `rhoai-*` directory (there should be exactly one from the sparse checkout). If found, read `PLATFORM.md` to identify which components the RFE touches, then read relevant component docs. Use this to ground your feasibility assessment in the actual platform.
+Read `.context/architecture-context/LATEST_VERSION` directly with the Read tool to get the version directory name (e.g., `rhoai-3.4-ea.2`). Do NOT use Glob or Bash to check existence first — just Read it; if the file is missing, Read returns an error, which is the fallback condition below. Then Read `.context/architecture-context/architecture/<version>/PLATFORM.md` to identify which components the RFE touches, and read relevant component docs. Use this to ground your feasibility assessment in the actual platform.
 
-If no architecture context is available (directory missing or empty), assess feasibility based on the RFE content alone and note that architecture context was not available.
+If the Read on `LATEST_VERSION` returns an error (file not found) or the PLATFORM.md read fails, assess feasibility based on the RFE content alone and state that architecture context was not available.
 
 ## Architecture Context Overlays
 

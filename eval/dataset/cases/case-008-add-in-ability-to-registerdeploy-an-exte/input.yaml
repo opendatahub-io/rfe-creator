@@ -1,0 +1,32 @@
+clarifying_context: 'Customers: Enterprise platform admin teams adopting RHOAI MaaS for governed AI model access — large financial
+  services, healthcare, and tech companies running OpenShift AI at scale (e.g., major banks using Azure OpenAI through MaaS
+  governance, Fortune 500 companies standardizing on RHOAI for multi-provider LLM access)
+
+  Business justification: This is a MaaS GA completeness requirement. The 3.4 release already supports external model registration
+  via CLI and surfaces them in AAE, but the lack of UI creates an admin experience gap that undermines MaaS adoption. Enterprise
+  customers expect full dashboard management for governed model endpoints — CLI-only registration is a barrier to platform
+  admin productivity and discoverability.
+
+  User problem: Platform admins must use kubectl/CLI to register external models into MaaS — there is no dashboard discoverability
+  of which external providers are configured, no way to update or remove registrations from the UI, and AI engineers cannot
+  easily distinguish configured external MaaS models from other endpoint types. This is fundamentally different from Custom
+  Endpoints (which are unmanaged, ad-hoc connections without subscription binding or admin governance). MaaS external model
+  registration requires admin ownership, MaaS subscription inclusion, and credential management at the MaaSModelRef level
+  — all of which currently require CLI.
+
+  Scope: Single focused need — adding UI support for external MaaS model registration CRUD operations on the Model Deployments
+  page. Form must capture provider (dropdown: OpenAI, Anthropic, Azure OpenAI, Bedrock, Vertex AI), endpoint URL, model name/identifier,
+  and credential reference. MVP providers are OpenAI, Anthropic, and Bedrock; stretch goal includes all supported providers.
+  Dependency on STRAT-102 (External Model Egress via IGW) backend landing first. CLI path must continue to work — this
+  is additive UI, not a replacement.
+
+  Success criteria: Platform admin can create a new external MaaS model registration from the dashboard with provider selection,
+  endpoint URL, model identifier, and credential reference; registered external model appears in AAE for AI engineers with
+  correct MaaS subscription access; platform admin can view, edit, and delete existing external MaaS model registrations from
+  the dashboard; UX is reviewed and approved by design team before implementation.'
+priority: Critical
+prompt: Right now in RHOAI 3.4, platform admins can only register external model endpoints (like OpenAI, Anthropic, Azure
+  OpenAI, Bedrock, Vertex AI) as MaaS-governed models through the CLI by creating MaaSModelRef CRDs. There's no dashboard
+  UI for this at all. We need to add the ability to register, view, edit, and delete external model endpoint registrations
+  directly from the Model Deployments page in the RHOAI dashboard. This is critical for MaaS GA — we can't expect all admins
+  to use kubectl for something this fundamental.

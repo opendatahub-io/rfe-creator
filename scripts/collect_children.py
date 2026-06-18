@@ -11,10 +11,10 @@ from artifact_utils import scan_task_files
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Find child RFEs by parent_key")
-    parser.add_argument("parent_ids", nargs="+",
-                        help="One or more parent RFE IDs (e.g. RHAIRFE-100)")
+    parser = argparse.ArgumentParser(description="Find child RFEs by parent_key")
+    parser.add_argument(
+        "parent_ids", nargs="+", help="One or more parent RFE IDs (e.g. RHAIRFE-100)"
+    )
     args = parser.parse_args()
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")

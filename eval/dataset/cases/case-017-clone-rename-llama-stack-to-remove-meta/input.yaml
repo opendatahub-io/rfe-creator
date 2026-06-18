@@ -1,0 +1,29 @@
+clarifying_context: 'Customers: RHOAI enterprise customers adopting agentic AI workloads, partners integrating with the Responses
+  API and OpenAI-compatible APIs, upstream open-source community contributors and users building on the project
+
+  Business justification: Removing dependency on Meta''s Llama trademark protects Red Hat''s independent brand identity and
+  avoids long-term legal and marketing risk. Pre-GA rename is dramatically cheaper than post-GA — a post-GA rename would require
+  deprecation cycles, customer migration guides, breaking changes across integrations, and extensive documentation rewrites.
+  Red Hat is now the primary driver of the codebase and community, so the project identity should reflect that ownership.
+
+  User problem: The current project name ''Llama Stack'' contains Meta''s trademark, tying the project''s identity to a company
+  that is no longer a meaningful contributor. As Red Hat grows the community independently, this creates confusion about ownership
+  and long-term governance. After GA, customers, docs, integrations, Kubernetes CRDs, container images, and community tooling
+  will all reference the name, making a future rename a breaking change with broad blast radius.
+
+  Scope: This is a single focused but wide-reaching initiative — a coordinated rename across upstream repository and package
+  names, Python import paths, downstream RHOAI operator CRDs, container image names in registry.redhat.io, Helm charts, Quick
+  Start templates, Kubernetes namespaces, API group names, MCP server tool names, CLI commands, API endpoint paths, all GA
+  documentation, CI/CD pipelines, and community communications. Backward-compatibility aliases must be maintained for at least
+  one release cycle.
+
+  Success criteria: New name selected via open community process and cleared by Red Hat legal for trademark availability.
+  All upstream and downstream references updated — no ''llama'' or ''llamastack'' in the Kubernetes API surface, container
+  image names, or customer-facing docs at GA (except migration/context notes). Old names aliased for one release cycle. Community
+  blog post or announcement published explaining the rename and migration path. All CI/CD pipelines and integration tests
+  pass under the new name. No customer-facing material ships at GA with the old name as primary reference.'
+priority: Critical
+prompt: We need to rename Llama Stack before it goes GA in RHOAI 3.5. Meta has pulled back their investment and Red Hat is
+  now driving the project independently — it doesn't make sense to keep shipping under Meta's 'Llama' trademark. Renaming
+  after GA would be a nightmare with deprecation cycles, customer migrations, and doc rewrites. We should pick a new community-owned
+  name and update everything — upstream repos, downstream operator CRDs, container images, docs, CLI tools — before we ship.

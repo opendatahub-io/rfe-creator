@@ -9,19 +9,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from artifact_utils import (
+    find_artifact_file_including_archived,
     find_review_file,
     read_frontmatter,
     scan_task_files,
     update_frontmatter,
-    find_artifact_file_including_archived,
 )
 
 ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Clean up orphan children from a failed split")
+    parser = argparse.ArgumentParser(description="Clean up orphan children from a failed split")
     parser.add_argument("parent_id", help="Parent RFE ID (e.g. RHAIRFE-100)")
     args = parser.parse_args()
 
@@ -41,8 +40,7 @@ def main():
         os.remove(path)
 
         # Delete companion files (comments, removed-context)
-        for companion in glob.glob(
-                os.path.join(tasks_dir, basename + "-*")):
+        for companion in glob.glob(os.path.join(tasks_dir, basename + "-*")):
             os.remove(companion)
 
         # Delete review file
@@ -51,8 +49,7 @@ def main():
             os.remove(review)
 
         # Delete feasibility review
-        feasibility = os.path.join(reviews_dir,
-                                   f"{child_id}-feasibility.md")
+        feasibility = os.path.join(reviews_dir, f"{child_id}-feasibility.md")
         if os.path.exists(feasibility):
             os.remove(feasibility)
 
@@ -67,15 +64,13 @@ def main():
         deleted.append(os.path.basename(path))
 
     # 2. Delete split-status.yaml
-    split_status = os.path.join(reviews_dir,
-                                f"{parent_id}-split-status.yaml")
+    split_status = os.path.join(reviews_dir, f"{parent_id}-split-status.yaml")
     if os.path.exists(split_status):
         os.remove(split_status)
 
     # 3. Un-archive the parent
     restored = ""
-    parent_path = find_artifact_file_including_archived(
-        ARTIFACTS_DIR, parent_id)
+    parent_path = find_artifact_file_including_archived(ARTIFACTS_DIR, parent_id)
     if parent_path:
         fm, _ = read_frontmatter(parent_path)
         if fm.get("status") == "Archived":

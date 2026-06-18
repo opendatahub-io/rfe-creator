@@ -1,0 +1,48 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+    - name: Run skillsaw
+      uses: stbenjam/skillsaw@c2592a0fe1a86345da838fa16fcda6b55f495178 # v0.11.2
+      with:
+        strict: 'true'
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      with:
+        python-version: '3.13'
+
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff
+        pip install -r requirements-dev.txt
+
+    - name: Run ruff check
+      run: ruff check .
+
+    - name: Run ruff format check
+      run: ruff format --check --diff .
+
+    - name: Run shellcheck
+      run: find . -name '*.sh' -type f -exec shellcheck {} +
+
+    - name: Run tests
+      run: python3 -m pytest tests/ -v -k "not integration"

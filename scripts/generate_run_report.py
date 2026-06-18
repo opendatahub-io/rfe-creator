@@ -18,14 +18,14 @@ SCORE_FIELDS = ["what", "why", "open_to_how", "not_a_task", "right_sized"]
 
 def _parse_run_id(start_time):
     """Derive run_id from a timestamp. Accepts YYYYMMDD-HHMMSS or ISO format."""
-    if re.match(r'^\d{8}-\d{6}$', start_time):
+    if re.match(r"^\d{8}-\d{6}$", start_time):
         return start_time
-    return (datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            .strftime("%Y%m%d-%H%M%S"))
+    return datetime.fromisoformat(start_time.replace("Z", "+00:00")).strftime("%Y%m%d-%H%M%S")
 
 
-def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids,
-                 artifacts_dir=None):
+def build_report(
+    rfe_ids, start_time, batch_size, retried_ids, retry_success_ids, artifacts_dir=None
+):
     if artifacts_dir is None:
         artifacts_dir = DEFAULT_ARTIFACTS_DIR
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -134,14 +134,17 @@ def build_report(rfe_ids, start_time, batch_size, retried_ids, retry_success_ids
 
 def main():
     parser = argparse.ArgumentParser(description="Generate auto-fix run report")
-    parser.add_argument("--start-time", required=True,
-                        help="Timestamp (YYYYMMDD-HHMMSS or ISO format)")
+    parser.add_argument(
+        "--start-time", required=True, help="Timestamp (YYYYMMDD-HHMMSS or ISO format)"
+    )
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument("--retried", default="", help="Comma-separated retried IDs")
-    parser.add_argument("--retry-successes", default="",
-                        help="Comma-separated retry success IDs")
-    parser.add_argument("--artifacts-dir", default=None,
-                        help="Artifacts directory (default: ../artifacts relative to script)")
+    parser.add_argument("--retry-successes", default="", help="Comma-separated retry success IDs")
+    parser.add_argument(
+        "--artifacts-dir",
+        default=None,
+        help="Artifacts directory (default: ../artifacts relative to script)",
+    )
     parser.add_argument("rfe_ids", nargs="*", help="RFE IDs (default: scan review files)")
     args = parser.parse_args()
 
@@ -150,23 +153,30 @@ def main():
     # If no IDs provided, scan review files
     if not args.rfe_ids:
         reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")
-        args.rfe_ids = [f.replace("-review.md", "")
-                        for f in sorted(os.listdir(reviews_dir))
-                        if f.endswith("-review.md")]
+        args.rfe_ids = [
+            f.replace("-review.md", "")
+            for f in sorted(os.listdir(reviews_dir))
+            if f.endswith("-review.md")
+        ]
 
     retried = [x for x in args.retried.split(",") if x]
     retry_ok = [x for x in args.retry_successes.split(",") if x]
 
-    report = build_report(args.rfe_ids, args.start_time, args.batch_size,
-                          retried, retry_ok, artifacts_dir=artifacts_dir)
+    report = build_report(
+        args.rfe_ids,
+        args.start_time,
+        args.batch_size,
+        retried,
+        retry_ok,
+        artifacts_dir=artifacts_dir,
+    )
 
     out_dir = os.path.join(artifacts_dir, "auto-fix-runs")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{report['run_id']}.yaml")
 
     with open(out_path, "w", encoding="utf-8") as f:
-        yaml.dump(report, f, default_flow_style=False, sort_keys=False,
-                  allow_unicode=True)
+        yaml.dump(report, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     print(out_path)
 

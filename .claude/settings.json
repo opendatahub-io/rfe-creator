@@ -46,6 +46,7 @@
       "Bash(python3 scripts/reassess_save.py *)",
       "Bash(python3 scripts/split_collect.py *)",
       "Bash(python3 scripts/check_right_sized.py *)",
+      "Bash(python3 scripts/check_autofix_complete.py *)",
       "Bash(python3 scripts/state.py *)",
       "Bash(python3 scripts/submit.py *)",
       "Bash(python3 scripts/split_submit.py *)",

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for scripts/snapshot_fetch.py — content hashing, snapshot diffing,
 ID file writing, and snapshot loading from results directories."""
+
 import hashlib
 import os
 import sys
@@ -38,10 +39,8 @@ class TestComputeContentHash:
             "type": "doc",
             "version": 1,
             "content": [
-                {"type": "paragraph", "content": [
-                    {"type": "text", "text": "Hello world"}
-                ]}
-            ]
+                {"type": "paragraph", "content": [{"type": "text", "text": "Hello world"}]}
+            ],
         }
         h = compute_content_hash(adf)
         assert isinstance(h, str)
@@ -53,64 +52,71 @@ class TestComputeContentHash:
             "type": "doc",
             "version": 1,
             "content": [
-                {"type": "paragraph", "content": [
-                    {"type": "text", "text": "Test content"}
-                ]}
-            ]
+                {"type": "paragraph", "content": [{"type": "text", "text": "Test content"}]}
+            ],
         }
         assert compute_content_hash(adf) == compute_content_hash(adf)
 
     def test_different_content_different_hash(self):
         """Different ADF content → different hash."""
         adf1 = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text", "text": "Version A"}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Version A"}]}],
         }
         adf2 = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text", "text": "Version B"}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Version B"}]}],
         }
         assert compute_content_hash(adf1) != compute_content_hash(adf2)
 
     def test_normalization_collapses_whitespace(self):
         """Curly quotes and extra spaces normalize to the same hash."""
         adf_straight = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text", "text": "It's a \"test\""}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": 'It\'s a "test"'}]}
+            ],
         }
         adf_curly = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text",
-                 "text": "It\u2019s a \u201ctest\u201d"}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "It\u2019s a \u201ctest\u201d"}],
+                }
+            ],
         }
-        assert compute_content_hash(adf_straight) == \
-            compute_content_hash(adf_curly)
+        assert compute_content_hash(adf_straight) == compute_content_hash(adf_curly)
 
     def test_whitespace_only_changes_same_hash(self):
         """Extra blank lines, indentation, and tabs produce the same hash."""
         adf_clean = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text", "text": "Line one\nLine two\nLine three"}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Line one\nLine two\nLine three"}],
+                }
+            ],
         }
         adf_messy = {
-            "type": "doc", "version": 1,
-            "content": [{"type": "paragraph", "content": [
-                {"type": "text",
-                 "text": "  Line one\n\n\n\tLine two  \n\n  Line three  "}
-            ]}]
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "  Line one\n\n\n\tLine two  \n\n  Line three  "}
+                    ],
+                }
+            ],
         }
-        assert compute_content_hash(adf_clean) == \
-            compute_content_hash(adf_messy)
+        assert compute_content_hash(adf_clean) == compute_content_hash(adf_messy)
 
 
 class TestDiffSnapshots:
@@ -195,9 +201,11 @@ class TestDiffSnapshots:
         current = {
             "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": {"hash": "aaa", "processed": True},
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == []
         assert new == []
@@ -207,9 +215,11 @@ class TestDiffSnapshots:
         current = {
             "RHAIRFE-1": {"content_hash": "aaa-new", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": {"hash": "aaa", "processed": True},
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": {"hash": "aaa", "processed": True},
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == ["RHAIRFE-1"]
         assert new == []
@@ -219,9 +229,11 @@ class TestDiffSnapshots:
         current = {
             "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": {"hash": "aaa", "processed": False},
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": {"hash": "aaa", "processed": False},
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == []
         assert new == ["RHAIRFE-1"]
@@ -231,9 +243,11 @@ class TestDiffSnapshots:
         current = {
             "RHAIRFE-1": {"content_hash": "aaa-new", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": {"hash": "aaa", "processed": False},
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": {"hash": "aaa", "processed": False},
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == []
         assert new == ["RHAIRFE-1"]
@@ -245,11 +259,13 @@ class TestDiffSnapshots:
             "RHAIRFE-2": {"content_hash": "bbb", "labels": []},
             "RHAIRFE-3": {"content_hash": "ccc", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": "aaa",  # old format, implicitly processed
-            "RHAIRFE-2": {"hash": "bbb", "processed": True},  # new, processed
-            "RHAIRFE-3": {"hash": "ccc", "processed": False},  # new, unprocessed
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": "aaa",  # old format, implicitly processed
+                "RHAIRFE-2": {"hash": "bbb", "processed": True},  # new, processed
+                "RHAIRFE-3": {"hash": "ccc", "processed": False},  # new, unprocessed
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == []
         assert new == ["RHAIRFE-3"]
@@ -259,9 +275,11 @@ class TestDiffSnapshots:
         current = {
             "RHAIRFE-1": {"content_hash": "aaa", "labels": []},
         }
-        previous = {"issues": {
-            "RHAIRFE-1": {"hash": "aaa"},  # no processed key
-        }}
+        previous = {
+            "issues": {
+                "RHAIRFE-1": {"hash": "aaa"},  # no processed key
+            }
+        }
         changed, new = diff_snapshots(current, previous)
         assert changed == []
         assert new == []
@@ -292,9 +310,12 @@ class TestUpdateSnapshotHashes:
 
     def test_mark_processed_preserves_hash(self, tmp_path):
         """mark_processed sets processed=True without changing hash."""
-        snap_dir, path = self._seed(tmp_path, {
-            "K1": {"hash": "aaa", "processed": False},
-        })
+        snap_dir, path = self._seed(
+            tmp_path,
+            {
+                "K1": {"hash": "aaa", "processed": False},
+            },
+        )
         result = update_snapshot_hashes({}, snap_dir, mark_processed=["K1"])
         assert result is not None
         with open(path) as f:
@@ -313,8 +334,7 @@ class TestUpdateSnapshotHashes:
     def test_mark_processed_skips_missing_key(self, tmp_path):
         """mark_processed with key not in snapshot → no error, no change."""
         snap_dir, path = self._seed(tmp_path, {"K1": "aaa"})
-        result = update_snapshot_hashes(
-            {}, snap_dir, mark_processed=["MISSING"])
+        result = update_snapshot_hashes({}, snap_dir, mark_processed=["MISSING"])
         assert result is not None
         with open(path) as f:
             data = yaml.safe_load(f)
@@ -322,12 +342,14 @@ class TestUpdateSnapshotHashes:
 
     def test_submitted_and_mark_processed_together(self, tmp_path):
         """Both hashes and mark_processed in single call."""
-        snap_dir, path = self._seed(tmp_path, {
-            "K1": {"hash": "old", "processed": False},
-            "K2": {"hash": "bbb", "processed": False},
-        })
-        result = update_snapshot_hashes(
-            {"K1": "new-hash"}, snap_dir, mark_processed=["K2"])
+        snap_dir, path = self._seed(
+            tmp_path,
+            {
+                "K1": {"hash": "old", "processed": False},
+                "K2": {"hash": "bbb", "processed": False},
+            },
+        )
+        result = update_snapshot_hashes({"K1": "new-hash"}, snap_dir, mark_processed=["K2"])
         assert result is not None
         with open(path) as f:
             data = yaml.safe_load(f)
@@ -361,8 +383,7 @@ def _make_results_dir(tmp_path, runs):
         os.makedirs(snap_dir, exist_ok=True)
 
         if run.get("snapshot"):
-            snap_path = os.path.join(snap_dir,
-                                     f"issue-snapshot-{name}.yaml")
+            snap_path = os.path.join(snap_dir, f"issue-snapshot-{name}.yaml")
             with open(snap_path, "w") as f:
                 yaml.dump(run["snapshot"], f)
 
@@ -379,10 +400,12 @@ class TestLoadSnapshotFromDir:
     def test_follows_latest_symlink(self, tmp_path):
         """Finds snapshot via latest symlink."""
         snapshot = {"issues": {"RHAIRFE-1": "aaa"}}
-        repo = _make_results_dir(tmp_path, [
-            {"name": "20260401-120000", "snapshot": snapshot,
-             "latest": True},
-        ])
+        repo = _make_results_dir(
+            tmp_path,
+            [
+                {"name": "20260401-120000", "snapshot": snapshot, "latest": True},
+            ],
+        )
 
         data = load_snapshot_from_dir(repo)
         assert data is not None
@@ -391,11 +414,13 @@ class TestLoadSnapshotFromDir:
     def test_walks_backwards_for_snapshot(self, tmp_path):
         """Latest run has no snapshot → walks to older run."""
         old_snapshot = {"issues": {"RHAIRFE-1": "aaa"}}
-        repo = _make_results_dir(tmp_path, [
-            {"name": "20260401-120000", "snapshot": old_snapshot},
-            {"name": "20260402-120000", "snapshot": None,
-             "latest": True},
-        ])
+        repo = _make_results_dir(
+            tmp_path,
+            [
+                {"name": "20260401-120000", "snapshot": old_snapshot},
+                {"name": "20260402-120000", "snapshot": None, "latest": True},
+            ],
+        )
 
         data = load_snapshot_from_dir(repo)
         assert data is not None
@@ -405,15 +430,17 @@ class TestLoadSnapshotFromDir:
         """No latest symlink → uses newest directory by name."""
         snap_old = {"issues": {"RHAIRFE-1": "aaa"}}
         snap_new = {"issues": {"RHAIRFE-1": "bbb", "RHAIRFE-2": "ccc"}}
-        repo = _make_results_dir(tmp_path, [
-            {"name": "20260401-120000", "snapshot": snap_old},
-            {"name": "20260402-120000", "snapshot": snap_new},
-        ])
+        repo = _make_results_dir(
+            tmp_path,
+            [
+                {"name": "20260401-120000", "snapshot": snap_old},
+                {"name": "20260402-120000", "snapshot": snap_new},
+            ],
+        )
 
         data = load_snapshot_from_dir(repo)
         assert data is not None
-        assert data["issues"] == {"RHAIRFE-1": "bbb",
-                                  "RHAIRFE-2": "ccc"}
+        assert data["issues"] == {"RHAIRFE-1": "bbb", "RHAIRFE-2": "ccc"}
 
     def test_empty_repo_returns_none(self, tmp_path):
         """No run directories → returns None."""
@@ -433,8 +460,7 @@ class TestLoadSnapshotFromDir:
         repo = str(tmp_path / "data-repo")
         td_dir = os.path.join(repo, "test-data", "auto-fix-runs")
         os.makedirs(td_dir)
-        with open(os.path.join(td_dir,
-                  "issue-snapshot-20260401-120000.yaml"), "w") as f:
+        with open(os.path.join(td_dir, "issue-snapshot-20260401-120000.yaml"), "w") as f:
             yaml.dump({"issues": {"RHAIRFE-1": "aaa"}}, f)
 
         data = load_snapshot_from_dir(repo)
@@ -444,11 +470,13 @@ class TestLoadSnapshotFromDir:
         """latest symlink with ./ prefix still prioritises target."""
         snap_old = {"issues": {"RHAIRFE-1": "old"}}
         snap_new = {"issues": {"RHAIRFE-1": "new"}}
-        repo = _make_results_dir(tmp_path, [
-            {"name": "20260401-120000", "snapshot": snap_old,
-             "latest": True},
-            {"name": "20260402-120000", "snapshot": snap_new},
-        ])
+        repo = _make_results_dir(
+            tmp_path,
+            [
+                {"name": "20260401-120000", "snapshot": snap_old, "latest": True},
+                {"name": "20260402-120000", "snapshot": snap_new},
+            ],
+        )
         # Re-create symlink with ./ prefix
         os.remove(os.path.join(repo, "latest"))
         os.symlink("./20260401-120000", os.path.join(repo, "latest"))
@@ -487,13 +515,13 @@ class TestReprocess:
         write_id_file(ids_file, ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"])
 
         import argparse
+
         args = argparse.Namespace(
-            reprocess=True, jql=None, random=None,
-            ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None, random=None, ids_file=ids_file, changed_file=changed_file
+        )
         cmd_fetch(args)
 
-        assert read_id_file(changed_file) == [
-            "RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
+        assert read_id_file(changed_file) == ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
 
     def test_reprocess_without_jql_fails_without_prior_ids(self, tmp_path):
         """--reprocess with no prior IDs file exits with error."""
@@ -501,9 +529,10 @@ class TestReprocess:
         changed_file = str(tmp_path / "changed-ids.txt")
 
         import argparse
+
         args = argparse.Namespace(
-            reprocess=True, jql=None, random=None,
-            ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None, random=None, ids_file=ids_file, changed_file=changed_file
+        )
         with pytest.raises(SystemExit) as exc_info:
             cmd_fetch(args)
         assert exc_info.value.code == 1
@@ -515,9 +544,10 @@ class TestReprocess:
         write_id_file(ids_file, ["RHAIRFE-1", "RHAIRFE-2"])
 
         import argparse
+
         args = argparse.Namespace(
-            reprocess=True, jql=None, random=None,
-            ids_file=ids_file, changed_file=changed_file)
+            reprocess=True, jql=None, random=None, ids_file=ids_file, changed_file=changed_file
+        )
         cmd_fetch(args)
 
         assert read_id_file(ids_file) == ["RHAIRFE-1", "RHAIRFE-2"]
@@ -533,22 +563,25 @@ class TestRandom:
     def _run_fetch(self, tmp_path, current, random_n, monkeypatch):
         """Run cmd_fetch with mocked Jira fetch, return (ids, changed)."""
         import argparse
+
         ids_file = str(tmp_path / "all-ids.txt")
         changed_file = str(tmp_path / "changed-ids.txt")
         snap_dir = str(tmp_path / "snapshots")
 
-        monkeypatch.setattr("snapshot_fetch.require_env",
-                            lambda: ("http://x", "u", "t"))
-        monkeypatch.setattr("snapshot_fetch.fetch_all_issues",
-                            lambda *a, **kw: current)
-        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot",
-                            lambda: (None, None))
+        monkeypatch.setattr("snapshot_fetch.require_env", lambda: ("http://x", "u", "t"))
+        monkeypatch.setattr("snapshot_fetch.fetch_all_issues", lambda *a, **kw: current)
+        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot", lambda: (None, None))
         monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", snap_dir)
 
         args = argparse.Namespace(
-            reprocess=True, jql="project = TEST", random=random_n,
-            limit=None, data_dir=None,
-            ids_file=ids_file, changed_file=changed_file)
+            reprocess=True,
+            jql="project = TEST",
+            random=random_n,
+            limit=None,
+            data_dir=None,
+            ids_file=ids_file,
+            changed_file=changed_file,
+        )
         cmd_fetch(args)
         return read_id_file(ids_file), read_id_file(changed_file)
 
@@ -593,40 +626,47 @@ class TestUnchangedSkippedFromSelection:
         snap_dir.mkdir(parents=True, exist_ok=True)
         snap_path = snap_dir / "issue-snapshot-20260501-000000.yaml"
         with open(snap_path, "w") as f:
-            yaml.dump({
-                "query_timestamp": "2026-05-01T00:00:00Z",
-                "timestamp": "2026-05-01T00:00:01Z",
-                "issues": prev_issues,
-            }, f)
+            yaml.dump(
+                {
+                    "query_timestamp": "2026-05-01T00:00:00Z",
+                    "timestamp": "2026-05-01T00:00:01Z",
+                    "issues": prev_issues,
+                },
+                f,
+            )
         return str(snap_dir)
 
-    def _run_fetch(self, tmp_path, current, prev_issues, monkeypatch,
-                   reprocess=False, limit=None):
+    def _run_fetch(self, tmp_path, current, prev_issues, monkeypatch, reprocess=False, limit=None):
         import argparse
+
         snap_dir = self._setup_snapshot(tmp_path, prev_issues)
         ids_file = str(tmp_path / "all-ids.txt")
         changed_file = str(tmp_path / "changed-ids.txt")
 
-        monkeypatch.setattr("snapshot_fetch.require_env",
-                            lambda: ("http://x", "u", "t"))
-        monkeypatch.setattr("snapshot_fetch.fetch_all_issues",
-                            lambda *a, **kw: current)
-        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot",
-                            lambda data_dir=None: (
-                                str(tmp_path / "auto-fix-runs" /
-                                    "issue-snapshot-20260501-000000.yaml"),
-                                {"issues": prev_issues}))
+        monkeypatch.setattr("snapshot_fetch.require_env", lambda: ("http://x", "u", "t"))
+        monkeypatch.setattr("snapshot_fetch.fetch_all_issues", lambda *a, **kw: current)
+        monkeypatch.setattr(
+            "snapshot_fetch.find_previous_snapshot",
+            lambda data_dir=None: (
+                str(tmp_path / "auto-fix-runs" / "issue-snapshot-20260501-000000.yaml"),
+                {"issues": prev_issues},
+            ),
+        )
         monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", snap_dir)
 
         args = argparse.Namespace(
-            reprocess=reprocess, jql="project = TEST", random=None,
-            limit=limit, data_dir=None,
-            ids_file=ids_file, changed_file=changed_file)
+            reprocess=reprocess,
+            jql="project = TEST",
+            random=None,
+            limit=limit,
+            data_dir=None,
+            ids_file=ids_file,
+            changed_file=changed_file,
+        )
         cmd_fetch(args)
         return read_id_file(ids_file), read_id_file(changed_file)
 
-    def test_unchanged_processed_excluded_by_default(
-            self, tmp_path, monkeypatch):
+    def test_unchanged_processed_excluded_by_default(self, tmp_path, monkeypatch):
         """Unchanged-processed RFEs are NOT in the selection."""
         current = {
             "RHAIRFE-1": {"content_hash": "aaa"},  # unchanged
@@ -641,8 +681,7 @@ class TestUnchangedSkippedFromSelection:
         ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch)
         assert ids == ["RHAIRFE-3"]
 
-    def test_unchanged_unprocessed_still_included(
-            self, tmp_path, monkeypatch):
+    def test_unchanged_unprocessed_still_included(self, tmp_path, monkeypatch):
         """processed: false → treated as new → selected even when unchanged."""
         current = {
             "RHAIRFE-1": {"content_hash": "aaa"},
@@ -655,8 +694,7 @@ class TestUnchangedSkippedFromSelection:
         ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch)
         assert ids == ["RHAIRFE-2"]
 
-    def test_reprocess_includes_unchanged_processed(
-            self, tmp_path, monkeypatch):
+    def test_reprocess_includes_unchanged_processed(self, tmp_path, monkeypatch):
         """--reprocess restores the fill-with-unchanged behavior."""
         current = {
             "RHAIRFE-1": {"content_hash": "aaa"},
@@ -668,23 +706,21 @@ class TestUnchangedSkippedFromSelection:
             "RHAIRFE-2": {"hash": "bbb", "processed": True},
             "RHAIRFE-3": {"hash": "ccc", "processed": True},
         }
-        ids, changed = self._run_fetch(
-            tmp_path, current, prev_issues, monkeypatch, reprocess=True)
+        ids, changed = self._run_fetch(tmp_path, current, prev_issues, monkeypatch, reprocess=True)
         assert sorted(ids) == ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"]
         # --reprocess marks all as changed
         assert sorted(changed) == sorted(ids)
 
     def test_limit_caps_changed_plus_new_only(self, tmp_path, monkeypatch):
         """--limit applies to changed+new; unchanged are not used as filler."""
-        current = {f"RHAIRFE-{i}": {"content_hash": f"new-{i}"}
-                   for i in range(1, 6)}  # all 5 changed
+        current = {
+            f"RHAIRFE-{i}": {"content_hash": f"new-{i}"} for i in range(1, 6)
+        }  # all 5 changed
         current["RHAIRFE-6"] = {"content_hash": "uchanged-hash"}  # unchanged
-        prev_issues = {f"RHAIRFE-{i}": {"hash": f"old-{i}", "processed": True}
-                       for i in range(1, 6)}
+        prev_issues = {f"RHAIRFE-{i}": {"hash": f"old-{i}", "processed": True} for i in range(1, 6)}
         prev_issues["RHAIRFE-6"] = {"hash": "uchanged-hash", "processed": True}
 
-        ids, _ = self._run_fetch(
-            tmp_path, current, prev_issues, monkeypatch, limit=10)
+        ids, _ = self._run_fetch(tmp_path, current, prev_issues, monkeypatch, limit=10)
         # All 5 changed selected, RHAIRFE-6 (unchanged-processed) excluded
         assert sorted(ids) == [f"RHAIRFE-{i}" for i in range(1, 6)]
         assert "RHAIRFE-6" not in ids

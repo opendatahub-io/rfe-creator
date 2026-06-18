@@ -1,0 +1,25 @@
+clarifying_context: 'Customers: Atlas Telecom — top-10 OpenShift customer. They are building AI Agents using the Claude
+  Code Agent SDK and want to deploy them through LlamaStack on OpenShift AI.
+
+  Business justification: Atlas Telecom''s agentic AI workloads represent significant revenue opportunity. Keeping Atlas Telecom on OpenShift
+  and driving OpenShift AI adoption is a strategic priority. Centralizing agentic traffic through LlamaStack enables unified
+  audit trails, security filtering, and massive cost savings over third-party hosted models.
+
+  User problem: LlamaStack currently lacks the native API surface and state handling required to support the Claude Code Agent
+  SDK''s orchestration logic. Customers building agents with the Claude SDK cannot deploy them through LlamaStack — there''s
+  no SSE streaming support for real-time token delivery, no stateful session management for multi-turn tool-call conversations,
+  and no schema translation between Claude-specific tool definitions and LlamaStack''s internal tool-calling structures.
+
+  Scope: Focused compatibility layer with three main components — (1) Server-Sent Events streaming for real-time token delivery,
+  (2) stateful server-side session/thread management so the Claude SDK can maintain context across multiple tool calls without
+  passing full conversation history each request, and (3) a schema translation engine to map Claude-specific tool definitions
+  to LlamaStack''s internal structures.
+
+  Success criteria: Context persistence verified via successful 5+ turn conversations where LlamaStack retains state across
+  turns without SDK-side overhead; tool-call interoperability verified for Claude SDK''s computer, text_editor, and bash tool
+  definitions; streaming Time to First Token under 200ms; ability to resume a session via session_id after a network disconnect.'
+priority: Critical
+prompt: Atlas Telecom is building AI Agents using the Claude Code Agent SDK and they need LlamaStack to work with it. Right
+  now LlamaStack doesn't have the API surface or state handling to support the Claude SDK's orchestration logic. We need to
+  build a compatibility layer so customers can deploy agents built with the Claude Code Agent SDK through LlamaStack. This
+  is critical for keeping Atlas Telecom on OpenShift and driving OpenShift AI adoption.

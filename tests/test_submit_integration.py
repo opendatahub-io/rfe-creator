@@ -4,6 +4,7 @@
 Runs the full execution path against a real HTTP server that tracks
 issue state, changelogs, labels, and comments.
 """
+
 import json
 import os
 import subprocess
@@ -32,6 +33,7 @@ def _read_frontmatter(path):
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def art_dir(tmp_path):
@@ -120,22 +122,23 @@ Does not meet rubric.
 """
 
 
-def _review(rfe_id, auto_revised="false", needs_attention="false",
-            extra_fields=""):
-    return REVIEW_FM.format(rfe_id=rfe_id, auto_revised=auto_revised,
-                            needs_attention=needs_attention,
-                            extra_fields=extra_fields)
+def _review(rfe_id, auto_revised="false", needs_attention="false", extra_fields=""):
+    return REVIEW_FM.format(
+        rfe_id=rfe_id,
+        auto_revised=auto_revised,
+        needs_attention=needs_attention,
+        extra_fields=extra_fields,
+    )
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
+
 class TestCreateNewRFE:
     def test_posts_correct_fields(self, art_dir, jira):
         """New RFE → issue created in Jira with correct fields."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -150,10 +153,8 @@ class TestCreateNewRFE:
 
     def test_includes_labels(self, art_dir, jira):
         """New RFE → labels include auto-created and rubric-pass."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -166,10 +167,8 @@ class TestCreateNewRFE:
 
     def test_renames_files(self, art_dir, jira):
         """New RFE → RFE-001.md renamed to RHAIRFE-N.md."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -187,11 +186,15 @@ class TestUpdateExistingRFE:
     def _setup_existing(self, art_dir, jira, original, revised):
         jira.create("RHAIRFE-1234", "Test RFE", original)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", original)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\n{revised}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{revised}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
     def test_puts_description(self, art_dir, jira):
         """Existing RFE with changes → description updated in Jira."""
@@ -246,11 +249,12 @@ class TestLabelOnly:
         body = "Same content.\n"
         jira.create("RHAIRFE-1234", "Test RFE", body)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\n{body}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", _review("RHAIRFE-1234"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -271,15 +275,20 @@ class TestLabelOnly:
 class TestRemoveLabels:
     def test_sends_remove_operation(self, art_dir, jira):
         """Rejected RFE with stale rubric-pass → label removed."""
-        jira.create("RHAIRFE-1234", "Test RFE", "Content.",
-                    labels=["rfe-creator-autofix-rubric-pass"])
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n"
-               f"original_labels:\n- rfe-creator-autofix-rubric-pass\n"
-               f"---\n\n## Problem\n\nContent.\n")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        jira.create(
+            "RHAIRFE-1234", "Test RFE", "Content.", labels=["rfe-creator-autofix-rubric-pass"]
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n"
+            "original_labels:\n- rfe-creator-autofix-rubric-pass\n"
+            "---\n\n## Problem\n\nContent.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -287,16 +296,16 @@ class TestRemoveLabels:
 
         # Verify label was removed
         issue = jira.get("RHAIRFE-1234")
-        assert "rfe-creator-autofix-rubric-pass" not in \
-            issue["fields"]["labels"]
+        assert "rfe-creator-autofix-rubric-pass" not in issue["fields"]["labels"]
 
     def test_no_api_call_on_plain_reject(self, art_dir, jira):
         """Rejected RFE without rubric-pass → issue unchanged."""
         jira.create("RHAIRFE-1234", "Test RFE", "Content.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -308,15 +317,20 @@ class TestRemoveLabels:
 
     def test_does_not_update_frontmatter_status(self, art_dir, jira):
         """Remove labels must NOT set status to Submitted."""
-        jira.create("RHAIRFE-1234", "Test RFE", "Content.",
-                    labels=["rfe-creator-autofix-rubric-pass"])
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n"
-               f"original_labels:\n- rfe-creator-autofix-rubric-pass\n"
-               f"---\n\n## Problem\n\nContent.\n")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        jira.create(
+            "RHAIRFE-1234", "Test RFE", "Content.", labels=["rfe-creator-autofix-rubric-pass"]
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n"
+            "original_labels:\n- rfe-creator-autofix-rubric-pass\n"
+            "---\n\n## Problem\n\nContent.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -329,23 +343,29 @@ class TestRemoveLabels:
         # Seed a snapshot
         snap_dir = os.path.join(art_dir, "auto-fix-runs")
         os.makedirs(snap_dir, exist_ok=True)
-        snap = {"query_timestamp": "2026-04-01T00:00:00Z",
-                "timestamp": "2026-04-01T00:00:01Z",
-                "issues": {"RHAIRFE-1234": "original-hash"}}
-        snap_path = os.path.join(snap_dir,
-                                 "issue-snapshot-20260401-000000.yaml")
+        snap = {
+            "query_timestamp": "2026-04-01T00:00:00Z",
+            "timestamp": "2026-04-01T00:00:01Z",
+            "issues": {"RHAIRFE-1234": "original-hash"},
+        }
+        snap_path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
         with open(snap_path, "w") as f:
             yaml.dump(snap, f)
 
-        jira.create("RHAIRFE-1234", "Test RFE", "Content.",
-                    labels=["rfe-creator-autofix-rubric-pass"])
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n"
-               f"original_labels:\n- rfe-creator-autofix-rubric-pass\n"
-               f"---\n\n## Problem\n\nContent.\n")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        jira.create(
+            "RHAIRFE-1234", "Test RFE", "Content.", labels=["rfe-creator-autofix-rubric-pass"]
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n"
+            "original_labels:\n- rfe-creator-autofix-rubric-pass\n"
+            "---\n\n## Problem\n\nContent.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -387,17 +407,19 @@ class TestFeasibilityLabelExecutor:
         """Re-submit existing RHAIRFE, no body change, verdict flipped →
         Label-only branch must remove stale feasibility label."""
         body = "## Problem\n\nSame content.\n"
-        jira.create("RHAIRFE-1234", "Test RFE", body,
-                    labels=["rfe-creator-feasibility-fail"])
+        jira.create("RHAIRFE-1234", "Test RFE", body, labels=["rfe-creator-feasibility-fail"])
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n"
-               f"original_labels:\n- rfe-creator-feasibility-fail\n"
-               f"---\n{body}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234",
-                                           verdict="feasible"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n"
+            f"original_labels:\n- rfe-creator-feasibility-fail\n"
+            f"---\n{body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", verdict="feasible"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -410,17 +432,21 @@ class TestFeasibilityLabelExecutor:
         """Body change AND verdict flip → Update branch must remove stale."""
         original_body = "## Problem\n\nOriginal content.\n"
         new_body = "## Problem\n\nUpdated content.\n"
-        jira.create("RHAIRFE-1234", "Test RFE", original_body,
-                    labels=["rfe-creator-feasibility-fail"])
+        jira.create(
+            "RHAIRFE-1234", "Test RFE", original_body, labels=["rfe-creator-feasibility-fail"]
+        )
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", original_body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n"
-               f"original_labels:\n- rfe-creator-feasibility-fail\n"
-               f"---\n{new_body}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234",
-                                           verdict="feasible"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n"
+            f"original_labels:\n- rfe-creator-feasibility-fail\n"
+            f"---\n{new_body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            FEAS_REVIEW_TEMPLATE.format(rfe_id="RHAIRFE-1234", verdict="feasible"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -435,11 +461,15 @@ class TestConflictDetection:
         """Jira description differs from original → skip, no PUT."""
         jira.create("RHAIRFE-1234", "Test RFE", "Edited by someone.")
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nOur revision.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nOur revision.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -463,17 +493,18 @@ class TestConflictDetection:
 class TestCommentPosting:
     def test_removed_context_comment(self, art_dir, jira):
         """RFE with removed-context YAML → comment posted."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
-        rc_yaml = {"blocks": [{
-            "type": "genuine",
-            "heading": "Implementation Notes",
-            "content": "Use gRPC for the service mesh.",
-        }]}
-        _write(f"{art_dir}/rfe-tasks/RFE-001-removed-context.yaml",
-               yaml.dump(rc_yaml))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+        rc_yaml = {
+            "blocks": [
+                {
+                    "type": "genuine",
+                    "heading": "Implementation Notes",
+                    "content": "Use gRPC for the service mesh.",
+                }
+            ]
+        }
+        _write(f"{art_dir}/rfe-tasks/RFE-001-removed-context.yaml", yaml.dump(rc_yaml))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -482,17 +513,20 @@ class TestCommentPosting:
         # Find the created issue and check its comments
         issues = jira.search("project = RHAIRFE")
         key = issues[0]["key"]
-        comments = jira.request(
-            "GET", f"/rest/api/3/issue/{key}/comment")
+        comments = jira.request("GET", f"/rest/api/3/issue/{key}/comment")
         assert comments["total"] >= 1
 
     def test_needs_attention_comment(self, art_dir, jira):
         """RFE with needs_attention → comment posted."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001", needs_attention="true",
-                       extra_fields="needs_attention_reason: Unclear scope\n"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            _review(
+                "RFE-001",
+                needs_attention="true",
+                extra_fields="needs_attention_reason: Unclear scope\n",
+            ),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -500,8 +534,7 @@ class TestCommentPosting:
 
         issues = jira.search("project = RHAIRFE")
         key = issues[0]["key"]
-        comments = jira.request(
-            "GET", f"/rest/api/3/issue/{key}/comment")
+        comments = jira.request("GET", f"/rest/api/3/issue/{key}/comment")
         assert comments["total"] >= 1
 
 
@@ -515,8 +548,7 @@ class TestSnapshotUpdate:
             "timestamp": "2026-04-01T00:00:01Z",
             "issues": issues,
         }
-        path = os.path.join(snap_dir,
-                            "issue-snapshot-20260401-000000.yaml")
+        path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
         with open(path, "w") as f:
             yaml.dump(snap, f, default_flow_style=False, sort_keys=False)
         return path
@@ -524,10 +556,8 @@ class TestSnapshotUpdate:
     def test_snapshot_updated_on_create(self, art_dir, jira):
         """Create → snapshot updated with new issue hash."""
         snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-9000": "existing"})
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -547,15 +577,15 @@ class TestSnapshotUpdate:
 
     def test_snapshot_updated_on_update(self, art_dir, jira):
         """Update → snapshot updated with revised hash."""
-        snap_path = self._seed_snapshot(art_dir,
-                                        {"RHAIRFE-1234": "old-hash"})
+        snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-1234": "old-hash"})
         jira.create("RHAIRFE-1234", "Test RFE", "Original.")
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", _review("RHAIRFE-1234"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -571,12 +601,12 @@ class TestSnapshotUpdate:
 
     def test_no_update_when_all_skipped(self, art_dir, jira):
         """All RFEs rejected/skipped → snapshot unchanged."""
-        snap_path = self._seed_snapshot(art_dir,
-                                        {"RHAIRFE-1234": "existing"})
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-1234": "existing"})
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -594,11 +624,12 @@ class TestSnapshotUpdate:
         # Set up a passing RFE that would normally be submitted
         jira.create("RHAIRFE-1234", "Test RFE", "Original.")
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", _review("RHAIRFE-1234"))
 
         env = {
             **os.environ,
@@ -607,9 +638,10 @@ class TestSnapshotUpdate:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
-             "--dry-run"],
-            capture_output=True, text=True, env=env,
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir, "--dry-run"],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
@@ -622,10 +654,11 @@ class TestSnapshotUpdate:
         """Dry-run with all-skipped entries must not mark processed."""
         snap_path = self._seed_snapshot(art_dir, {"RHAIRFE-1234": "existing"})
 
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               TASK_FM.format(rfe_id="RHAIRFE-1234"))
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md", TASK_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         env = {
             **os.environ,
@@ -634,9 +667,10 @@ class TestSnapshotUpdate:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
-             "--dry-run"],
-            capture_output=True, text=True, env=env,
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir, "--dry-run"],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
@@ -649,8 +683,7 @@ class TestSnapshotUpdate:
 class TestSplitConflictDetection:
     """Integration test: split_submit.py detects parent conflict."""
 
-    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..",
-                                "scripts", "split_submit.py")
+    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "split_submit.py")
 
     PARENT_TASK = (
         "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
@@ -666,8 +699,7 @@ class TestSplitConflictDetection:
         """Parent modified in Jira since fetch → exit code 3."""
         # Jira has different content than our original
         jira.create("RHAIRFE-1000", "Parent RFE", "Edited by someone.")
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
-               "Original content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Original content.")
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
         _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK)
 
@@ -678,9 +710,10 @@ class TestSplitConflictDetection:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000", "--artifacts-dir", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 3
         assert "modified in Jira since fetch" in r.stderr
@@ -700,9 +733,10 @@ class TestSplitConflictDetection:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000", "--artifacts-dir", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode != 3
 
@@ -710,20 +744,17 @@ class TestSplitConflictDetection:
         """submit.py handles split conflict (exit 3) gracefully."""
         # Parent in Jira has different content than our original
         jira.create("RHAIRFE-1000", "Parent RFE", "Edited by someone.")
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
-               "Original content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Original content.")
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
         _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK)
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md",
-               _review("RHAIRFE-1000"))
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", _review("RHAIRFE-1000"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0  # continues after refusal
         assert "Jira conflict" in r.stdout
 
         # Check review frontmatter was updated
-        fm = _read_frontmatter(
-            f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
         assert fm["needs_attention"] is True
         assert "modified in Jira" in fm["needs_attention_reason"]
         assert fm["error"] == "split_refused: jira conflict"
@@ -736,8 +767,7 @@ class TestSplitConflictDetection:
 class TestSplitFieldInheritance:
     """Integration test: children inherit parent's components and labels."""
 
-    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..",
-                                "scripts", "split_submit.py")
+    SPLIT_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "split_submit.py")
 
     PARENT_TASK = (
         "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
@@ -751,16 +781,17 @@ class TestSplitFieldInheritance:
 
     def test_children_inherit_components_and_labels(self, art_dir, jira):
         """Split children get parent's components and non-automation labels."""
-        jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.",
-                    labels=["3.5-candidate", "rfe-creator-auto-revised"],
-                    components=["AI Safety"])
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
-               "Parent content.")
+        jira.create(
+            "RHAIRFE-1000",
+            "Parent RFE",
+            "Parent content.",
+            labels=["3.5-candidate", "rfe-creator-auto-revised"],
+            components=["AI Safety"],
+        )
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Parent content.")
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               self.CHILD_TASK_TPL.format(num=1))
-        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
-               self.CHILD_TASK_TPL.format(num=2))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", self.CHILD_TASK_TPL.format(num=1))
+        _write(f"{art_dir}/rfe-tasks/RFE-002.md", self.CHILD_TASK_TPL.format(num=2))
 
         env = {
             **os.environ,
@@ -769,24 +800,22 @@ class TestSplitFieldInheritance:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-1000", "--artifacts-dir", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         # Find the created children
-        issues = jira.search("project = RHAIRFE",
-                             fields="key,labels,components")
-        children = [i for i in issues
-                    if i["key"] != "RHAIRFE-1000"]
+        issues = jira.search("project = RHAIRFE", fields="key,labels,components")
+        children = [i for i in issues if i["key"] != "RHAIRFE-1000"]
         assert len(children) == 2
 
         for child in children:
             child_detail = jira.get(child["key"])
             labels = child_detail["fields"]["labels"]
-            components = [c["name"] for c in
-                          child_detail["fields"].get("components", [])]
+            components = [c["name"] for c in child_detail["fields"].get("components", [])]
 
             # Should inherit non-automation label
             assert "3.5-candidate" in labels
@@ -798,33 +827,51 @@ class TestSplitFieldInheritance:
             # Should inherit component
             assert "AI Safety" in components
 
-
     def test_children_inherit_jira_parent(self, art_dir, jira):
         """Split children inherit the Jira parent link (e.g. RHAISTRAT)."""
         # Create RHAISTRAT parent, then RHAIRFE with epic_link to set parent
-        jira.request("POST", "/api/admin/import", {"issues": [
-            {"key": "RHAISTRAT-100", "summary": "Strategy Feature",
-             "project": "RHAISTRAT", "issue_type": "Feature",
-             "description": "Strategy content."},
-            {"key": "RHAIRFE-2000", "summary": "Parent RFE",
-             "project": "RHAIRFE", "issue_type": "Feature Request",
-             "description": "Parent content.",
-             "epic_link": "RHAISTRAT-100"},
-        ]})
+        jira.request(
+            "POST",
+            "/api/admin/import",
+            {
+                "issues": [
+                    {
+                        "key": "RHAISTRAT-100",
+                        "summary": "Strategy Feature",
+                        "project": "RHAISTRAT",
+                        "issue_type": "Feature",
+                        "description": "Strategy content.",
+                    },
+                    {
+                        "key": "RHAIRFE-2000",
+                        "summary": "Parent RFE",
+                        "project": "RHAIRFE",
+                        "issue_type": "Feature Request",
+                        "description": "Parent content.",
+                        "epic_link": "RHAISTRAT-100",
+                    },
+                ]
+            },
+        )
 
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-2000.md",
-               "Parent content.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-2000.md",
-               "---\nrfe_id: RHAIRFE-2000\ntitle: Parent RFE\n"
-               "priority: Major\nstatus: Archived\n---\n\nParent content.\n")
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
-               "priority: Major\nstatus: Ready\n"
-               "parent_key: RHAIRFE-2000\n---\n\nChild 1 content.\n")
-        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
-               "---\nrfe_id: RFE-002\ntitle: Child RFE 2\n"
-               "priority: Major\nstatus: Ready\n"
-               "parent_key: RHAIRFE-2000\n---\n\nChild 2 content.\n")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-2000.md", "Parent content.")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-2000.md",
+            "---\nrfe_id: RHAIRFE-2000\ntitle: Parent RFE\n"
+            "priority: Major\nstatus: Archived\n---\n\nParent content.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
+            "priority: Major\nstatus: Ready\n"
+            "parent_key: RHAIRFE-2000\n---\n\nChild 1 content.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-002.md",
+            "---\nrfe_id: RFE-002\ntitle: Child RFE 2\n"
+            "priority: Major\nstatus: Ready\n"
+            "parent_key: RHAIRFE-2000\n---\n\nChild 2 content.\n",
+        )
 
         env = {
             **os.environ,
@@ -833,37 +880,39 @@ class TestSplitFieldInheritance:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-2000",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-2000", "--artifacts-dir", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
         # Find the created children
-        issues = jira.search("project = RHAIRFE",
-                             fields="key,parent")
-        children = [i for i in issues
-                    if i["key"] not in ("RHAIRFE-2000",)]
+        issues = jira.search("project = RHAIRFE", fields="key,parent")
+        children = [i for i in issues if i["key"] not in ("RHAIRFE-2000",)]
         assert len(children) == 2
 
         for child in children:
             child_detail = jira.get(child["key"])
             parent = child_detail["fields"].get("parent")
-            assert parent is not None, (
-                f"{child['key']} should inherit parent RHAISTRAT-100")
+            assert parent is not None, f"{child['key']} should inherit parent RHAISTRAT-100"
             assert parent["key"] == "RHAISTRAT-100"
 
     def test_no_parent_when_parent_has_none(self, art_dir, jira):
         """Children don't get a parent field if the split parent has none."""
         jira.create("RHAIRFE-3000", "Parent No Strat", "Content.")
         _write(f"{art_dir}/rfe-originals/RHAIRFE-3000.md", "Content.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-3000.md",
-               "---\nrfe_id: RHAIRFE-3000\ntitle: Parent No Strat\n"
-               "priority: Major\nstatus: Archived\n---\n\nContent.\n")
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
-               "priority: Major\nstatus: Ready\n"
-               "parent_key: RHAIRFE-3000\n---\n\nChild content.\n")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-3000.md",
+            "---\nrfe_id: RHAIRFE-3000\ntitle: Parent No Strat\n"
+            "priority: Major\nstatus: Archived\n---\n\nContent.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-001.md",
+            "---\nrfe_id: RFE-001\ntitle: Child RFE 1\n"
+            "priority: Major\nstatus: Ready\n"
+            "parent_key: RHAIRFE-3000\n---\n\nChild content.\n",
+        )
 
         env = {
             **os.environ,
@@ -872,9 +921,10 @@ class TestSplitFieldInheritance:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-3000",
-             "--artifacts-dir", art_dir],
-            capture_output=True, text=True, env=env,
+            [sys.executable, self.SPLIT_SCRIPT, "RHAIRFE-3000", "--artifacts-dir", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
@@ -892,10 +942,8 @@ class TestReplayIdempotency:
 
     def test_replay_new_rfe_no_duplicate(self, art_dir, jira):
         """Create RFE, replay → no duplicate issue in Jira."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         # First run: creates the issue + renames file
         r1 = _run_submit(art_dir, jira.url)
@@ -924,11 +972,15 @@ class TestReplayIdempotency:
         """Update existing RFE, replay → second run skips it."""
         jira.create("RHAIRFE-1234", "Test RFE", "Original.")
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised content.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised content.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
         # First run: updates the issue
         r1 = _run_submit(art_dir, jira.url)
@@ -946,15 +998,13 @@ class TestReplayIdempotency:
 
     def test_replay_after_partial_failure(self, art_dir, jira):
         """First RFE succeeds, second fails → replay only submits second."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
-        _write(f"{art_dir}/rfe-tasks/RFE-002.md",
-               TASK_FM.format(rfe_id="RFE-002").replace(
-                   "title: Test RFE", "title: Second RFE"))
-        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md",
-               _review("RFE-002"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-002.md",
+            TASK_FM.format(rfe_id="RFE-002").replace("title: Test RFE", "title: Second RFE"),
+        )
+        _write(f"{art_dir}/rfe-reviews/RFE-002-review.md", _review("RFE-002"))
 
         # First run: both succeed
         r1 = _run_submit(art_dir, jira.url)
@@ -981,11 +1031,12 @@ class TestReplayIdempotency:
         body = "Same content.\n"
         jira.create("RHAIRFE-1234", "Test RFE", body)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\n{body}")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md", _review("RHAIRFE-1234"))
 
         # First run: label-only
         r1 = _run_submit(art_dir, jira.url)
@@ -1023,8 +1074,7 @@ class TestSplitChildSnapshot:
             "timestamp": "2026-04-01T00:00:01Z",
             "issues": issues,
         }
-        path = os.path.join(snap_dir,
-                            "issue-snapshot-20260401-000000.yaml")
+        path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
         with open(path, "w") as f:
             yaml.dump(snap, f, default_flow_style=False, sort_keys=False)
         return path
@@ -1032,12 +1082,10 @@ class TestSplitChildSnapshot:
     def _setup_split(self, art_dir, jira, num_children=2):
         """Set up a split parent with children and a seeded snapshot."""
         jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.")
-        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md",
-               "Parent content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Parent content.")
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
         for i in range(1, num_children + 1):
-            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md",
-                   self.CHILD_TASK_TPL.format(num=i))
+            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", self.CHILD_TASK_TPL.format(num=i))
         return self._seed_snapshot(art_dir, {"RHAIRFE-1000": "parent-hash"})
 
     def test_split_child_hashes_in_snapshot(self, art_dir, jira):
@@ -1045,10 +1093,8 @@ class TestSplitChildSnapshot:
         snap_path = self._setup_split(art_dir, jira)
 
         # Add a regular RFE so Phase 2 also runs
-        _write(f"{art_dir}/rfe-tasks/RFE-099.md",
-               TASK_FM.format(rfe_id="RFE-099"))
-        _write(f"{art_dir}/rfe-reviews/RFE-099-review.md",
-               _review("RFE-099"))
+        _write(f"{art_dir}/rfe-tasks/RFE-099.md", TASK_FM.format(rfe_id="RFE-099"))
+        _write(f"{art_dir}/rfe-reviews/RFE-099-review.md", _review("RFE-099"))
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
@@ -1059,16 +1105,15 @@ class TestSplitChildSnapshot:
 
         # Find the child keys (RHAIRFE-NNNN created by split_submit.py)
         all_issues = jira.search("project = RHAIRFE")
-        child_keys = sorted([i["key"] for i in all_issues
-                             if i["key"] != "RHAIRFE-1000"])
+        child_keys = sorted([i["key"] for i in all_issues if i["key"] != "RHAIRFE-1000"])
         # At least the 2 split children + 1 regular RFE
         assert len(child_keys) >= 3
 
         # Each split child must have a valid hash in the snapshot
         split_child_entries = {
-            k: v for k, v in data["issues"].items()
-            if k != "RHAIRFE-1000" and isinstance(v, dict)
-            and len(v.get("hash", "")) == 64
+            k: v
+            for k, v in data["issues"].items()
+            if k != "RHAIRFE-1000" and isinstance(v, dict) and len(v.get("hash", "")) == 64
         }
         assert len(split_child_entries) >= 2
         for key, entry in split_child_entries.items():
@@ -1088,8 +1133,7 @@ class TestSplitChildSnapshot:
 
         # Split children must have valid hashes
         child_entries = {
-            k: v for k, v in data["issues"].items()
-            if k != "RHAIRFE-1000" and isinstance(v, dict)
+            k: v for k, v in data["issues"].items() if k != "RHAIRFE-1000" and isinstance(v, dict)
         }
         assert len(child_entries) >= 2
         for key, entry in child_entries.items():
@@ -1107,9 +1151,10 @@ class TestSplitChildSnapshot:
             "JIRA_TOKEN": "admin",
         }
         r = subprocess.run(
-            [sys.executable, SCRIPT, "--artifacts-dir", art_dir,
-             "--dry-run"],
-            capture_output=True, text=True, env=env,
+            [sys.executable, SCRIPT, "--artifacts-dir", art_dir, "--dry-run"],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         assert r.returncode == 0, r.stderr
 
@@ -1125,11 +1170,15 @@ class TestApprovedTransition:
         body = "Original."
         jira.create("RHAIRFE-1234", "Test RFE", body)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
         r = _run_submit(art_dir, jira.url, ["--auto-approve"])
         assert r.returncode == 0, r.stderr
@@ -1138,18 +1187,14 @@ class TestApprovedTransition:
         issue = jira.get("RHAIRFE-1234")
         assert issue["fields"]["status"]["name"] == "Approved"
 
-        comments = jira.request(
-            "GET", "/rest/api/3/issue/RHAIRFE-1234/comment")
+        comments = jira.request("GET", "/rest/api/3/issue/RHAIRFE-1234/comment")
         bodies = [c["body"] for c in comments["comments"]]
-        assert any("automatically transitioned to Approved" in json.dumps(b)
-                    for b in bodies)
+        assert any("automatically transitioned to Approved" in json.dumps(b) for b in bodies)
 
     def test_new_rfe_transitions_to_approved(self, art_dir, jira):
         """--auto-approve + new RFE with passing review → Approved."""
-        _write(f"{art_dir}/rfe-tasks/RFE-001.md",
-               TASK_FM.format(rfe_id="RFE-001"))
-        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md",
-               _review("RFE-001"))
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
 
         r = _run_submit(art_dir, jira.url, ["--auto-approve"])
         assert r.returncode == 0, r.stderr
@@ -1165,11 +1210,15 @@ class TestApprovedTransition:
         body = "Original."
         jira.create("RHAIRFE-1234", "Test RFE", body)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+        )
 
         r = _run_submit(art_dir, jira.url, ["--auto-approve"])
         assert r.returncode == 0, r.stderr
@@ -1183,20 +1232,24 @@ class TestApprovedTransition:
         body = "Original."
         jira.create("RHAIRFE-1234", "Test RFE", body)
         # Pre-transition to Approved
-        transitions = jira.request(
-            "GET", "/rest/api/3/issue/RHAIRFE-1234/transitions")
+        transitions = jira.request("GET", "/rest/api/3/issue/RHAIRFE-1234/transitions")
         approve_id = next(
-            t["id"] for t in transitions["transitions"]
-            if t["to"]["name"] == "Approved")
-        jira.request("POST", "/rest/api/3/issue/RHAIRFE-1234/transitions",
-                     {"transition": {"id": approve_id}})
+            t["id"] for t in transitions["transitions"] if t["to"]["name"] == "Approved"
+        )
+        jira.request(
+            "POST", "/rest/api/3/issue/RHAIRFE-1234/transitions", {"transition": {"id": approve_id}}
+        )
 
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
         r = _run_submit(art_dir, jira.url, ["--auto-approve"])
         assert r.returncode == 0, r.stderr
@@ -1208,11 +1261,15 @@ class TestApprovedTransition:
         body = "Original."
         jira.create("RHAIRFE-1234", "Test RFE", body)
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
-               f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
-               f"priority: Major\nstatus: Ready\n---\nRevised.")
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
-               _review("RHAIRFE-1234", auto_revised="true"))
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr

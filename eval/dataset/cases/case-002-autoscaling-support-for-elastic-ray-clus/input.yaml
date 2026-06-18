@@ -1,0 +1,27 @@
+clarifying_context: 'Customers: Quantum Analytics (large GPU training jobs with variable demand), BioML Corp (batch inference
+  workloads with spiky traffic patterns), CloudScale Inc. (multi-tenant Ray platform needing cost controls), internal platform
+  engineering teams managing shared Ray infrastructure
+
+  Business justification: 80% of Ray workloads have variable resource needs and are currently running on static clusters.
+  Expected impact is 60% reduction in infrastructure costs via scale-to-zero, 90% reduction in job queue time during peak
+  loads, and zero manual intervention for cluster sizing. Multiple enterprise prospects have cited lack of autoscaling as
+  a blocker for adoption.
+
+  User problem: Users can only configure static cluster sizes in the SDK, requiring manual intervention to resize clusters.
+  This leads to resource waste from over-provisioning during low-demand periods, performance bottlenecks and long job queue
+  times from under-provisioning during peak loads, and no ability to scale to zero when clusters are idle — all driving up
+  costs and operational burden.
+
+  Scope: Single focused need — Ray Autoscaler integration into the SDK. Includes adding min/max worker parameters, an AutoscalingConfig
+  model supporting resource-based scaling (CPU/memory/GPU utilization), workload-based scaling (Ray task queue depth), and
+  custom metrics via Prometheus. Also includes a dynamic adjustment API for runtime changes and scale-to-zero capability.
+
+  Success criteria: Users can configure min_workers and max_workers parameters (including min_workers=0 for scale-to-zero).
+  An autoscaling_config parameter accepts an AutoscalingConfig model with resource-based, workload-based, and custom metrics
+  policies. Users can call autoscaling_status() to monitor current scaling state and update_autoscaling() to dynamically adjust
+  configuration at runtime. Clusters automatically scale up and down based on configured policies without manual intervention.'
+priority: Undefined
+prompt: We need to add autoscaling support for our Ray clusters managed through the SDK. Right now customers can only spin
+  up static-sized clusters, which means they either over-provision and waste money or under-provision and hit performance
+  bottlenecks. We should integrate with Ray's Autoscaler so users can define min/max workers, scale based on CPU/GPU/memory
+  utilization or task queue depth, and ideally support scale-to-zero for cost optimization.
