@@ -35,7 +35,7 @@ If `artifacts/rfe-rubric.md` exists (either already present or just exported), r
 
 If the rubric is still not available after the bootstrap attempt, proceed with the built-in question flow below.
 
-**JTBD registry setup:** If `bootstrap-jtbd-registry.sh` fails, note that JTBD enrichment is unavailable and proceed without it. This is not a blocking failure — the RFE will be created normally.
+**JTBD registry setup:** If `bootstrap-jtbd-registry.sh` fails, skip JTBD enrichment (Step 1.5) and proceed with the built-in question flow. JTBD unavailability is non-blocking — create the RFE normally without JTBD evidence.
 
 ## Step 1.5: JTBD Enrichment
 
