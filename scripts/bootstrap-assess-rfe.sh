@@ -8,7 +8,7 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
 fi
 
 CONTEXT_DIR=".context/assess-rfe"
-RUBRIC_FILE="$CONTEXT_DIR/scripts/agent_prompt.md"
+RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
 
 if [ ! -d "$CONTEXT_DIR" ]; then
   git clone https://github.com/opendatahub-io/assess-rfe "$CONTEXT_DIR" 2>&1
