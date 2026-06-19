@@ -55,9 +55,11 @@ When the user doesn't specify, use these defaults:
 Count entries and pre-allocate all IDs upfront:
 
 ```bash
-N=$(python3 -c "import yaml; print(len(yaml.safe_load(open('batch.yaml'))))")
+N=$(python3 -c "import yaml; d=yaml.safe_load(open('INPUT_FILE')); print(len(d) if isinstance(d, list) else 1)")
 python3 scripts/next_rfe_id.py $N   # prints RFE-001 through RFE-<N>
 ```
+
+If the input is a single dict (not a list), treat it as one entry — extract its `prompt`, `priority`, and optional `clarifying_context` fields.
 
 For each entry, launch an Agent to invoke `/rfe.create`. Pass the pre-assigned ID so each Agent knows which ID to use:
 
