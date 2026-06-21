@@ -8,7 +8,9 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
 fi
 
 CONTEXT_DIR=".context/assess-rfe"
-RUBRIC_FILE="$CONTEXT_DIR/scripts/agent_prompt.md"
+# Scripts now live under each skill dir (assess-rfe moved them out of the repo
+# root in assess-rfe#5 "move-scripts-to-skill-dirs").
+RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
 
 if [ ! -d "$CONTEXT_DIR" ]; then
   git clone https://github.com/n1hility/assess-rfe "$CONTEXT_DIR" 2>&1
@@ -22,22 +24,15 @@ if [ ! -f "$RUBRIC_FILE" ]; then
   exit 1
 fi
 
-# Copy all skills from the plugin
+# Copy all skills from the plugin, including their bundled scripts/ so the
+# copied SKILL.md's ${CLAUDE_SKILL_DIR}/scripts/... references resolve at
+# runtime (scripts are co-located with each SKILL.md as of assess-rfe#5).
 for skill_dir in "$CONTEXT_DIR"/skills/*/; do
   skill_name=$(basename "$skill_dir")
   target=".claude/skills/$skill_name"
   mkdir -p "$target"
-  cp "$skill_dir/SKILL.md" "$target/SKILL.md"
+  cp -r "$skill_dir". "$target/"
 done
-
-# Patch PLUGIN_ROOT in copied skill — the upstream SKILL.md resolves it
-# relative to its own location, which breaks when copied to .claude/skills/.
-# Replace the resolution paragraph with a hardcoded path.
-ASSESS_SKILL=".claude/skills/assess-rfe/SKILL.md"
-if [ -f "$ASSESS_SKILL" ]; then
-  ABS_CONTEXT_DIR="$(cd "$CONTEXT_DIR" && pwd)"
-  sed -i "s|When this skill is invoked, resolve the absolute path of the plugin root directory. This SKILL.md is at \`<plugin_root>/skills/assess-rfe/SKILL.md\` — the plugin root is two levels up. Determine this path once at the start and use it for all script and file references. Store it as \`{PLUGIN_ROOT}\` for substitution into commands and agent prompts.|The plugin root is \`$ABS_CONTEXT_DIR\`. Use this as \`{PLUGIN_ROOT}\` for all script and file references.|" "$ASSESS_SKILL"
-fi
 
 # Install agent definitions
 if [ -d "$CONTEXT_DIR/agents" ]; then
@@ -46,4 +41,4 @@ if [ -d "$CONTEXT_DIR/agents" ]; then
 fi
 
 # Export rubric to artifacts
-python3 "$CONTEXT_DIR/scripts/export_rubric.py" 2>/dev/null || true
+python3 "$CONTEXT_DIR/skills/export-rubric/scripts/export_rubric.py" 2>/dev/null || true
