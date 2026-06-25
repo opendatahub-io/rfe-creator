@@ -131,6 +131,7 @@ def create_issue(
     labels=None,
     components=None,
     parent_key=None,
+    reporter_account_id=None,
 ):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
@@ -148,7 +149,21 @@ def create_issue(
         body["fields"]["components"] = [{"name": c} for c in components]
     if parent_key:
         body["fields"]["parent"] = {"key": parent_key}
-    result = api_call_with_retry(server, "/issue", user, token, body=body)
+    if reporter_account_id and reporter_account_id.strip():
+        body["fields"]["reporter"] = {"accountId": reporter_account_id.strip()}
+    try:
+        result = api_call_with_retry(server, "/issue", user, token, body=body)
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 403) and "reporter" in body["fields"]:
+            print(
+                f"  WARNING: Could not set reporter ({e.code}) — "
+                f"retrying without reporter field.",
+                file=sys.stderr,
+            )
+            del body["fields"]["reporter"]
+            result = api_call_with_retry(server, "/issue", user, token, body=body)
+        else:
+            raise
     return result["key"]
 
 
