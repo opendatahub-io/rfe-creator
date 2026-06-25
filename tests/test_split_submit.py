@@ -276,6 +276,9 @@ class TestCreateIssueReporter:
         )
         assert key == "RHAIRFE-999"
         assert mock_api.call_count == 2
+        # Second call should not have reporter in fields
+        retry_body = mock_api.call_args_list[1][1].get("body") or mock_api.call_args_list[1][0][4]
+        assert "reporter" not in retry_body["fields"]
 
     @patch("jira_utils.api_call_with_retry")
     def test_non_reporter_error_not_caught(self, mock_api):
