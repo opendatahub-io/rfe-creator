@@ -4,9 +4,9 @@
 
 The feasibility step in `rfe-creator` has a 0% `feasibility-fail` rate in production. The opus call is the most expensive stage of the pipeline, 50,000–80,000 token context read fires on every single RFE, and almost always returns "feasible".
 
-RFEs describe WHAT and WHY — they purposefully leave the HOW to engineering. The infeasibility bar is "the platform's architecture conflicts with this need." At that level of abstraction, before anyone has proposed an implementation, nothing qualifies. The check is structurally set up to pass.
+RFEs describe WHAT and WHY — they purposefully leave the HOW to engineering. Since nobody has proposed a solution, the abstraction makes the bar at this level too high. The check is set up to pass.
 
-Feasibility is really important at the strategy stage, where there's a HOW to judge. `strat-creator`'s `strategy-feasibility-review` asks whether a specific implementation approach works, whether the effort estimate is credible, whether component choices hold up, and whether cross-team dependencies are accounted for. Those are questions an engineering plan can really fail on. That check is the same as this one, already exists, runs on opus, and reads the same architecture context.
+Feasibility is really important at the strategy stage, where there's a HOW to judge. `strat-creator`'s `strategy-feasibility-review` asks whether a specific implementation works, whether the effort estimate is credible, whether component choices hold up, and whether cross-team dependencies are accounted for. Those are questions an engineering plan can really fail on. That check is the same as the RFE one. It already exists, runs on opus, and reads the same architecture context.
 
 ## Cost
 
