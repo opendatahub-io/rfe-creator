@@ -55,8 +55,7 @@ When the user doesn't specify, use these defaults:
 Count entries and pre-allocate all IDs upfront:
 
 ```bash
-N=$(python3 -c "import yaml; print(len(yaml.safe_load(open('batch.yaml'))))")
-python3 scripts/next_rfe_id.py $N   # prints RFE-001 through RFE-<N>
+python3 scripts/next_rfe_id.py --from-batch <input_file>   # input_file = the --input path; prints one RFE ID per entry
 ```
 
 For each entry, launch an Agent to invoke `/rfe.create`. Pass the pre-assigned ID so each Agent knows which ID to use:
@@ -104,6 +103,8 @@ Build the auto-fix command using flags from the config file:
 Pass `--headless` and `--announce-complete` through if set in the config. **Always** pass `--batch-size <batch_size>` using the value from `tmp/speedrun-config.yaml` — never omit it, never let auto-fix's own default take over. The speedrun default (5) was already pinned in Step 0; relying on it here is what makes runs reproducible.
 
 Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-assessment, splitting oversized RFEs, retry queue, and report generation. Wait for it to complete. **Do NOT stop, summarize, or skip remaining batches early** — the pipeline must process every ID through all phases. Never emit a text-only response (no tool call) during pipeline execution — this terminates the CI process.
+
+**Bash discipline:** Issue exactly one operation per Bash call. Never use command substitution `$(...)` or chain commands with `;`, `&&`, or `||` — they trigger an approval prompt and are denied in headless mode. Instead, pass a value between commands by writing it to a `tmp/` file with `scripts/state.py` and reading it back in a separate call.
 
 After auto-fix returns, verify all RFEs were processed:
 

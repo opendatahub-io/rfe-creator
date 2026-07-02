@@ -12,6 +12,40 @@ import sys
 
 import yaml
 
+
+def read_ids_file(path):
+    """Read RFE IDs from a file (one per line), deduped, order-preserved.
+
+    Mirrors the format written by `state.py write-ids`. Lets scripts accept
+    an --ids-file argument instead of forcing skills to use $(...) command
+    substitution, which triggers headless permission denials.
+    """
+    if not os.path.isfile(path):
+        print(
+            f"IDs file not found: {path} — was it persisted in a prior step?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        with open(path) as f:
+            ids = [line.strip() for line in f if line.strip()]
+    except OSError as e:
+        print(f"Could not read IDs file {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+    return list(dict.fromkeys(ids))
+
+
+def resolve_ids(positional, ids_file):
+    """Combine positional IDs with --ids-file IDs, deduped, order-preserved.
+
+    Positional IDs come first so explicit args take precedence in ordering.
+    """
+    combined = list(positional or [])
+    if ids_file:
+        combined.extend(read_ids_file(ids_file))
+    return list(dict.fromkeys(combined))
+
+
 # ─── Schema Definitions ────────────────────────────────────────────────────────
 
 # Each schema is a dict of field_name -> field_spec.

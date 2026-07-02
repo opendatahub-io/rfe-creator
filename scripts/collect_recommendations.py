@@ -8,7 +8,7 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import read_frontmatter
+from artifact_utils import read_frontmatter, resolve_ids
 
 ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
@@ -74,19 +74,26 @@ def collect_errors(ids):
 
 def main():
     parser = argparse.ArgumentParser(description="Group RFE IDs by review recommendation.")
-    parser.add_argument("ids", nargs="+", help="RFE IDs to check")
+    parser.add_argument("ids", nargs="*", help="RFE IDs to check")
+    parser.add_argument(
+        "--ids-file", help="Read RFE IDs from a file (one per line) instead of positional args"
+    )
     parser.add_argument(
         "--reassess", action="store_true", help="Collect re-assess candidates instead"
     )
     parser.add_argument("--errors", action="store_true", help="Collect IDs with error field set")
     args = parser.parse_args()
 
+    ids = resolve_ids(args.ids, args.ids_file)
+    if not ids:
+        parser.error("no RFE IDs provided (pass positionally or via --ids-file)")
+
     if args.errors:
-        collect_errors(args.ids)
+        collect_errors(ids)
     elif args.reassess:
-        collect_reassess(args.ids)
+        collect_reassess(ids)
     else:
-        collect_default(args.ids)
+        collect_default(ids)
 
 
 if __name__ == "__main__":

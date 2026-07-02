@@ -79,6 +79,8 @@ python3 scripts/pipeline_state.py set-phase BATCH_START
 
 **CRITICAL: You MUST run the loop to completion.** Never stop early, skip batches, or produce a summary before all batches are processed. Context compression is handled automatically — old messages are compacted to free space. Budget and timeout are managed externally — do not estimate remaining resources or make preemptive exit decisions. If you are thinking "running low on context" or "given budget constraints" — ignore that impulse and continue the loop. The pipeline MUST reach phase `DONE` naturally.
 
+**Bash discipline:** Issue exactly one operation per Bash call. Never use command substitution `$(...)` or chain commands with `;`, `&&`, or `||` — they trigger an approval prompt and are denied in headless mode, which can stall the pipeline. Instead, pass a value between commands by writing it to a `tmp/` file with `scripts/state.py` and reading it back in a separate call.
+
 Repeat until phase is `DONE`:
 
 ### Step 1: Get next action
@@ -133,7 +135,7 @@ agents:
 After phase reaches `DONE`:
 
 ```bash
-python3 scripts/batch_summary.py --counts-only $(python3 scripts/state.py read-ids tmp/pipeline-all-ids.txt)
+python3 scripts/batch_summary.py --counts-only --ids-file tmp/pipeline-all-ids.txt
 ```
 
 $ARGUMENTS

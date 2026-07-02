@@ -164,7 +164,7 @@ Sleep for the `NEXT_POLL` seconds reported by the script before polling again. W
 **Post-processing: fix auto_revised flag.** The revise agent may run out of budget before setting `auto_revised=true`. After all agents complete, run the batch check which compares originals to task files and sets the flag directly in review frontmatter:
 
 ```bash
-python3 scripts/check_revised.py --batch $(python3 scripts/state.py read-ids tmp/rfe-poll-revise.txt)
+python3 scripts/check_revised.py --batch --ids-file tmp/rfe-poll-revise.txt
 ```
 
 ## Review Step 4: Re-assess if Revised (max 2 cycles)
@@ -178,7 +178,7 @@ python3 scripts/state.py read-ids tmp/review-all-ids.txt
 After all revise agents complete, check which IDs need re-assessment:
 
 ```bash
-python3 scripts/collect_recommendations.py --reassess $(python3 scripts/state.py read-ids tmp/review-all-ids.txt)
+python3 scripts/collect_recommendations.py --reassess --ids-file tmp/review-all-ids.txt
 ```
 
 Parse output for `REASSESS=` line. For each ID needing re-assessment (auto_revised=true, pass=false), initialize the cycle counter on disk (set-default is safe if compression causes re-entry — it won't reset an existing counter):
@@ -232,7 +232,7 @@ Launch all assess agents in parallel.
 Re-read reassess IDs from disk, write poll file, and poll using `NEXT_POLL` interval:
 
 ```bash
-python3 scripts/state.py write-ids tmp/rfe-poll-reassess-assess.txt $(python3 scripts/state.py read-ids tmp/review-reassess-ids.txt)
+python3 scripts/state.py copy-ids tmp/review-reassess-ids.txt tmp/rfe-poll-reassess-assess.txt
 python3 scripts/check_review_progress.py --phase assess --id-file tmp/rfe-poll-reassess-assess.txt
 ```
 
@@ -255,7 +255,7 @@ Launch all review agents in parallel.
 Re-read reassess IDs from disk, write poll file, and poll using `NEXT_POLL` interval:
 
 ```bash
-python3 scripts/state.py write-ids tmp/rfe-poll-reassess-review.txt $(python3 scripts/state.py read-ids tmp/review-reassess-ids.txt)
+python3 scripts/state.py copy-ids tmp/review-reassess-ids.txt tmp/rfe-poll-reassess-review.txt
 python3 scripts/check_review_progress.py --phase review --id-file tmp/rfe-poll-reassess-review.txt
 ```
 
@@ -280,7 +280,7 @@ python3 scripts/filter_for_revision.py <all_reassess_IDs_from_file>
 Launch revise agents for the IDs returned (if any). Wait for all to complete, then run the batch auto_revised flag fix:
 
 ```bash
-python3 scripts/check_revised.py --batch $(python3 scripts/state.py read-ids tmp/review-reassess-ids.txt)
+python3 scripts/check_revised.py --batch --ids-file tmp/review-reassess-ids.txt
 ```
 
 After cycle 2, stop regardless of results.
@@ -315,7 +315,7 @@ Do not summarize or stop.
 **If interactive (no `--headless`)**: Re-read ID list and present summary:
 
 ```bash
-python3 scripts/batch_summary.py $(python3 scripts/state.py read-ids tmp/review-all-ids.txt)
+python3 scripts/batch_summary.py --ids-file tmp/review-all-ids.txt
 ```
 
 Based on the output:
