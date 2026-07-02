@@ -156,8 +156,7 @@ def create_issue(
     except urllib.error.HTTPError as e:
         if e.code in (400, 403) and "reporter" in body["fields"]:
             print(
-                f"  WARNING: Could not set reporter ({e.code}) — "
-                f"retrying without reporter field.",
+                f"  WARNING: Could not set reporter ({e.code}) — retrying without reporter field.",
                 file=sys.stderr,
             )
             del body["fields"]["reporter"]
