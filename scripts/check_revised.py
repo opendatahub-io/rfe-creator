@@ -18,7 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import find_review_file, read_frontmatter, update_frontmatter
+from artifact_utils import find_review_file, read_frontmatter, read_ids_file, update_frontmatter
 
 
 def strip_frontmatter(text):
@@ -77,10 +77,38 @@ def batch_mode(ids, artifacts_dir="artifacts"):
     print(f"UPDATED={changed}")
 
 
+def _extract_ids_file(argv):
+    """Pull an --ids-file <path> pair (or --ids-file=<path>) out of argv.
+
+    Returns (remaining_argv, ids_from_file). Lets --batch read IDs from a
+    file instead of forcing the skill to use $(...) command substitution.
+    """
+    remaining = []
+    ids = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--ids-file":
+            if i + 1 >= len(argv):
+                print("Error: --ids-file requires a path argument", file=sys.stderr)
+                sys.exit(2)
+            ids.extend(read_ids_file(argv[i + 1]))
+            i += 2
+            continue
+        if arg.startswith("--ids-file="):
+            ids.extend(read_ids_file(arg.split("=", 1)[1]))
+            i += 1
+            continue
+        remaining.append(arg)
+        i += 1
+    return remaining, ids
+
+
 def main():
     if "--batch" in sys.argv:
-        args = [a for a in sys.argv[1:] if a != "--batch"]
-        batch_mode(args)
+        rest, file_ids = _extract_ids_file(sys.argv[1:])
+        args = [a for a in rest if a != "--batch"]
+        batch_mode(args + file_ids)
         return
 
     if len(sys.argv) != 3:
