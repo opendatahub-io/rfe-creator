@@ -36,6 +36,9 @@ KNOWN_FIELDS = {"prompt", "priority", "labels", "clarifying_context"}
 
 def validate_entries(entries):
     """Validate a list of batch entries. Returns (errors, warnings) lists of strings."""
+    if not entries:
+        return ["batch input must contain at least one entry"], []
+
     errors = []
     warnings = []
     seen_prompts = {}
@@ -57,8 +60,15 @@ def validate_entries(entries):
                 f"entry {i}: 'priority' {entry['priority']!r} is not one of {ALLOWED_PRIORITIES}"
             )
 
-        if "labels" in entry and not isinstance(entry["labels"], list):
-            errors.append(f"entry {i}: 'labels' must be a list")
+        if "labels" in entry:
+            labels = entry["labels"]
+            if not isinstance(labels, list):
+                errors.append(f"entry {i}: 'labels' must be a list")
+            elif any(not isinstance(label, str) or not label.strip() for label in labels):
+                errors.append(f"entry {i}: 'labels' entries must be non-empty strings")
+
+        if "clarifying_context" in entry and not isinstance(entry["clarifying_context"], str):
+            errors.append(f"entry {i}: 'clarifying_context' must be a string")
 
         unknown = set(entry) - KNOWN_FIELDS
         for field in sorted(unknown):
@@ -83,18 +93,21 @@ def main():
     args = parser.parse_args()
 
     if not os.path.exists(args.path):
-        print(f"Error: file not found: {args.path}", file=sys.stderr)
+        print(f"ERROR: file not found: {args.path}", file=sys.stderr)
         sys.exit(2)
 
     try:
         with open(args.path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
+    except OSError as e:
+        print(f"ERROR: could not read file: {e}", file=sys.stderr)
+        sys.exit(2)
     except yaml.YAMLError as e:
-        print(f"Error: invalid YAML: {e}", file=sys.stderr)
+        print(f"ERROR: invalid YAML: {e}", file=sys.stderr)
         sys.exit(2)
 
     if not isinstance(data, list):
-        print(f"Error: batch input root must be a list, got {type(data).__name__}", file=sys.stderr)
+        print(f"ERROR: batch input root must be a list, got {type(data).__name__}", file=sys.stderr)
         sys.exit(2)
 
     errors, warnings = validate_entries(data)

@@ -57,6 +57,27 @@ class TestValidateEntriesFunction:
         errors, warnings = validate_entries([{"prompt": "x", "labels": ["candidate-3.5"]}])
         assert errors == []
 
+    def test_labels_with_non_string_entry(self):
+        errors, warnings = validate_entries([{"prompt": "x", "labels": [123, "ok"]}])
+        assert len(errors) == 1
+        assert "labels" in errors[0]
+
+    def test_labels_with_blank_string_entry(self):
+        errors, warnings = validate_entries([{"prompt": "x", "labels": ["   "]}])
+        assert len(errors) == 1
+        assert "labels" in errors[0]
+
+    def test_clarifying_context_wrong_type(self):
+        errors, warnings = validate_entries(
+            [{"prompt": "x", "clarifying_context": ["not", "a", "string"]}]
+        )
+        assert len(errors) == 1
+        assert "clarifying_context" in errors[0]
+
+    def test_clarifying_context_string_is_valid(self):
+        errors, warnings = validate_entries([{"prompt": "x", "clarifying_context": "some context"}])
+        assert errors == []
+
     def test_unknown_field_is_warning_not_error(self):
         errors, warnings = validate_entries([{"prompt": "x", "team": "aipcc"}])
         assert errors == []
@@ -80,10 +101,10 @@ class TestValidateEntriesFunction:
         errors, warnings = validate_entries([{"prompt": "a"}, {"prompt": "b"}])
         assert warnings == []
 
-    def test_empty_list_is_valid(self):
+    def test_empty_list_is_invalid(self):
         errors, warnings = validate_entries([])
-        assert errors == []
-        assert warnings == []
+        assert len(errors) == 1
+        assert "at least one" in errors[0]
 
 
 class TestCLI:
@@ -136,3 +157,16 @@ class TestCLI:
         _write(path, "prompt: Users need X\n")
         result = subprocess.run(["python3", SCRIPT, path], capture_output=True, text=True)
         assert result.returncode == 2
+
+    def test_empty_batch_exits_one(self, tmp_path):
+        path = str(tmp_path / "batch.yaml")
+        _write(path, "[]\n")
+        result = subprocess.run(["python3", SCRIPT, path], capture_output=True, text=True)
+        assert result.returncode == 1
+        assert "ERROR_COUNT=1" in result.stdout
+
+    def test_unreadable_path_exits_two(self, tmp_path):
+        # A directory is not a valid file to open — should be caught as an OSError, not crash.
+        result = subprocess.run(["python3", SCRIPT, str(tmp_path)], capture_output=True, text=True)
+        assert result.returncode == 2
+        assert "ERROR:" in result.stderr
