@@ -31,6 +31,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_utils import SCHEMAS
 
 ALLOWED_PRIORITIES = SCHEMAS["rfe-task"]["priority"]["enum"]
+
+# Keep in sync with the batch YAML format documented in
+# .claude/skills/rfe.speedrun/SKILL.md (Mode A). Since the skill runs this
+# validator with --strict, a field missing here becomes a blocking warning
+# for anyone who adds a new batch field without updating both places.
 KNOWN_FIELDS = {"prompt", "priority", "labels", "clarifying_context"}
 
 
