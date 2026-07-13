@@ -54,6 +54,7 @@ def _run_split_submit(artifacts_dir, parent_key="RHAIRFE-1000"):
         "JIRA_SERVER": "",
         "JIRA_USER": "",
         "JIRA_TOKEN": "",
+        "JIRA_PROJECT": "RHAIRFE",
     }
     return subprocess.run(
         [sys.executable, SCRIPT, parent_key, "--dry-run", "--artifacts-dir", artifacts_dir],

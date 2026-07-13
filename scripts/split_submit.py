@@ -10,7 +10,7 @@ Identifies parent (status: Archived, rfe_id matches parent key) and children
 (parent_key matches parent's rfe_id) from frontmatter.
 
 Usage:
-    python scripts/split_submit.py RHAIRFE-XXXX [--dry-run] [--artifacts-dir DIR]
+    python scripts/split_submit.py PROJ-XXXX [--dry-run] [--artifacts-dir DIR]
 
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
@@ -238,8 +238,9 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
         labels = state.parent_labels + labels
 
         if dry_run:
+            project = os.environ.get("JIRA_PROJECT", "UNKNOWN")
             print(
-                f"  Phase 2: Would create RHAIRFE ticket for child "
+                f"  Phase 2: Would create {project} ticket for child "
                 f"{idx}/{total}: {title} (priority: {priority})"
             )
             print(f"           Labels: {', '.join(labels)}")
@@ -252,7 +253,7 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
             print(f"           Would link to {parent_key} via 'Issue split'")
             if attn_reason:
                 print("           Would post needs-attention comment")
-            state.phase2_done[idx] = "RHAIRFE-DRY"
+            state.phase2_done[idx] = f"{os.environ.get('JIRA_PROJECT', 'UNKNOWN')}-DRY"
             continue
 
         # 1. Create ticket with labels, inherited components, and parent
@@ -260,8 +261,8 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
             server,
             user,
             token,
-            "RHAIRFE",
-            "Feature Request",
+            os.environ["JIRA_PROJECT"],
+            os.environ.get("JIRA_ISSUE_TYPE", "Feature Request"),
             title,
             description_adf,
             priority,
@@ -439,7 +440,7 @@ def main():
     # Find leaf children: walk the tree recursively to collect all
     # non-archived descendants.  Intermediary nodes (archived local IDs
     # like DRAFT-017) are stepping stones — their children belong to the
-    # RHAIRFE parent for Jira linking purposes.
+    # Jira parent for linking purposes.
     tasks_by_parent = {}
     for path, data in tasks:
         pk = data.get("parent_key")
@@ -553,7 +554,7 @@ def main():
     # Post-submit: update frontmatter and rename files
     for idx, (rfe_id, title, priority, artifact_path) in enumerate(children, 1):
         assigned_key = state.phase2_done.get(idx)
-        if not assigned_key or assigned_key == "RHAIRFE-DRY":
+        if not assigned_key or assigned_key.endswith("-DRY"):
             continue
 
         rename_to_jira_key(args.artifacts_dir, rfe_id, assigned_key)
