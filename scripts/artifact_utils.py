@@ -481,14 +481,14 @@ def find_artifact_file(artifacts_dir, identifier):
 
     Matches:
     - DRAFT-NNN.md (local pre-submission)
-    - RHAIRFE-NNNN.md (Jira-keyed)
+    - PROJ-NNNN.md (Jira-keyed, any project)
 
     Excludes companion files (-comments.md, -removed-context.md).
     Excludes archived artifacts (status: Archived in frontmatter).
 
     Args:
         artifacts_dir: path to artifacts directory
-        identifier: DRAFT-NNN or RHAIRFE-NNNN
+        identifier: DRAFT-NNN or PROJ-NNNN (any Jira key)
 
     Returns:
         Full path to artifact file, or None if not found.
@@ -503,8 +503,8 @@ def find_artifact_file(artifacts_dir, identifier):
         if _is_companion_file(filename):
             continue
 
-        # Match by Jira key (exact: RHAIRFE-1595.md)
-        if identifier.startswith("RHAIRFE-"):
+        # Match by Jira key (exact: PROJ-1595.md)
+        if is_jira_key(identifier):
             if filename == f"{identifier}.md":
                 path = os.path.join(tasks_dir, filename)
                 # Check if archived
@@ -537,7 +537,7 @@ def find_artifact_file_including_archived(artifacts_dir, identifier):
         if _is_companion_file(filename):
             continue
 
-        if identifier.startswith("RHAIRFE-"):
+        if is_jira_key(identifier):
             if filename == f"{identifier}.md":
                 return os.path.join(tasks_dir, filename)
 
@@ -558,7 +558,7 @@ def find_removed_context_yaml(artifacts_dir, identifier):
         if not filename.endswith("-removed-context.yaml"):
             continue
 
-        if identifier.startswith("RHAIRFE-"):
+        if is_jira_key(identifier):
             if filename == f"{identifier}-removed-context.yaml":
                 return os.path.join(tasks_dir, filename)
 
@@ -579,7 +579,7 @@ def find_removed_context_file(artifacts_dir, identifier):
         if not filename.endswith("-removed-context.md"):
             continue
 
-        if identifier.startswith("RHAIRFE-"):
+        if is_jira_key(identifier):
             if filename == f"{identifier}-removed-context.md":
                 return os.path.join(tasks_dir, filename)
 
@@ -603,7 +603,7 @@ def find_review_file(artifacts_dir, identifier):
         if not filename.endswith("-review.md"):
             continue
 
-        if identifier.startswith("RHAIRFE-"):
+        if is_jira_key(identifier):
             if filename == f"{identifier}-review.md":
                 return os.path.join(reviews_dir, filename)
 
@@ -680,7 +680,7 @@ def rename_to_jira_key(artifacts_dir, rfe_id, jira_key):
     Args:
         artifacts_dir: path to artifacts directory
         rfe_id: e.g. "DRAFT-001"
-        jira_key: e.g. "RHAIRFE-1600"
+        jira_key: e.g. "PROJ-1600"
     """
     tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
     reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")

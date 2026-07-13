@@ -345,3 +345,55 @@ class TestIsJiraKey:
         from artifact_utils import is_jira_key
 
         assert is_jira_key("ABC123-456") is True
+
+
+class TestFindArtifactFileGenericKey:
+    def test_finds_generic_jira_key(self, tmp_path):
+        from artifact_utils import find_artifact_file, write_frontmatter
+
+        tasks_dir = tmp_path / "rfe-tasks"
+        tasks_dir.mkdir()
+        task_path = tasks_dir / "MYPROJ-42.md"
+        write_frontmatter(
+            str(task_path),
+            {
+                "rfe_id": "MYPROJ-42",
+                "title": "Test",
+                "priority": "Normal",
+                "status": "Ready",
+            },
+            "rfe-task",
+        )
+        result = find_artifact_file(str(tmp_path), "MYPROJ-42")
+        assert result is not None
+        assert "MYPROJ-42.md" in result
+
+    def test_finds_generic_key_review(self, tmp_path):
+        from artifact_utils import find_review_file, write_frontmatter
+
+        reviews_dir = tmp_path / "rfe-reviews"
+        reviews_dir.mkdir()
+        review_path = reviews_dir / "MYPROJ-42-review.md"
+        write_frontmatter(
+            str(review_path),
+            {
+                "rfe_id": "MYPROJ-42",
+                "score": 8,
+                "pass": True,
+                "recommendation": "submit",
+                "feasibility": "feasible",
+                "auto_revised": False,
+                "needs_attention": False,
+                "scores": {
+                    "what": 2,
+                    "why": 2,
+                    "open_to_how": 2,
+                    "not_a_task": 1,
+                    "right_sized": 1,
+                },
+            },
+            "rfe-review",
+        )
+        result = find_review_file(str(tmp_path), "MYPROJ-42")
+        assert result is not None
+        assert "MYPROJ-42-review.md" in result
