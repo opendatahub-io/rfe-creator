@@ -209,3 +209,52 @@ class TestCollectReassess:
         assert rc == 0
         groups = _parse_output(out)
         assert "DRAFT-001" in groups["DONE"]
+
+
+class TestFromReviews:
+    def test_discovers_ids_from_review_files(self, art_dir):
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-001",
+                score=9,
+                pass_val="true",
+                recommendation="submit",
+                auto_revised="false",
+            ),
+        )
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-002-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-002",
+                score=3,
+                pass_val="false",
+                recommendation="reject",
+                auto_revised="false",
+            ),
+        )
+        out, _, rc = _run(["--from-reviews"])
+        assert rc == 0
+        groups = _parse_output(out)
+        assert "DRAFT-001" in groups["SUBMIT"]
+        assert "DRAFT-002" in groups["REJECT"]
+
+    def test_no_review_files_exits_nonzero(self, art_dir):
+        _, _, rc = _run(["--from-reviews"])
+        assert rc != 0
+
+    def test_from_reviews_with_reassess(self, art_dir):
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-001",
+                score=5,
+                pass_val="false",
+                recommendation="revise",
+                auto_revised="true",
+            ),
+        )
+        out, _, rc = _run(["--from-reviews", "--reassess"])
+        assert rc == 0
+        groups = _parse_output(out)
+        assert "DRAFT-001" in groups["REASSESS"]
