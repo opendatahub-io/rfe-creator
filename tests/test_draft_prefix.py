@@ -47,7 +47,8 @@ class TestDraftPrefixInSchemas:
         errors = validate(data, "rfe-review")
         assert errors == [], f"DRAFT-042 should be valid: {errors}"
 
-    def test_rfe_prefix_rejected_in_task_schema(self):
+    def test_rfe_prefix_accepted_as_jira_key_in_task_schema(self):
+        """RFE-001 is a valid Jira key format (RFE is a valid project key)."""
         data = {
             "rfe_id": "RFE-001",
             "title": "Test RFE",
@@ -55,11 +56,10 @@ class TestDraftPrefixInSchemas:
             "status": "Draft",
         }
         errors = validate(data, "rfe-task")
-        assert any("does not match" in e for e in errors), (
-            "RFE-001 should be rejected — RFE looks like a Jira project key"
-        )
+        assert errors == [], f"RFE-001 should be valid as a Jira key: {errors}"
 
-    def test_rfe_prefix_rejected_in_review_schema(self):
+    def test_rfe_prefix_accepted_as_jira_key_in_review_schema(self):
+        """RFE-001 is a valid Jira key format (RFE is a valid project key)."""
         data = {
             "rfe_id": "RFE-001",
             "score": 8,
@@ -77,9 +77,7 @@ class TestDraftPrefixInSchemas:
             },
         }
         errors = validate(data, "rfe-review")
-        assert any("does not match" in e for e in errors), (
-            "RFE-001 should be rejected — RFE looks like a Jira project key"
-        )
+        assert errors == [], f"RFE-001 should be valid as a Jira key: {errors}"
 
     def test_jira_key_still_accepted_in_task_schema(self):
         data = {
