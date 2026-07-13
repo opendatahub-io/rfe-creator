@@ -15,7 +15,7 @@ Parse `$ARGUMENTS` for:
 - `--announce-complete`: Print completion marker when done (for CI / eval harnesses)
 - `--dry-run`: Skip Jira writes in submit
 - `--batch-size N`: Override batch size (default 5), passed to auto-fix
-- Remaining arguments: either a single Jira key (RHAIRFE-NNNN) or a free-text idea
+- Remaining arguments: either a single Jira key or a free-text idea
 
 Clean temp state and persist parsed flags. `batch_size` MUST always be a concrete integer — if the user did not pass `--batch-size`, substitute the speedrun default of `5`. Do not write `<N>`, `null`, or omit the field.
 
@@ -25,9 +25,18 @@ python3 scripts/prep_assess.py --clean-all
 python3 scripts/state.py init tmp/speedrun-config.yaml headless=<true/false> announce_complete=<true/false> dry_run=<true/false> batch_size=<N or 5> input_file=<path or null>
 ```
 
+### Resolve Jira Project
+
+Run:
+```bash
+python3 scripts/resolve_project.py
+```
+
+If it exits non-zero, ask the user: "What Jira project key should I use? (e.g., RHAIRFE, MYPROJECT)" Then export `JIRA_PROJECT=<answer>` and re-run to confirm.
+
 Determine pipeline mode:
 - **Mode A (Batch YAML)**: `--input` flag present → batch create + auto-fix + submit
-- **Mode B (Existing RFE)**: argument is a Jira key (RHAIRFE-NNNN) → skip create, auto-fix + submit
+- **Mode B (Existing RFE)**: argument is a Jira key → skip create, auto-fix + submit
 - **Mode C (Single idea)**: free-text argument, no `--input` → single create + auto-fix + submit
 
 If no arguments provided, stop with usage instructions.
@@ -184,7 +193,7 @@ If headless, output a brief machine-readable summary. If interactive, output:
 - Split: N (into M children)
 
 ### Submitted
-- RHAIRFE-NNNN: <title> [created/updated/dry-run]
+- <PROJECT>-NNNN: <title> [created/updated/dry-run]
 
 ### Reports
 - Run report: artifacts/auto-fix-runs/<timestamp>.yaml

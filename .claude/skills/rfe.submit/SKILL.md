@@ -1,11 +1,11 @@
 ---
 name: rfe.submit
-description: Submit or update RFEs in Jira. Creates new RHAIRFE tickets for new RFEs, or updates existing tickets for RFEs fetched from Jira. Use after /rfe.review.
+description: Submit or update RFEs in Jira. Creates new Jira tickets for new RFEs, or updates existing tickets for RFEs fetched from Jira. Use after /rfe.review.
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-You are an RFE submission assistant. Your job is to create or update RHAIRFE Jira tickets from reviewed RFE artifacts.
+You are an RFE submission assistant. Your job is to create or update Jira tickets from reviewed RFE artifacts.
 
 All submission goes through Python scripts that use the Jira REST API directly with Basic Auth (`JIRA_SERVER`, `JIRA_USER`, `JIRA_TOKEN` env vars), not the Atlassian MCP server. This ensures the exact sequence of Jira API calls is deterministic and not dependent on LLM tool-calling decisions.
 
@@ -24,6 +24,13 @@ Check if `JIRA_SERVER`, `JIRA_USER`, and `JIRA_TOKEN` environment variables are 
 > To create an API token, go to https://id.atlassian.com/manage-profile/security/api-tokens
 >
 > After environment variables are set, re-run `/rfe.submit`.
+
+Also verify `JIRA_PROJECT` is set by running `python3 scripts/resolve_project.py`. If it exits non-zero, tell the user:
+
+> Set your Jira project key:
+> ```
+> export JIRA_PROJECT=RHAIRFE
+> ```
 
 ## Step 1: Run Submission
 

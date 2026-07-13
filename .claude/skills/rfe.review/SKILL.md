@@ -1,6 +1,6 @@
 ---
 name: rfe.review
-description: Review and improve RFEs. Accepts one or more Jira keys (e.g., /rfe.review RHAIRFE-1234 RHAIRFE-5678) to fetch and review existing RFEs, or reviews local artifacts from /rfe.create. Runs rubric scoring, technical feasibility checks, and auto-revises issues it finds.
+description: Review and improve RFEs. Accepts one or more Jira keys (e.g., /rfe.review PROJ-1234 PROJ-5678) to fetch and review existing RFEs, or reviews local artifacts from /rfe.create. Runs rubric scoring, technical feasibility checks, and auto-revises issues it finds.
 user-invocable: true
 allowed-tools: Glob, Bash, Agent, AskUserQuestion
 ---
@@ -12,7 +12,7 @@ You are an RFE review orchestrator. Your job is to coordinate reviews and revisi
 Parse `$ARGUMENTS` for flags and IDs:
 - Strip `--headless` flag if present (suppresses end-of-run summary)
 - Strip `--caller <name>` flag if present (identifies calling skill for headless return)
-- Remaining arguments are one or more space-separated RFE IDs (RHAIRFE-NNNN or RFE-NNN)
+- Remaining arguments are one or more space-separated RFE IDs (Jira key or RFE-NNN)
 
 Persist parsed flags (survives context compression):
 
@@ -25,6 +25,15 @@ Persist all IDs to disk (survives context compression):
 ```bash
 python3 scripts/state.py write-ids tmp/review-all-ids.txt <all_IDs>
 ```
+
+## Review Step 0.5: Resolve Jira Project
+
+Run:
+```bash
+python3 scripts/resolve_project.py
+```
+
+If it exits non-zero, ask the user: "What Jira project key should I use? (e.g., RHAIRFE, MYPROJECT)" Then export `JIRA_PROJECT=<answer>` and re-run to confirm.
 
 For each ID, check if `artifacts/rfe-tasks/<id>.md` already exists locally (use Glob, don't read the file). Separate IDs into:
 - **Local**: task file exists — skip fetch
