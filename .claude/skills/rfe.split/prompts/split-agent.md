@@ -10,7 +10,7 @@ Review file: {REVIEW_FILE}
 
 Read the task file and the review file. The review file's right-sizing feedback explains why this RFE needs splitting.
 
-**Before proceeding, check the Right-sized score.** If the score is **1/2** ("slightly broad at 1-2 strategy features"), splitting may not be appropriate. An RFE that maps to 2 tightly-coupled strategy features is acceptable — the decomposition into strategy features happens at the RHAISTRAT level, not the RHAIRFE level. Only proceed with splitting if:
+**Before proceeding, check the Right-sized score.** If the score is **1/2** ("slightly broad at 1-2 strategy features"), splitting may not be appropriate. An RFE that maps to 2 tightly-coupled strategy features is acceptable — the decomposition into strategy features happens at the strategy level, not the RFE level. Only proceed with splitting if:
 - The Right-sized score is **0/2** (clearly needs 3+ features), OR
 - The score is 1/2 AND the capabilities serve genuinely different customer segments or user scenarios that could be independently prioritized without harm
 
