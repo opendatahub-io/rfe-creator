@@ -2,7 +2,7 @@
 """Submit RFE artifacts to Jira — create new or update existing tickets.
 
 Handles both split and standard submissions in one pass. Split parents
-(RHAIRFE with status: Archived) are submitted via split_submit.py first,
+(Jira issues with status: Archived) are submitted via split_submit.py first,
 then regular RFEs are updated/created directly.
 
 Reads all structured metadata from YAML frontmatter on task and review files.
@@ -50,6 +50,7 @@ from artifact_utils import (  # noqa: E402
     ValidationError,
     find_removed_context_yaml,
     find_review_file,
+    is_jira_key,
     read_frontmatter_validated,
     rebuild_index,
     rename_to_jira_key,
@@ -190,20 +191,20 @@ def main():
         sys.exit(1)
 
     # --- Phase 1: Submit splits via split_submit.py ---
-    # Find RHAIRFE parents that were split (Archived + have children)
+    # Find Jira parents that were split (Archived + have children)
     child_parent_keys = {data.get("parent_key") for _, data in tasks if data.get("parent_key")}
     split_parent_data = {
         data["rfe_id"]: data
         for _, data in tasks
         if data.get("status") == "Archived"
-        and data["rfe_id"].startswith("RHAIRFE-")
+        and is_jira_key(data["rfe_id"])
         and data["rfe_id"] in child_parent_keys
     }
     split_parents = list(split_parent_data.keys())
 
     # Build parent ancestry map to identify descendants of Jira split
     # parents at any depth (handles re-splits where grandchildren point
-    # to local intermediary parents like DRAFT-017 → RHAIRFE-1234).
+    # to local intermediary parents like DRAFT-017 → PROJ-1234).
     _parent_of = {}  # rfe_id -> parent_key
     for _, data in tasks:
         pk = data.get("parent_key")
@@ -211,11 +212,11 @@ def main():
             _parent_of[data["rfe_id"]] = pk
 
     def _has_jira_ancestor(rfe_id):
-        """True if rfe_id descends from any RHAIRFE parent."""
+        """True if rfe_id descends from any Jira parent."""
         seen = set()
         pk = _parent_of.get(rfe_id)
         while pk and pk not in seen:
-            if pk.startswith("RHAIRFE-"):
+            if is_jira_key(pk):
                 return True
             seen.add(pk)
             pk = _parent_of.get(pk)
@@ -324,7 +325,7 @@ def main():
             for path, data in post_split_tasks:
                 if data.get("parent_key") and data.get("status") == "Submitted":
                     rfe_id = data.get("rfe_id", "")
-                    if rfe_id.startswith("RHAIRFE-"):
+                    if is_jira_key(rfe_id):
                         with open(path, encoding="utf-8") as f:
                             raw = f.read()
                         cleaned = strip_metadata(raw)
@@ -352,11 +353,11 @@ def main():
     tasks = scan_task_files(args.artifacts_dir)
 
     # Filter to non-archived, non-submitted RFEs.  Any descendant of a
-    # Jira split parent (RHAIRFE-*) was already handled by split_submit.py
-    # in Phase 1 — this includes grandchildren from re-splits whose
-    # immediate parent is a local ID (e.g. DRAFT-017 → RHAIRFE-1234).
-    # Children of purely local parents (DRAFT-NNN with no RHAIRFE ancestor)
-    # go through Phase 2 as regular creates.
+    # Jira split parent was already handled by split_submit.py in Phase 1
+    # — this includes grandchildren from re-splits whose immediate parent
+    # is a local ID (e.g. DRAFT-017 → PROJ-1234).  Children of purely
+    # local parents (DRAFT-NNN with no Jira ancestor) go through Phase 2
+    # as regular creates.
     # Filtering Submitted makes replay safe: already-submitted entries are
     # skipped, preventing duplicate Jira creates.
     submittable = [
@@ -387,7 +388,7 @@ def main():
     for task_path, task_data in submittable:
         rfe_id = task_data["rfe_id"]
         title = task_data["title"]
-        is_existing = rfe_id.startswith("RHAIRFE-")
+        is_existing = is_jira_key(rfe_id)
         priority = task_data["priority"]
         size = task_data.get("size", "M")
 
@@ -695,15 +696,16 @@ def main():
             else:
                 # Create new ticket
                 if args.dry_run:
-                    print(f"  {rfe_id}: Would create RHAIRFE ticket: {title}")
-                    results[rfe_id] = "RHAIRFE-DRY"
+                    project = os.environ.get("JIRA_PROJECT", "UNKNOWN")
+                    print(f"  {rfe_id}: Would create {project} ticket: {title}")
+                    results[rfe_id] = f"{project}-DRY"
                 else:
                     new_key = create_issue(
                         server,
                         user,
                         token,
-                        "RHAIRFE",
-                        "Feature Request",
+                        os.environ["JIRA_PROJECT"],
+                        os.environ.get("JIRA_ISSUE_TYPE", "Feature Request"),
                         title,
                         description_adf,
                         entry["priority"],
@@ -743,7 +745,7 @@ def main():
             # comment posting which looks up files by original rfe_id)
             if not entry["is_existing"] and not args.dry_run:
                 new_key = results.get(rfe_id)
-                if new_key and new_key != "RHAIRFE-DRY":
+                if new_key and not new_key.endswith("-DRY"):
                     rename_to_jira_key(args.artifacts_dir, rfe_id, new_key)
                     print(f"  {rfe_id}: Renamed to {new_key}")
 

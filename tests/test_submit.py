@@ -798,3 +798,41 @@ class TestApprovedTransition:
         stdout, stderr, rc = _run_submit(art_dir)
         assert rc == 0, stderr
         assert "Would transition to Approved" not in stdout
+
+
+class TestProjectEnvVar:
+    """submit.py reads JIRA_PROJECT from env for create operations."""
+
+    def test_dry_run_uses_jira_project(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JIRA_PROJECT", "TESTPROJ")
+        art_dir = str(tmp_path)
+        for d in ["rfe-tasks", "rfe-reviews"]:
+            os.makedirs(os.path.join(art_dir, d), exist_ok=True)
+        _write(
+            f"{art_dir}/rfe-tasks/DRAFT-001.md",
+            "---\nrfe_id: DRAFT-001\ntitle: Test\npriority: Normal\nstatus: Draft\n---\n\nBody.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_FM.format(rfe_id="DRAFT-001", auto_revised="false"),
+        )
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Would create TESTPROJ ticket" in stdout
+
+    def test_dry_run_without_jira_project_shows_unknown(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("JIRA_PROJECT", raising=False)
+        art_dir = str(tmp_path)
+        for d in ["rfe-tasks", "rfe-reviews"]:
+            os.makedirs(os.path.join(art_dir, d), exist_ok=True)
+        _write(
+            f"{art_dir}/rfe-tasks/DRAFT-001.md",
+            "---\nrfe_id: DRAFT-001\ntitle: Test\npriority: Normal\nstatus: Draft\n---\n\nBody.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_FM.format(rfe_id="DRAFT-001", auto_revised="false"),
+        )
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Would create UNKNOWN ticket" in stdout
