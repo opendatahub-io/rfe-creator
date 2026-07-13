@@ -44,10 +44,10 @@ suggested_judges:
 
 ## Skill Analysis
 
-`rfe.speedrun` is a thin orchestrator that turns problem statements into reviewed, optionally split, and Jira-submitted RHAIRFE tickets via three phases: **create -> auto-fix -> submit**. It accepts input in three modes:
+`rfe.speedrun` is a thin orchestrator that turns problem statements into reviewed, optionally split, and Jira-submitted tickets via three phases: **create -> auto-fix -> submit**. It accepts input in three modes:
 
 - **Mode A — Batch YAML** (`--input <path>`): list of `{prompt, priority, labels}` entries. Used by the eval harness.
-- **Mode B — Existing Jira key**: a single `RHAIRFE-NNNN` to fetch, review, and resubmit.
+- **Mode B — Existing Jira key**: a single Jira key to fetch, review, and resubmit.
 - **Mode C — Single idea**: free-text problem statement.
 
 Every flag and ID list is persisted to `tmp/` (via `scripts/state.py`) so the pipeline survives context compression between phases.
@@ -69,7 +69,7 @@ Companion files the skill reads at runtime: `tmp/speedrun-config.yaml`, `tmp/spe
 
 The pipeline writes to 5 directories under `artifacts/`:
 
-1. **artifacts/rfe-tasks/** — One Markdown file per RFE. Naming `RFE-NNN.md` (newly-created, pre-submit) or `RHAIRFE-NNNN.md` (fetched/submitted). YAML frontmatter (validated by `scripts/frontmatter.py`): `rfe_id`, `title`, `priority` (enum), `size` (S/M/L/XL), `status` (Draft/Ready/Submitted/Archived), `parent_key` (split children), `original_labels`. Body sections: Summary, Problem Statement, Affected Customers, Business Justification, Acceptance Criteria, Success Criteria.
+1. **artifacts/rfe-tasks/** — One Markdown file per RFE. Naming `RFE-NNN.md` (newly-created, pre-submit) or `<PROJECT>-NNNN.md` (fetched/submitted). YAML frontmatter (validated by `scripts/frontmatter.py`): `rfe_id`, `title`, `priority` (enum), `size` (S/M/L/XL), `status` (Draft/Ready/Submitted/Archived), `parent_key` (split children), `original_labels`. Body sections: Summary, Problem Statement, Affected Customers, Business Justification, Acceptance Criteria, Success Criteria.
 
 2. **artifacts/rfe-reviews/** — Per-RFE review artifacts:
    - `{ID}-review.md` — frontmatter with `rfe_id`, `score` (0-10), `pass` (bool), `recommendation` (submit/revise/split/reject/autorevise_reject), `feasibility` (feasible/infeasible/indeterminate), `auto_revised` (bool), `needs_attention` (bool), `needs_attention_reason`, `scores.{what,why,open_to_how,not_a_task,right_sized}` (each 0-2), `before_score`, `before_scores`, `error` on failure. Body: Assessor Feedback table, Verdict, Feedback, Technical Feasibility, Strategy Considerations, Revision History.

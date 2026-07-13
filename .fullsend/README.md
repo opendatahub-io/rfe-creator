@@ -39,9 +39,9 @@ To test the harness end-to-end on a real issue:
 export JIRA_SERVER=https://issues.redhat.com
 export JIRA_USER=you@example.com
 export JIRA_TOKEN=your-api-token
-export JIRA_PROJECT=RHAIRFE
+export JIRA_PROJECT=MYPROJECT
 
-FULLSEND_WORK_ITEM_URL=https://issues.redhat.com/browse/RHAIRFE-1234 \
+FULLSEND_WORK_ITEM_URL=https://issues.redhat.com/browse/MYPROJECT-1234 \
   fullsend run rfe-creator
 ```
 
@@ -75,11 +75,11 @@ with a CEL expression to match Jira work-item events for the target project.
 
 | Variable | Required | Where | Purpose |
 |----------|----------|-------|---------|
-| `FULLSEND_WORK_ITEM_URL` | yes | runner + sandbox | Jira issue URL (e.g., `https://issues.redhat.com/browse/RHAIRFE-1234`) |
+| `FULLSEND_WORK_ITEM_URL` | yes | runner + sandbox | Jira issue URL (e.g., `https://issues.redhat.com/browse/PROJ-1234`) |
 | `JIRA_SERVER` | yes | runner only | Jira server base URL |
 | `JIRA_USER` | yes | runner only | Jira username / email |
 | `JIRA_TOKEN` | yes | runner only | Jira API token |
-| `JIRA_PROJECT` | yes | runner only | Expected Jira project key (e.g., `RHAIRFE`). Validation rejects artifacts with IDs outside this project. |
+| `JIRA_PROJECT` | yes | runner only | Expected Jira project key (e.g., `MYPROJECT`). Validation rejects artifacts with IDs outside this project. |
 
 ## File layout
 

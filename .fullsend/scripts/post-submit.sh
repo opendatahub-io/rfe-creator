@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Get recommendations — outputs lines like SUBMIT=RHAIRFE-1234,DRAFT-001
+# Get recommendations — outputs lines like SUBMIT=PROJ-1234,DRAFT-001
 eval "$(python3 scripts/collect_recommendations.py --from-reviews)"
 
 if [[ -z "${SUBMIT:-}" ]]; then
