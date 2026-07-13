@@ -10,7 +10,7 @@ from collections import Counter
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import find_artifact_file_including_archived, read_frontmatter
+from artifact_utils import find_artifact_file_including_archived, is_jira_key, read_frontmatter
 
 DEFAULT_ARTIFACTS = os.path.join(os.getcwd(), "artifacts")
 
@@ -1301,13 +1301,13 @@ def main():
 
     def jira_link(rfe_id):
         """Wrap an RFE ID in a Jira link if it's a real key and server is configured."""
-        if jira_server and rfe_id.startswith("RHAIRFE-"):
+        if jira_server and is_jira_key(rfe_id):
             return f'<a href="{jira_server}/browse/{html_escape(rfe_id)}" target="_blank" class="jira-link" title="Open in Jira">{html_escape(rfe_id)} &#x1F517;</a>'
         return html_escape(rfe_id)
 
     def jira_ext(rfe_id):
         """Small external link icon for Jira keys in summary table."""
-        if jira_server and rfe_id.startswith("RHAIRFE-"):
+        if jira_server and is_jira_key(rfe_id):
             return f' <a href="{jira_server}/browse/{html_escape(rfe_id)}" target="_blank" style="color:#0f3460;text-decoration:none;font-size:9pt;" title="Open in Jira">&#x1F517;</a>'
         return ""
 

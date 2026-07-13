@@ -675,7 +675,7 @@ def strip_metadata(markdown):
 
     Strips content that should not be pushed to Jira:
     - YAML frontmatter (--- delimited block at start of file)
-    - Title headings (# DRAFT-NNN: / # RHAIRFE-NNN: / # STRAT-NNN: / # RHAISTRAT-NNN:)
+    - Title headings (# DRAFT-NNN: / # PROJ-NNN:)
       — title is in frontmatter and Jira's summary field
     - Legacy inline metadata lines (now in frontmatter):
       **Jira Key**, **Size**, **Split from**, **Priority**, **Source RFE**
@@ -698,7 +698,7 @@ def strip_metadata(markdown):
 
     for line in lines:
         # Skip title heading — duplicates Summary
-        if re.match(r"^#\s+(DRAFT-\d+|RHAIRFE-\d+|STRAT-\d+|RHAISTRAT-\d+):", line):
+        if re.match(r"^#\s+(DRAFT-\d+|[A-Z][A-Z0-9]+-\d+):", line):
             continue
 
         # Skip metadata lines (legacy inline format, now in frontmatter)
