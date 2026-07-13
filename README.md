@@ -1,6 +1,6 @@
 # RFE Creator
 
-Claude Code skills for creating, reviewing, and submitting RFEs to the RHAIRFE Jira project.
+Claude Code skills for creating, reviewing, and submitting RFEs to Jira.
 
 Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tree/main/workflows/prd-rfe-workflow) in ambient, which established the pipeline pattern and multi-perspective review concept.
 
@@ -16,15 +16,15 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 /rfe.auto-fix   # Batch review+revise+split pipeline (non-interactive)
 
 # Improve an existing Jira RFE
-/rfe.review RHAIRFE-1234      # Fetch, review, and auto-revise
-/rfe.split RHAIRFE-1234       # Fetch and split an oversized RFE
-/rfe.speedrun RHAIRFE-1234    # Fetch, review, revise, and update in one step
+/rfe.review PROJ-1234      # Fetch, review, and auto-revise
+/rfe.split PROJ-1234       # Fetch and split an oversized RFE
+/rfe.speedrun PROJ-1234    # Fetch, review, revise, and update in one step
 
 # Batch operations
 /rfe.speedrun --input batch.yaml --headless --dry-run              # Batch create + review from YAML
 /rfe.speedrun --input batch.yaml --headless --announce-complete    # Print completion marker for CI
-/rfe.auto-fix --jql "project = RHAIRFE AND ..."         # Batch review from JQL query
-/rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678                 # Batch review explicit IDs
+/rfe.auto-fix --jql "project = $JIRA_PROJECT AND ..."         # Batch review from JQL query
+/rfe.auto-fix PROJ-1234 PROJ-5678                 # Batch review explicit IDs
 
 # Maintenance
 /rfe-creator.update-deps   # Force update vendored dependencies
@@ -45,10 +45,10 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 ### Existing Jira RFEs
 
 ```
-/rfe.review RHAIRFE-1234 → /rfe.submit
+/rfe.review PROJ-1234 → /rfe.submit
 ```
 
-Or in one step: `/rfe.speedrun RHAIRFE-1234`
+Or in one step: `/rfe.speedrun PROJ-1234`
 
 ### Batch Operations
 
@@ -71,8 +71,8 @@ YAML format:
 Review a batch of existing Jira RFEs:
 
 ```
-/rfe.auto-fix --jql "project = RHAIRFE AND status = New" --limit 20
-/rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678 RHAIRFE-9012
+/rfe.auto-fix --jql "project = $JIRA_PROJECT AND status = New" --limit 20
+/rfe.auto-fix PROJ-1234 PROJ-5678 PROJ-9012
 ```
 
 Auto-fix processes in batches (default 5), handles review, revision, splitting, retry, and report generation.
@@ -87,7 +87,7 @@ The strategy skills have moved to a dedicated repo: [ederign/strat-creator](http
 2. **Review**: Scores RFEs against the assess-rfe rubric, checks technical feasibility, and auto-revises issues. Accepts Jira keys to review existing RFEs. Supports `--headless` for non-interactive use.
 3. **Split**: Decompose an oversized RFE into right-sized pieces. Runs review on new RFEs, self-corrects right-sizing (up to 3 cycles), and checks scope coverage. Supports `--headless`.
 4. **Auto-fix**: Batch pipeline that orchestrates review + revision + split + retry across many RFEs. Accepts explicit IDs or a `--jql` query. Processes in configurable batches (`--batch-size N`, default 5). Generates run reports and HTML review reports.
-5. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira.
+5. **Submit**: Creates new Jira tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira.
 6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--announce-complete` for completion signaling, `--dry-run` to skip Jira writes, and `--batch-size N`.
 
 ## Editing Between Steps
@@ -119,6 +119,12 @@ Submission uses the Jira REST API directly via Python scripts (not the MCP serve
 export JIRA_SERVER=https://your-site.atlassian.net
 export JIRA_USER=your-email@example.com
 export JIRA_TOKEN=your-api-token
+
+# Set the Jira project key (required)
+export JIRA_PROJECT=RHAIRFE
+
+# Optionally set the issue type (default: Feature Request)
+export JIRA_ISSUE_TYPE='Feature Request'
 ```
 
 The Atlassian MCP server is used for read operations (fetching issues, comments) when available, with a REST API fallback.

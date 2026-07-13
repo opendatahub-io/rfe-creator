@@ -1,6 +1,6 @@
 # RFE Creator
 
-Skills for creating, reviewing, and submitting RFEs to the RHAIRFE Jira project.
+Skills for creating, reviewing, and submitting RFEs to Jira.
 
 ## Artifact Conventions
 
@@ -12,17 +12,17 @@ artifacts/
   rfes.md                   # Generated index — rebuilt from frontmatter, not a source of truth
 
   rfe-tasks/                # Individual RFE files with YAML frontmatter
-    RHAIRFE-1595.md          # Existing Jira issue (keyed by Jira key)
-    RHAIRFE-1595-comments.md # Companion: stakeholder comment history
-    RHAIRFE-1595-removed-context.yaml  # Companion: structured removed content with type classification
-    RHAIRFE-1595-removed-context.md  # Legacy companion (markdown, being phased out)
+    PROJ-1595.md          # Existing Jira issue (keyed by Jira key)
+    PROJ-1595-comments.md # Companion: stakeholder comment history
+    PROJ-1595-removed-context.yaml  # Companion: structured removed content with type classification
+    PROJ-1595-removed-context.md  # Legacy companion (markdown, being phased out)
     DRAFT-001.md             # New RFE (pre-submission, renamed on submit)
 
   rfe-originals/            # Raw Jira descriptions at time of fetch (not templated)
-    RHAIRFE-1595.md          # Baseline for before/after analysis and submit-time conflict detection
+    PROJ-1595.md          # Baseline for before/after analysis and submit-time conflict detection
 
   rfe-reviews/              # Per-issue review files with YAML frontmatter
-    RHAIRFE-1595-review.md
+    PROJ-1595-review.md
     DRAFT-001-review.md
 
 ```
@@ -65,9 +65,9 @@ Each skill uses distinct file prefixes to avoid collisions during nested calls: 
 
 ### File Naming
 
-- **Existing Jira issues**: Use Jira key as filename and `rfe_id` (e.g., `RHAIRFE-1595.md` with `rfe_id: RHAIRFE-1595`)
+- **Existing Jira issues**: Use Jira key as filename and `rfe_id` (e.g., `PROJ-1595.md` with `rfe_id: PROJ-1595`)
 - **New RFEs (pre-submission)**: Use `RFE-NNN.md` naming with `rfe_id: RFE-NNN`
-- **On submit**: `RFE-NNN.md` files are renamed to `RHAIRFE-NNNN.md`, and `rfe_id` is updated to the Jira key
+- **On submit**: `RFE-NNN.md` files are renamed to `<JIRA_PROJECT>-NNNN.md`, and `rfe_id` is updated to the Jira key
 - **Companion files**: Same prefix as main file with `-comments.md` or `-removed-context.md` suffix
 - **Archived RFEs**: Set `status: Archived` in frontmatter (no filename changes)
 
@@ -83,6 +83,8 @@ Required environment variables:
 JIRA_SERVER=https://your-site.atlassian.net
 JIRA_USER=your-email@example.com
 JIRA_TOKEN=your-api-token
+JIRA_PROJECT=RHAIRFE                     # Required: Jira project key
+JIRA_ISSUE_TYPE=Feature Request          # Optional: defaults to "Feature Request"
 ```
 
 To create an API token: https://id.atlassian.com/manage-profile/security/api-tokens
@@ -98,9 +100,9 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 
 ## Jira Field Mappings
 
-### RHAIRFE Project
-- **Project**: `RHAIRFE`
-- **Issue Type**: `Feature Request`
+### Jira Project Configuration
+- **Project**: Set via `JIRA_PROJECT` environment variable (required)
+- **Issue Type**: Set via `JIRA_ISSUE_TYPE` environment variable (default: `Feature Request`)
 - **Priority values** (use these exactly): Blocker, Critical, Major, Normal, Minor, Undefined
 - **Status on creation**: `New`
 
