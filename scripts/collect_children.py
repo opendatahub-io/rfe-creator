@@ -12,9 +12,7 @@ from artifact_utils import resolve_ids, scan_task_files
 
 def main():
     parser = argparse.ArgumentParser(description="Find child RFEs by parent_key")
-    parser.add_argument(
-        "parent_ids", nargs="*", help="One or more parent RFE IDs (e.g. PROJ-100)"
-    )
+    parser.add_argument("parent_ids", nargs="*", help="One or more parent RFE IDs (e.g. PROJ-100)")
     parser.add_argument(
         "--ids-file",
         help="Read parent RFE IDs from a file (one per line) instead of positional args",
