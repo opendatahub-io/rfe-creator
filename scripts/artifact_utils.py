@@ -12,6 +12,18 @@ import sys
 
 import yaml
 
+_JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]+-\d+$")
+
+
+def is_jira_key(identifier):
+    """True if identifier looks like a Jira issue key (e.g., PROJ-1234).
+
+    Returns False for DRAFT-NNN identifiers (local pre-submission IDs).
+    """
+    if identifier.startswith("DRAFT-"):
+        return False
+    return bool(_JIRA_KEY_RE.match(identifier))
+
 
 def read_ids_file(path):
     """Read RFE IDs from a file (one per line), deduped, order-preserved.
@@ -62,7 +74,7 @@ SCHEMAS = {
         "rfe_id": {
             "type": "string",
             "required": True,
-            "pattern": r"^(DRAFT-\d+|RHAIRFE-\d+)$",
+            "pattern": r"^(DRAFT-\d+|[A-Z][A-Z0-9]+-\d+)$",
         },
         "title": {
             "type": "string",
@@ -87,7 +99,7 @@ SCHEMAS = {
         "parent_key": {
             "type": "string",
             "required": False,
-            "pattern": r"^(DRAFT-\d+|RHAIRFE-\d+)$",
+            "pattern": r"^(DRAFT-\d+|[A-Z][A-Z0-9]+-\d+)$",
             "default": None,
         },
         "original_labels": {
@@ -100,7 +112,7 @@ SCHEMAS = {
         "rfe_id": {
             "type": "string",
             "required": True,
-            "pattern": r"^(DRAFT-\d+|RHAIRFE-\d+)$",
+            "pattern": r"^(DRAFT-\d+|[A-Z][A-Z0-9]+-\d+)$",
         },
         "score": {
             "type": "int",

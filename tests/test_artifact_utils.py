@@ -299,3 +299,49 @@ class TestUpdateFrontmatter:
         write_frontmatter("review.md", VALID_REVIEW_FM.copy(), "rfe-review")
         with pytest.raises(ValidationError):
             update_frontmatter("review.md", {"recommendation": "invalid"}, "rfe-review")
+
+
+# ── is_jira_key ──────────────────────────────────────────────────────────────
+
+
+class TestIsJiraKey:
+    def test_standard_jira_key(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("RHAIRFE-1234") is True
+
+    def test_other_project_key(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("MYPROJ-42") is True
+
+    def test_single_letter_project_not_valid(self):
+        from artifact_utils import is_jira_key
+
+        # Jira requires at least 2 characters for project keys
+        assert is_jira_key("X-1") is False
+
+    def test_draft_is_not_jira_key(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("DRAFT-001") is False
+
+    def test_lowercase_is_not_jira_key(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("rhairfe-1234") is False
+
+    def test_no_number_is_not_jira_key(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("RHAIRFE-") is False
+
+    def test_empty_string(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("") is False
+
+    def test_alphanumeric_project(self):
+        from artifact_utils import is_jira_key
+
+        assert is_jira_key("ABC123-456") is True
