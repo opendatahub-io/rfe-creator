@@ -81,7 +81,7 @@ def discover_ids_from_reviews():
     for path in sorted(glob.glob(pattern)):
         basename = os.path.basename(path)
         # DRAFT-001-review.md -> DRAFT-001
-        # RHAIRFE-1234-review.md -> RHAIRFE-1234
+        # PROJ-1234-review.md -> PROJ-1234
         rfe_id = basename.rsplit("-review.md", 1)[0]
         ids.append(rfe_id)
     return ids

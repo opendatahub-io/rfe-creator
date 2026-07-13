@@ -5,7 +5,7 @@ Combines prep_single (cleanup) + copy of the task file into the assessment
 directory. This replaces the two-step process in rfe.review (prep_single + cp).
 
 Usage:
-    python3 scripts/prep_assess.py RHAIRFE-1234
+    python3 scripts/prep_assess.py PROJ-1234
     python3 scripts/prep_assess.py DRAFT-001
 
 Outputs:

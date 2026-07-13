@@ -21,7 +21,7 @@ ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
 def main():
     parser = argparse.ArgumentParser(description="Clean up orphan children from a failed split")
-    parser.add_argument("parent_id", help="Parent RFE ID (e.g. RHAIRFE-100)")
+    parser.add_argument("parent_id", help="Parent RFE ID (e.g. PROJ-100)")
     args = parser.parse_args()
 
     parent_id = args.parent_id
