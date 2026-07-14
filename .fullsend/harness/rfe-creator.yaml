@@ -22,11 +22,11 @@ host_files:
     dest: /tmp/workspace/.gcp-oidc-token
     optional: true
 
-pre_script: scripts/pre-fetch.sh
-post_script: scripts/post-submit.sh
+pre_script: wrapper/pre-fetch.sh
+post_script: wrapper/post-submit.sh
 
 validation_loop:
-  script: scripts/validate-artifacts.sh
+  script: wrapper/validate-artifacts.sh
   max_iterations: 1
 
 env:
