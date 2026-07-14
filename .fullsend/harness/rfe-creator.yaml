@@ -12,6 +12,16 @@ skills:
   - skills/rfe.split
   - skills/rfe.submit
 
+host_files:
+  - src: env/gcp-vertex.env
+    dest: /tmp/workspace/.env.d/gcp-vertex.env
+    expand: true
+  - src: ${GOOGLE_APPLICATION_CREDENTIALS}
+    dest: /tmp/workspace/.gcp-credentials.json
+  - src: ${GCP_OIDC_TOKEN_FILE}
+    dest: /tmp/workspace/.gcp-oidc-token
+    optional: true
+
 pre_script: scripts/pre-fetch.sh
 post_script: scripts/post-submit.sh
 
@@ -19,12 +29,9 @@ validation_loop:
   script: scripts/validate-artifacts.sh
   max_iterations: 1
 
-env:
-  runner:
-    FULLSEND_WORK_ITEM_URL: "${FULLSEND_WORK_ITEM_URL}"
-    JIRA_SERVER: "${JIRA_SERVER}"
-    JIRA_USER: "${JIRA_USER}"
-    JIRA_TOKEN: "${JIRA_TOKEN}"
-    JIRA_PROJECT: "${JIRA_PROJECT}"
-  sandbox:
-    FULLSEND_WORK_ITEM_URL: "${FULLSEND_WORK_ITEM_URL}"
+runner_env:
+  FULLSEND_WORK_ITEM_URL: "${FULLSEND_WORK_ITEM_URL}"
+  JIRA_SERVER: "${JIRA_SERVER}"
+  JIRA_USER: "${JIRA_USER}"
+  JIRA_TOKEN: "${JIRA_TOKEN}"
+  JIRA_PROJECT: "${JIRA_PROJECT}"
