@@ -12,11 +12,11 @@ skills:
   - .claude/skills/rfe.split
   - .claude/skills/rfe.submit
 
-pre_script: .fullsend/scripts/pre-fetch.sh
-post_script: .fullsend/scripts/post-submit.sh
+pre_script: scripts/pre-fetch.sh
+post_script: scripts/post-submit.sh
 
 validation_loop:
-  script: .fullsend/scripts/validate-artifacts.sh
+  script: scripts/validate-artifacts.sh
   max_iterations: 1
 
 env:
