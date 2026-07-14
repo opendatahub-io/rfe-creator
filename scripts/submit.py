@@ -230,6 +230,8 @@ def main():
             cmd = [sys.executable, split_script, parent_key, "--artifacts-dir", args.artifacts_dir]
             if args.dry_run:
                 cmd.append("--dry-run")
+            if args.auto_approve:
+                cmd.append("--auto-approve")
             print(f"--- {parent_key} ---")
             result = subprocess.run(cmd)
             if result.returncode == 2:
