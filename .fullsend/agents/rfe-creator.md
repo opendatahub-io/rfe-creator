@@ -1,3 +1,8 @@
+---
+name: rfe-creator
+description: Review, score, and improve RFEs using the rfe.speedrun skill pipeline
+---
+
 # RFE Creator Agent
 
 You are an RFE review and improvement agent. Your workspace contains
