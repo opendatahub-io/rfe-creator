@@ -34,7 +34,7 @@ Original parent content.
 
 CHILD_TASK = """\
 ---
-rfe_id: RFE-{num:03d}
+rfe_id: DRAFT-{num:03d}
 title: Child RFE {num}
 priority: Major
 status: Ready
@@ -54,6 +54,7 @@ def _run_split_submit(artifacts_dir, parent_key="RHAIRFE-1000"):
         "JIRA_SERVER": "",
         "JIRA_USER": "",
         "JIRA_TOKEN": "",
+        "JIRA_PROJECT": "RHAIRFE",
     }
     return subprocess.run(
         [sys.executable, SCRIPT, parent_key, "--dry-run", "--artifacts-dir", artifacts_dir],
@@ -79,7 +80,7 @@ class TestMaxLeafChildren:
         """More than MAX_LEAF_CHILDREN → exit code 2."""
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", PARENT_TASK)
         for i in range(1, 8):  # 7 children > 6 limit
-            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", CHILD_TASK.format(num=i))
+            _write(f"{art_dir}/rfe-tasks/DRAFT-{i:03d}.md", CHILD_TASK.format(num=i))
 
         result = _run_split_submit(art_dir)
         assert result.returncode == 2
@@ -91,7 +92,7 @@ class TestMaxLeafChildren:
         """Exactly MAX_LEAF_CHILDREN → proceeds (no exit code 2)."""
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", PARENT_TASK)
         for i in range(1, 7):  # 6 children = limit
-            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", CHILD_TASK.format(num=i))
+            _write(f"{art_dir}/rfe-tasks/DRAFT-{i:03d}.md", CHILD_TASK.format(num=i))
 
         result = _run_split_submit(art_dir)
         # Should not exit with code 2 (may fail for other reasons
@@ -103,7 +104,7 @@ class TestMaxLeafChildren:
         """Fewer than MAX_LEAF_CHILDREN → proceeds."""
         _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", PARENT_TASK)
         for i in range(1, 4):  # 3 children
-            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", CHILD_TASK.format(num=i))
+            _write(f"{art_dir}/rfe-tasks/DRAFT-{i:03d}.md", CHILD_TASK.format(num=i))
 
         result = _run_split_submit(art_dir)
         assert result.returncode != 2
@@ -116,8 +117,8 @@ class TestSplitSummaryAdf:
         state = SubmissionState()
         state.phase2_done = {1: "RHAIRFE-100", 2: "RHAIRFE-101"}
         children = [
-            ("RFE-001", "First child", "Major", "/fake/path1"),
-            ("RFE-002", "Second child", "Major", "/fake/path2"),
+            ("DRAFT-001", "First child", "Major", "/fake/path1"),
+            ("DRAFT-002", "Second child", "Major", "/fake/path2"),
         ]
         adf = build_split_summary_adf("https://jira.example.com", children, state, 2)
 
@@ -143,7 +144,7 @@ class TestSplitSummaryAdf:
         """Trailing slash on server URL does not produce double slash."""
         state = SubmissionState()
         state.phase2_done = {1: "RHAIRFE-100"}
-        children = [("RFE-001", "Child", "Major", "/fake/path")]
+        children = [("DRAFT-001", "Child", "Major", "/fake/path")]
         adf = build_split_summary_adf("https://jira.example.com/", children, state, 1)
 
         item = adf["content"][1]["content"][0]

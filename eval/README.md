@@ -38,7 +38,7 @@ Each run produces:
 
 ## How it works
 
-The evaluation runs the `rfe.speedrun` skill headlessly against 20 test cases derived from real RHAIRFE Jira issues. Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
+The evaluation runs the `rfe.speedrun` skill headlessly against 20 test cases derived from real Jira issues. Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
 
 ### How it was generated
 

@@ -86,10 +86,10 @@ inputs:
 
 outputs:
   - path: artifacts/rfe-tasks
-    batch_pattern: "RFE-{n:03d}"
+    batch_pattern: "DRAFT-{n:03d}"
     schema: |
       RFE task files in Markdown with YAML frontmatter.
-      Naming: RFE-NNN.md (new, pre-submission) or RHAIRFE-NNNN.md (fetched).
+      Naming: DRAFT-NNN.md (new, pre-submission) or <PROJECT>-NNNN.md (fetched).
       Frontmatter fields (validated by scripts/frontmatter.py):
         rfe_id, title, priority (Blocker/Critical/Major/Normal/Minor),
         size (S/M/L/XL), status (Draft/Ready/Submitted/Archived),
@@ -98,7 +98,7 @@ outputs:
       Business Justification, Acceptance Criteria, Success Criteria.
 
   - path: artifacts/rfe-reviews
-    batch_pattern: "RFE-{n:03d}"
+    batch_pattern: "DRAFT-{n:03d}"
     schema: |
       Review and assessment files for each RFE.
       Files per RFE:
@@ -118,7 +118,7 @@ outputs:
       Revision History.
 
   - path: artifacts/rfe-originals
-    batch_pattern: "RFE-{n:03d}"
+    batch_pattern: "DRAFT-{n:03d}"
     schema: |
       Backup of original RFE content before revisions. One file per RFE:
       {ID}.md containing the original body (no frontmatter). Used for

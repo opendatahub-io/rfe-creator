@@ -90,9 +90,9 @@ def art_dir(tmp_path):
 class TestCollectDefault:
     def test_groups_by_recommendation(self, art_dir):
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001",
+                rfe_id="DRAFT-001",
                 score=9,
                 pass_val="true",
                 recommendation="submit",
@@ -100,9 +100,9 @@ class TestCollectDefault:
             ),
         )
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-002-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-002-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-002",
+                rfe_id="DRAFT-002",
                 score=3,
                 pass_val="false",
                 recommendation="reject",
@@ -110,102 +110,151 @@ class TestCollectDefault:
             ),
         )
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-003-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-003-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-003",
+                rfe_id="DRAFT-003",
                 score=7,
                 pass_val="true",
                 recommendation="split",
                 auto_revised="false",
             ),
         )
-        out, _, rc = _run(["RFE-001", "RFE-002", "RFE-003"])
+        out, _, rc = _run(["DRAFT-001", "DRAFT-002", "DRAFT-003"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["SUBMIT"]
-        assert "RFE-002" in groups["REJECT"]
-        assert "RFE-003" in groups["SPLIT"]
+        assert "DRAFT-001" in groups["SUBMIT"]
+        assert "DRAFT-002" in groups["REJECT"]
+        assert "DRAFT-003" in groups["SPLIT"]
 
     def test_autorevise_reject_maps_to_reject(self, art_dir):
         """autorevise_reject should be grouped as REJECT, not ERRORS."""
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001",
+                rfe_id="DRAFT-001",
                 score=4,
                 pass_val="false",
                 recommendation="autorevise_reject",
                 auto_revised="true",
             ),
         )
-        out, _, rc = _run(["RFE-001"])
+        out, _, rc = _run(["DRAFT-001"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["REJECT"]
+        assert "DRAFT-001" in groups["REJECT"]
         assert groups["ERRORS"] == []
 
     def test_missing_review_file_goes_to_errors(self, art_dir):
-        out, _, rc = _run(["RFE-MISSING"])
+        out, _, rc = _run(["DRAFT-MISSING"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-MISSING" in groups["ERRORS"]
+        assert "DRAFT-MISSING" in groups["ERRORS"]
 
     def test_error_field_goes_to_errors(self, art_dir):
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
-            ERROR_REVIEW.format(rfe_id="RFE-001", error="fetch_failed"),
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
+            ERROR_REVIEW.format(rfe_id="DRAFT-001", error="fetch_failed"),
         )
-        out, _, rc = _run(["RFE-001"])
+        out, _, rc = _run(["DRAFT-001"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["ERRORS"]
+        assert "DRAFT-001" in groups["ERRORS"]
 
 
 class TestCollectReassess:
     def test_revised_and_failing_needs_reassess(self, art_dir):
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001",
+                rfe_id="DRAFT-001",
                 score=5,
                 pass_val="false",
                 recommendation="revise",
                 auto_revised="true",
             ),
         )
-        out, _, rc = _run(["--reassess", "RFE-001"])
+        out, _, rc = _run(["--reassess", "DRAFT-001"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["REASSESS"]
+        assert "DRAFT-001" in groups["REASSESS"]
 
     def test_passing_goes_to_done(self, art_dir):
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001",
+                rfe_id="DRAFT-001",
                 score=9,
                 pass_val="true",
                 recommendation="submit",
                 auto_revised="true",
             ),
         )
-        out, _, rc = _run(["--reassess", "RFE-001"])
+        out, _, rc = _run(["--reassess", "DRAFT-001"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["DONE"]
+        assert "DRAFT-001" in groups["DONE"]
 
     def test_not_revised_goes_to_done(self, art_dir):
         _write(
-            f"{art_dir}/artifacts/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001",
+                rfe_id="DRAFT-001",
                 score=5,
                 pass_val="false",
                 recommendation="revise",
                 auto_revised="false",
             ),
         )
-        out, _, rc = _run(["--reassess", "RFE-001"])
+        out, _, rc = _run(["--reassess", "DRAFT-001"])
         assert rc == 0
         groups = _parse_output(out)
-        assert "RFE-001" in groups["DONE"]
+        assert "DRAFT-001" in groups["DONE"]
+
+
+class TestFromReviews:
+    def test_discovers_ids_from_review_files(self, art_dir):
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-001",
+                score=9,
+                pass_val="true",
+                recommendation="submit",
+                auto_revised="false",
+            ),
+        )
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-002-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-002",
+                score=3,
+                pass_val="false",
+                recommendation="reject",
+                auto_revised="false",
+            ),
+        )
+        out, _, rc = _run(["--from-reviews"])
+        assert rc == 0
+        groups = _parse_output(out)
+        assert "DRAFT-001" in groups["SUBMIT"]
+        assert "DRAFT-002" in groups["REJECT"]
+
+    def test_no_review_files_exits_nonzero(self, art_dir):
+        _, _, rc = _run(["--from-reviews"])
+        assert rc != 0
+
+    def test_from_reviews_with_reassess(self, art_dir):
+        _write(
+            f"{art_dir}/artifacts/rfe-reviews/DRAFT-001-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="DRAFT-001",
+                score=5,
+                pass_val="false",
+                recommendation="revise",
+                auto_revised="true",
+            ),
+        )
+        out, _, rc = _run(["--from-reviews", "--reassess"])
+        assert rc == 0
+        groups = _parse_output(out)
+        assert "DRAFT-001" in groups["REASSESS"]

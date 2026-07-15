@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Allocate the next available RFE-NNN ID(s) atomically.
+"""Allocate the next available DRAFT-NNN ID(s) atomically.
 
 Uses a lock file to prevent concurrent split agents from picking
 the same IDs.
 
 Usage:
     python3 scripts/next_rfe_id.py 3
-    # RFE-012
-    # RFE-013
-    # RFE-014
+    # DRAFT-012
+    # DRAFT-013
+    # DRAFT-014
 
     python3 scripts/next_rfe_id.py --from-batch batch.yaml
     # allocates one ID per entry in the YAML batch file (avoids N=$(...) in skills)
@@ -25,11 +25,11 @@ LOCK_FILE = "artifacts/.rfe-id-lock"
 
 
 def get_highest_rfe_number():
-    """Scan artifacts/rfe-tasks/ for the highest RFE-NNN number."""
+    """Scan artifacts/rfe-tasks/ for the highest DRAFT-NNN number."""
     highest = 0
-    for path in glob.glob(os.path.join(TASKS_DIR, "RFE-*.md")):
+    for path in glob.glob(os.path.join(TASKS_DIR, "DRAFT-*.md")):
         basename = os.path.basename(path)
-        match = re.match(r"RFE-(\d+)", basename)
+        match = re.match(r"DRAFT-(\d+)", basename)
         if match:
             num = int(match.group(1))
             if num > highest:
@@ -72,7 +72,7 @@ def main():
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         highest = get_highest_rfe_number()
         for i in range(count):
-            rfe_id = f"RFE-{highest + 1 + i:03d}"
+            rfe_id = f"DRAFT-{highest + 1 + i:03d}"
             # Touch a placeholder so subsequent calls see it
             placeholder = os.path.join(TASKS_DIR, f"{rfe_id}.md")
             open(placeholder, "a").close()

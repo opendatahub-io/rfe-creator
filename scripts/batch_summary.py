@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Aggregate RFE review results for batch summaries."
     )
-    parser.add_argument("ids", nargs="*", help="RFE IDs (e.g. RHAIRFE-100)")
+    parser.add_argument("ids", nargs="*", help="RFE IDs (e.g. PROJ-100)")
     parser.add_argument(
         "--ids-file", help="Read RFE IDs from a file (one per line) instead of positional args"
     )

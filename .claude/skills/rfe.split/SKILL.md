@@ -1,6 +1,6 @@
 ---
 name: rfe.split
-description: Split oversized RFEs into smaller, right-sized RFEs. Accepts one or more IDs (e.g., /rfe.split RHAIRFE-1234 RHAIRFE-5678). Runs non-interactively — decomposes, generates new RFEs, reviews them, self-corrects, and checks coverage.
+description: Split oversized RFEs into smaller, right-sized RFEs. Accepts one or more IDs (e.g., /rfe.split PROJ-1234 PROJ-5678). Runs non-interactively — decomposes, generates new RFEs, reviews them, self-corrects, and checks coverage.
 user-invocable: true
 allowed-tools: Glob, Bash, Agent, Skill, AskUserQuestion
 ---
@@ -11,7 +11,7 @@ You are an RFE splitting orchestrator. Your job is to coordinate RFE decompositi
 
 Parse `$ARGUMENTS` for flags and IDs:
 - Strip `--headless` flag if present (suppresses end-of-run summary)
-- Remaining arguments are one or more space-separated RFE IDs (RHAIRFE-NNNN or RFE-NNN)
+- Remaining arguments are one or more space-separated RFE IDs (Jira key or RFE-NNN)
 
 Persist parsed flags (survives context compression):
 
@@ -26,6 +26,15 @@ Persist all IDs to disk (survives context compression):
 ```bash
 python3 scripts/state.py write-ids tmp/split-all-ids.txt <all_IDs>
 ```
+
+## Split Step 0.5: Resolve Jira Project
+
+Run:
+```bash
+python3 scripts/resolve_project.py
+```
+
+If it exits non-zero, ask the user: "What Jira project key should I use? ?" Then export `JIRA_PROJECT=<answer>` and re-run to confirm.
 
 For each ID, verify the task file exists via Glob (`artifacts/rfe-tasks/<ID>.md`). If missing, report and skip.
 
@@ -157,10 +166,10 @@ Returning to **Step 3d: Between-Batch Summary** of `/rfe.auto-fix`. Re-read the 
 ```
 ## Split Complete
 
-Original: RHAIRFE-1234 (archived)
+Original: PROJ-1234 (archived)
 New RFEs:
-- RFE-003: <title> (Priority: Normal) — PASS
-- RFE-004: <title> (Priority: Normal) — PASS
+- DRAFT-003: <title> (Priority: Normal) — PASS
+- DRAFT-004: <title> (Priority: Normal) — PASS
 
 Coverage: All original scope items covered
 Review: All new RFEs passed

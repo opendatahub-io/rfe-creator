@@ -82,23 +82,23 @@ class TestSplitChildrenIncluded:
         )
         # Child tasks with parent_key
         _write(
-            f"{art_dir}/rfe-tasks/RFE-001.md",
-            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+            f"{art_dir}/rfe-tasks/DRAFT-001.md",
+            TASK_TEMPLATE.format(rfe_id="DRAFT-001", extra="parent_key: RHAIRFE-1234"),
         )
         _write(
-            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+                rfe_id="DRAFT-001", score=9, pass_val="true", recommendation="submit", right_sized=2
             ),
         )
         _write(
-            f"{art_dir}/rfe-tasks/RFE-002.md",
-            TASK_TEMPLATE.format(rfe_id="RFE-002", extra="parent_key: RHAIRFE-1234"),
+            f"{art_dir}/rfe-tasks/DRAFT-002.md",
+            TASK_TEMPLATE.format(rfe_id="DRAFT-002", extra="parent_key: RHAIRFE-1234"),
         )
         _write(
-            f"{art_dir}/rfe-reviews/RFE-002-review.md",
+            f"{art_dir}/rfe-reviews/DRAFT-002-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-002", score=8, pass_val="true", recommendation="submit", right_sized=1
+                rfe_id="DRAFT-002", score=8, pass_val="true", recommendation="submit", right_sized=1
             ),
         )
 
@@ -107,8 +107,8 @@ class TestSplitChildrenIncluded:
 
         ids_in_report = [e["id"] for e in report["per_rfe"]]
         assert "RHAIRFE-1234" in ids_in_report
-        assert "RFE-001" in ids_in_report
-        assert "RFE-002" in ids_in_report
+        assert "DRAFT-001" in ids_in_report
+        assert "DRAFT-002" in ids_in_report
         assert len(report["per_rfe"]) == 3
 
     def test_children_not_duplicated_if_already_passed(self, art_dir):
@@ -128,20 +128,20 @@ class TestSplitChildrenIncluded:
             ),
         )
         _write(
-            f"{art_dir}/rfe-tasks/RFE-001.md",
-            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+            f"{art_dir}/rfe-tasks/DRAFT-001.md",
+            TASK_TEMPLATE.format(rfe_id="DRAFT-001", extra="parent_key: RHAIRFE-1234"),
         )
         _write(
-            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+                rfe_id="DRAFT-001", score=9, pass_val="true", recommendation="submit", right_sized=2
             ),
         )
 
-        report = build_report(["RHAIRFE-1234", "RFE-001"], "2026-04-01T22:50:53Z", 5, [], [])
+        report = build_report(["RHAIRFE-1234", "DRAFT-001"], "2026-04-01T22:50:53Z", 5, [], [])
 
         ids_in_report = [e["id"] for e in report["per_rfe"]]
-        assert ids_in_report.count("RFE-001") == 1
+        assert ids_in_report.count("DRAFT-001") == 1
         assert len(report["per_rfe"]) == 2
 
     def test_input_count_reflects_original_ids(self, art_dir):
@@ -161,13 +161,13 @@ class TestSplitChildrenIncluded:
             ),
         )
         _write(
-            f"{art_dir}/rfe-tasks/RFE-001.md",
-            TASK_TEMPLATE.format(rfe_id="RFE-001", extra="parent_key: RHAIRFE-1234"),
+            f"{art_dir}/rfe-tasks/DRAFT-001.md",
+            TASK_TEMPLATE.format(rfe_id="DRAFT-001", extra="parent_key: RHAIRFE-1234"),
         )
         _write(
-            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            f"{art_dir}/rfe-reviews/DRAFT-001-review.md",
             REVIEW_TEMPLATE.format(
-                rfe_id="RFE-001", score=9, pass_val="true", recommendation="submit", right_sized=2
+                rfe_id="DRAFT-001", score=9, pass_val="true", recommendation="submit", right_sized=2
             ),
         )
 

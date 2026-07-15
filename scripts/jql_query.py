@@ -2,12 +2,12 @@
 """Execute a JQL query against Jira and return paginated key list.
 
 Usage:
-    python3 scripts/jql_query.py "project = RHAIRFE AND status = New" [--limit N]
+    python3 scripts/jql_query.py "project = MYPROJ AND status = New" [--limit N]
 
 Output:
     TOTAL=<total_matching>
-    RHAIRFE-100
-    RHAIRFE-101
+    PROJ-100
+    PROJ-101
     ...
 """
 

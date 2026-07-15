@@ -561,7 +561,7 @@ class TestPollMode:
 
     def test_poll_max_wait_caps_id_list(self, tmp_path):
         """10+ pending IDs → message shows first 5 + '... and N more'."""
-        ids = [f"RFE-{i:03d}" for i in range(10)]
+        ids = [f"DRAFT-{i:03d}" for i in range(10)]
         with (
             patch.dict(
                 "check_review_progress.PHASE_CHECKS",
@@ -575,7 +575,7 @@ class TestPollMode:
         assert "... and 5 more" in out
         # First 5 sorted IDs should be present
         for i in range(5):
-            assert f"RFE-{i:03d}" in out
+            assert f"DRAFT-{i:03d}" in out
 
     def test_poll_max_wait_negative_rejected(self):
         """--max-wait -1 should error."""

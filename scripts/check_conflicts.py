@@ -32,7 +32,7 @@ import re
 import sys
 import unicodedata
 
-from artifact_utils import scan_task_files
+from artifact_utils import is_jira_key, scan_task_files
 from jira_utils import adf_to_markdown, get_issue, require_env
 
 
@@ -101,7 +101,7 @@ def main():
     jira_rfes = []
     for task_path, task_data in tasks:
         rfe_id = task_data["rfe_id"]
-        if not rfe_id.startswith("RHAIRFE-"):
+        if not is_jira_key(rfe_id):
             continue
         if task_data.get("status") == "Archived":
             continue
