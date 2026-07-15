@@ -2,6 +2,7 @@
 """Group RFE IDs by review recommendation or reassess status."""
 
 import argparse
+import glob
 import os
 import sys
 
@@ -72,6 +73,20 @@ def collect_errors(ids):
     print(f"ERRORS={','.join(error_ids)}")
 
 
+def discover_ids_from_reviews():
+    """Glob review files and extract IDs from filenames."""
+    review_dir = os.path.join(ARTIFACTS_DIR, "rfe-reviews")
+    pattern = os.path.join(review_dir, "*-review.md")
+    ids = []
+    for path in sorted(glob.glob(pattern)):
+        basename = os.path.basename(path)
+        # DRAFT-001-review.md -> DRAFT-001
+        # PROJ-1234-review.md -> PROJ-1234
+        rfe_id = basename.rsplit("-review.md", 1)[0]
+        ids.append(rfe_id)
+    return ids
+
+
 def main():
     parser = argparse.ArgumentParser(description="Group RFE IDs by review recommendation.")
     parser.add_argument("ids", nargs="*", help="RFE IDs to check")
@@ -79,14 +94,25 @@ def main():
         "--ids-file", help="Read RFE IDs from a file (one per line) instead of positional args"
     )
     parser.add_argument(
+        "--from-reviews",
+        action="store_true",
+        help="Discover IDs by globbing artifacts/rfe-reviews/*-review.md",
+    )
+    parser.add_argument(
         "--reassess", action="store_true", help="Collect re-assess candidates instead"
     )
     parser.add_argument("--errors", action="store_true", help="Collect IDs with error field set")
     args = parser.parse_args()
 
-    ids = resolve_ids(args.ids, args.ids_file)
-    if not ids:
-        parser.error("no RFE IDs provided (pass positionally or via --ids-file)")
+    if args.from_reviews:
+        ids = discover_ids_from_reviews()
+        if not ids:
+            print("ERROR: no review files found in artifacts/rfe-reviews/", file=sys.stderr)
+            sys.exit(1)
+    else:
+        ids = resolve_ids(args.ids, args.ids_file)
+        if not ids:
+            parser.error("no RFE IDs provided (pass positionally or via --ids-file)")
 
     if args.errors:
         collect_errors(ids)
