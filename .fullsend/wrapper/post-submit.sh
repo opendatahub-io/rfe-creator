@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Get recommendations — outputs lines like SUBMIT=RHAIRFE-1234,DRAFT-001
+# Ensure scripts/ is available in CWD (see pre-fetch.sh for explanation)
+if [[ ! -e scripts ]]; then
+    REAL_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd -P)"
+    ln -s "$REAL_SCRIPTS" scripts
+fi
+
+# Get recommendations — outputs lines like SUBMIT=PROJ-1234,DRAFT-001
 eval "$(python3 scripts/collect_recommendations.py --from-reviews)"
 
 if [[ -z "${SUBMIT:-}" ]]; then
