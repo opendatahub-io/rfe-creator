@@ -89,7 +89,7 @@ outputs:
     batch_pattern: "DRAFT-{n:03d}"
     schema: |
       RFE task files in Markdown with YAML frontmatter.
-      Naming: DRAFT-NNN.md (new, pre-submission) or RHAIRFE-NNNN.md (fetched).
+      Naming: DRAFT-NNN.md (new, pre-submission) or <PROJECT>-NNNN.md (fetched).
       Frontmatter fields (validated by scripts/frontmatter.py):
         rfe_id, title, priority (Blocker/Critical/Major/Normal/Minor),
         size (S/M/L/XL), status (Draft/Ready/Submitted/Archived),
