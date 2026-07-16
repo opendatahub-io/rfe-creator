@@ -1,7 +1,7 @@
 ---
 name: rfe.speedrun
 description: End-to-end RFE pipeline. Accepts a single idea, Jira key(s), or a YAML batch file. Creates, reviews, auto-fixes (with splits), and submits. Supports --headless, --announce-complete, and --dry-run for CI.
-argument-hint: "<idea|RHAIRFE-key|--input batch.yaml> [--headless] [--dry-run] [--announce-complete]"
+argument-hint: "<idea|RHAIRFE-key|--input batch.yaml> [--headless] [--dry-run] [--announce-complete] [--batch-size <N>]"
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill
 ---
@@ -18,6 +18,7 @@ This skill creates and modifies files only in these locations:
 - `artifacts/rfe-reviews/` (review and feasibility files, created by `/rfe.auto-fix`)
 - `artifacts/rfe-originals/` (pre-revision backups, created by `/rfe.auto-fix`)
 - `artifacts/auto-fix-runs/` (run reports, created by `/rfe.auto-fix`)
+- `artifacts/rfe-rubric.md` (rubric, bootstrapped by `/rfe.create` if missing)
 
 Do NOT modify files outside these directories. In particular, do not edit `CLAUDE.md`, `scripts/`, or `.claude/` files during pipeline execution, because these are shared infrastructure that other skills depend on.
 
@@ -160,7 +161,7 @@ python3 scripts/check_autofix_complete.py
 If incomplete (exit code 1), the output shows `MISSING_IDS=RFE-006,RFE-007,...`. Re-invoke auto-fix with only the missing IDs:
 
 ```text
-/rfe.auto-fix [--headless] [--batch-size N] <missing_IDs>
+/rfe.auto-fix [--headless] --batch-size <batch_size> <missing_IDs>
 ```
 
 Repeat the verify+retry cycle until all RFEs have reviews or 3 retries have been exhausted.
