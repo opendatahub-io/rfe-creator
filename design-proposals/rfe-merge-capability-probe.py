@@ -58,6 +58,19 @@ IDENTITY_FIELDS = {"reporter", "assignee"}
 TRACKED_EDITABILITY_FIELDS = ["reporter", "assignee", "priority", "labels", "components", "parent"]
 
 
+def is_https_url(url: str | None) -> bool:
+    """True only for a well-formed https:// URL with a non-empty host.
+
+    Guards against sending Basic auth (base64, not encryption) over
+    plain HTTP -- a missing scheme, a bare hostname, or an accidental
+    http:// typo in JIRA_SERVER should never silently proceed.
+    """
+    if not url:
+        return False
+    parsed = urllib.parse.urlsplit(url)
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
 def is_identity_field(field_id: str, schema: dict[str, Any] | None) -> bool:
     """True for known identity fields or any field whose Jira schema is user-valued.
 
@@ -368,6 +381,17 @@ def main() -> int:
     if not all((server, user, token)):
         print(
             "Set JIRA_SERVER, JIRA_USER, and JIRA_TOKEN before running.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not is_https_url(server):
+        # Basic auth sends the token base64-encoded, not encrypted -- over
+        # plain HTTP that's the token in the clear on the wire. A typo'd
+        # JIRA_SERVER (http:// instead of https://, or no scheme at all)
+        # should never silently proceed to send credentials.
+        print(
+            f"JIRA_SERVER must be an https:// URL, got: {server!r}",
             file=sys.stderr,
         )
         return 1

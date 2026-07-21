@@ -24,6 +24,8 @@
 | 2026-07-20 | Eighth adversarial review pass, two narrow specification gaps confirmed against current text — no further state-machine issues found: (1) **Fixed a real self-contradiction from last round's own fix** — the canonicalization rules said "the payload fragment itself carries no trailing newline beyond that one [separator]" and, two bullets later, "nothing else is trimmed (no additional whitespace stripping that could silently absorb a real trailing blank line in the payload)" — both can't hold for a payload that genuinely ends in a blank line, and invariant 3 requires the original content back verbatim, blank lines included. Resolved by separating the two concerns cleanly: `canonical_payload` is line-ending-normalized but otherwise exactly the original text, whatever its own trailing newlines are; the posted comment is always `canonical_payload + "\n" + marker`, with the separator being one *mechanically appended* `\n` that's never conflated with anything already in `canonical_payload`; `body_sha256` hashes `canonical_payload` alone, before that separator exists. (2) **Fixed a real gap in applying Phase 4's own principle to itself** — the pre-close branch verified the survivor, provenance, and link, then transitioned the absorbed issue using the classification read from step 1, without a fresh check immediately before the transition itself; the already-closed branch's marker backfill (itself a Jira write) had the same gap. Both are the identical "immediately before mutation" principle Phase 3's per-link loop already applies strictly to its own writes — Phase 4 just hadn't been held to the same standard. Added an explicit refetch-and-reconfirm step right before each of those two writes. |
 | 2026-07-20 | Non-blocking wording hardening, final review pass: both survivor-recheck spots added last round said "refetch the survivor" without naming what to compare the result against, which reads like a GET without a validation step even though a comparison was clearly intended. Both now explicitly say "refetch and reconfirm it still matches `survivor_before_close`" — the already-closed branch's marker backfill, and (added for consistency) the pre-close branch's own post-transition marker write, which shares the identical write and deserved the identical explicit check. No remaining state-machine or provenance-integrity issue identified; the design is implementation-ready pending the manual Jira rehearsal (section 16). |
 | 2026-07-20 | The two JQL count queries (section 19) came back: `issueLinkType = "Polaris merge work item link"` → 0 issues, `issueLinkType = Duplicate` → 50+ issues. Exactly the predicted outcome — `Duplicate` is a real, actively-used convention; Polaris types are confirmed unused for this purpose on this instance. `merge_link_candidates` (section 5) updated from a recommendation to a confirmed decision; the corresponding section 19 open question moved to resolved. Separately: before recording this, replaced every real ticket key in this doc (three tickets actually probed) with placeholders (`sample-new`/`sample-mid-workflow`/`sample-closed`) — this is a public repository, and while what was recorded about those tickets was already minimal (status/link-presence only, no titles or content, per the redaction work in earlier rounds), the ticket identifiers themselves added no decision-relevant value and were removed rather than argued over. Only the identifiers changed; every finding, count, and structural fact in this document is unchanged. |
+| 2026-07-21 | PR #133 opened against upstream; automated review (CodeRabbit) posted 6 actionable comments, each checked against the actual current text before acting, not taken on faith. Four were real and fixed: (1) **HTTPS enforcement in the probe** — `request_json()` had no scheme validation on `JIRA_SERVER`; a typo'd `http://` would send the Basic-auth token in the clear. Added `is_https_url()` and a startup check in `main()`, with unit test coverage. (2) **No path-traversal guard on proposal-controlled file paths** — `content.merged_description_path`/`source_mapping_path` (section 8) were bare strings with no canonicalization rule; added invariant 16 (section 4) requiring the executor to sandbox both against a fixed artifacts root before opening them, since a `proposal_hash`-verified proposal is still an untrusted path string until then. (3) **Missing issue-security-level eligibility check** — section 6's "same project and issue type" said nothing about Jira's separate Issue Security Level scheme; a more-restricted absorbed issue's content merging into a less-restricted survivor is a real visibility escalation, not just a metadata mismatch. Added as an explicit MVP eligibility requirement, forcing `needs_human_review` on a mismatch, and added `security` to `metadata_hash`'s field list (section 7) for the same reason `project`/`issuetype` are there. (4) **`expected_merge_links` didn't pin the actual probed Jira capability values** — `fingerprint_profile` versions the hashing algorithm, but nothing bound the proposal to the specific link-type ID or transition payload it was approved against, so an admin renaming `Duplicate` or changing the `Closed` transition between approval and execution would go undetected. Added `approved_write_profile` (section 8, included in `proposal_hash`), and updated phase 3/4 (section 11) to fail closed against it rather than re-deriving these values mid-execution. One finding was already handled — the "phase 1 needs full revalidation" comment describes exactly what checkpoints #1 and #2 in section 11 already do; likely a review-window limitation on CodeRabbit's side, not a real gap. One was scoped down rather than fully designed: concurrent-executor safety is real but out of scope for this MVP (single-operator, sequential execution assumed) — added as an explicit non-goal (section 2) rather than building a lock mechanism now. Separately, added `tests/test_rfe_merge_capability_probe.py` (37 tests, direct-import + subprocess-CLI style matching this repo's existing conventions) covering the probe's redaction guarantees, HTTPS enforcement, and error-handling paths — addressing the pre-merge check's fair point that the probe shipped with no repo-tracked tests, only ad-hoc verification during design review. |
+| 2026-07-21 | Human review corrected the concurrent-executor non-goal (section 2) before it shipped: the previous wording suggested "a Jira-side or file-based lease" as a plausible future fix, which is wrong, not just unfinished — Jira has no atomic create-if-absent for comments or links, so a lease built from a Jira write needs its own check-then-set, which relocates the exact race it's meant to prevent rather than closing it. Rewrote the bullet to state the residual risk plainly (two genuinely concurrent executors can race the same writes; this document doesn't claim otherwise) and to explicitly distinguish what idempotency markers (section 13) actually buy — crash-and-resume safety for one executor, restarted, not concurrency control for two — rather than letting the two get conflated. Also fixed 4 markdownlint-flagged unlabeled code fences (the two CLI-invocation examples in section 6, the recovery-marker block in section 13, and the layout-compatibility block in section 17) by adding `text` language tags; the other 9 bare fences in the document are closing fences and don't need one. |
 
 As probe and rehearsal results come in, append rows here rather than
 rewriting the rationale above them — the goal is that empirical
@@ -64,6 +66,25 @@ transition machinery that split already has proven out.
 - Cross-project merging
 - Automatic survivor selection without approval
 - Fully unattended ticket closure
+- **Safe concurrent execution.** One executor per proposal at a time —
+  enforced by the operator/process convention, not by anything in this
+  design. Jira exposes no atomic create-if-absent for comments or
+  links, so a "lease" implemented as a Jira write would need its own
+  check-then-set, which is the exact race it's trying to prevent —
+  it relocates the TOCTOU window, it doesn't close it. A file-based
+  lock has the same problem across machines, and adds a new failure
+  mode (a stale lock file after a crash) without removing the Jira-side
+  one. The idempotency markers (section 13) are best-effort mitigation
+  for **crash-and-resume** — one executor, interrupted, restarted later
+  — which is the failure mode this design actually targets. They are
+  not a concurrency-control mechanism, and the residual risk is real:
+  two executors genuinely running at the same time against the same
+  proposal can race the same writes, and this document does not claim
+  otherwise. If concurrent execution becomes a real scenario, it needs
+  its own design with its own primitive (most plausibly Jira's own
+  optimistic-locking support, if any, or an external coordinator
+  outside Jira entirely) — not a lease bolted onto phases that assume
+  they're the only writer.
 
 ## 3. Terminology
 
@@ -107,6 +128,8 @@ These invariants must hold and should guide implementation and future refactors:
 14. **The merged RFE must pass review and remain right-sized.** The planning gate runs `/rfe.review` on the reconciled draft before any Jira write; a merge that produces an oversized or low-quality RFE is not complete just because the Jira mechanics succeeded.
 
 15. **Any unresolved content conflict prevents execution.** If reconciliation can't resolve a contradiction between source acceptance criteria (not just "different wording," but actual conflicting requirements), the merge proposal records it under `unresolved_conflicts` and cannot proceed to phase 1 until a human resolves it.
+
+16. **Proposal-controlled file paths never resolve outside the artifacts root.** `content.merged_description_path` and `content.source_mapping_path` (section 8) are read from a proposal file — even a `proposal_hash`-verified one is still an untrusted path string until sandboxed. The executor must canonicalize each against a fixed artifacts root, reject absolute paths, `..` traversal, and symlink escapes, and refuse to read/write if the canonical result falls outside that root. `proposal_hash` proves the proposal wasn't tampered with after approval; it doesn't by itself prove a path inside it was ever safe to open.
 
 ## 5. Jira capability profile
 
@@ -284,13 +307,13 @@ absorbed issues only (an earlier draft repeated the survivor as both the
 `--into` value and a positional argument, which was just a typo, not a
 real repeat-the-survivor-twice syntax):
 
-```
+```text
 /rfe.merge --into RHAIRFE-1234 RHAIRFE-1567
 ```
 
 Discovery-driven invocation:
 
-```
+```text
 /rfe.merge --report artifacts/rfe-dupes/dupes-report.yaml --pair pair-001
 ```
 
@@ -299,6 +322,17 @@ MVP requirements, regardless of invocation form:
 - At least two existing Jira issues.
 - An explicit survivor (never inferred without approval).
 - Same Jira project and issue type.
+- **Same issue security level.** Jira's Issue Security Level is a
+  separate, orthogonal permission scheme from project-level access —
+  an issue can be restricted to a smaller audience than the project it
+  lives in. "Same project and issue type" says nothing about this.
+  Merging pulls an absorbed issue's content (acceptance criteria,
+  provenance) into the survivor; if the absorbed issue is more
+  restricted than the survivor, that content becomes visible to
+  whoever can already see the survivor — a real visibility escalation,
+  not just a metadata mismatch. Differing security levels force
+  `needs_human_review`, the same posture as an unexpected absorbed-issue
+  terminal state below.
 - Compatible parent relationship (see metadata policy, section 9).
 - Non-terminal survivor (can't merge into an already-closed issue).
 - Human approval before any write.
@@ -337,7 +371,7 @@ pairs:
           value: "..."
         metadata_hash:
           algorithm: sha256
-          fields: [project, issuetype, summary, priority, components, labels, parent, status, resolution, reporter, assignee]
+          fields: [project, issuetype, security, summary, priority, components, labels, parent, status, resolution, reporter, assignee]
           value: "..."
         relationship_hash:
           algorithm: sha256
@@ -351,7 +385,7 @@ pairs:
         content_hash: {algorithm: sha256, canonicalization: rfe-creator-adf-v1, value: "..."}
         metadata_hash:
           algorithm: sha256
-          fields: [project, issuetype, summary, priority, components, labels, parent, status, resolution, reporter, assignee]
+          fields: [project, issuetype, security, summary, priority, components, labels, parent, status, resolution, reporter, assignee]
           value: "..."
         relationship_hash: {algorithm: sha256, value: "..."}
 
@@ -396,7 +430,11 @@ just need a metadata-policy re-check. `resolution` is there because
 an absorbed issue can already be terminal (section 6's absorbed-issue
 policy) or become terminal concurrently, and closure recovery (section
 14) needs to distinguish "still open as approved" from "someone
-resolved it a different way while the merge was in flight."
+resolved it a different way while the merge was in flight." `security`
+is there for the same reason as `project`/`issuetype`: it's now a
+section 6 eligibility requirement (same issue security level), so a
+post-approval change to it can invalidate eligibility itself, not just
+trigger a visibility re-check.
 
 ## 8. Merge proposal artifact
 
@@ -426,7 +464,38 @@ fingerprint_profile:
   provenance_canonicalization: rfe-merge-provenance-v1   # how a comment's payload fragment is normalized before hashing (section 13)
   provenance_chunking: rfe-merge-chunks-v1                # how the survivor's description is split into parts, and reassembled
 
+# Pins the specific Jira configuration (section 5's jira_capabilities)
+# this proposal was approved against. fingerprint_profile versions the
+# *hashing* algorithm; this versions the *external Jira facts* the
+# write phases depend on -- which link type, which transition, which
+# resolution. Without it, an admin renaming the Duplicate link type or
+# changing the Closed transition's required fields between approval
+# and execution would go undetected until a write failed in a
+# confusing way, or worse, silently succeeded against the wrong thing.
+# Every write phase (11) that touches Jira validates against this
+# block before acting, and fails closed on any mismatch -- it never
+# falls back to re-deriving these values from a fresh capability probe
+# mid-execution, since that would mean executing against a
+# configuration nobody approved.
+approved_write_profile:
+  duplicate_link:
+    type_id: "10002"
+    type_name: Duplicate
+    inward_label: is duplicated by
+    outward_label: duplicates
+    request_orientation: PENDING_REHEARSAL   # section 5/16 -- absorbed=inwardIssue, survivor=outwardIssue, unconfirmed
+  closure_transition:
+    id: "..."            # from section 5's jira_capabilities.rehearsal.verified_transition_payload
+    name: Closed
+    resolution_id: "10002"
+    resolution_name: Duplicate
+
 content:
+  # Both paths below must be canonicalized against a fixed artifacts
+  # root before the executor opens them -- reject absolute paths, ..
+  # traversal, and symlink escapes. See invariant 16 (section 4);
+  # proposal_hash proves the string wasn't tampered with, not that the
+  # path it names is safe to open.
   merged_description_path: artifacts/rfe-merges/RHAIRFE-1234-merged.md
   # Phase 1's survivor provenance comment and step 6 of the planning
   # gate both need this file, not just its hash -- a resumed executor
@@ -564,9 +633,10 @@ approved_output:
 
 # proposal_hash = SHA-256 of the canonical JSON encoding of exactly these
 # top-level keys: schema_version, proposal_id, survivor, absorbed,
-# fingerprint_profile, content, metadata_policy, risk_gates, approved_at,
-# approved_baseline, expected_after_survivor_update, expected_after_link,
-# expected_merge_links, expected_after_close, approved_output.
+# fingerprint_profile, approved_write_profile, content, metadata_policy,
+# risk_gates, approved_at, approved_baseline, expected_after_survivor_update,
+# expected_after_link, expected_merge_links, expected_after_close,
+# approved_output.
 # (_derived_examples is deliberately excluded and, per its own comment
 # above, shouldn't exist in a real file at all -- it's a pure
 # composition of the fields already listed, adding no new approved
@@ -769,7 +839,13 @@ getting stuck because the overall state matches neither
       - **If it already exists** (correctly oriented): mark this
         entry complete. Do not POST.
       - **If it doesn't**: continue to step 4.
-   4. Create the link.
+   4. Create the link using `approved_write_profile.duplicate_link`'s
+      pinned `type_id` and `request_orientation` — not a value
+      re-derived from a fresh capability probe. If the actual Jira
+      instance rejects that exact type/orientation (the link type was
+      renamed, removed, or its behavior changed since approval), that
+      is a capability-profile mismatch: abort this proposal rather
+      than falling back to guessing a different orientation.
    5. Refetch both issues and verify this specific link exists,
       correctly oriented — regardless of what step 4's response said.
       Invariant 5 says a 200 isn't proof; the symmetric case holds
@@ -830,9 +906,12 @@ purpose was supposed to change.
    means immediately before *this* mutation, not immediately before
    the classification read from step 1 — the same reasoning that
    already governs each individual link creation in phase 3. Then
-   transition it using the exact payload discovered by the
-   probe/rehearsal, refetch to confirm the result matches
-   `expected_after_close`, then — same principle, same write —
+   transition it using `approved_write_profile.closure_transition`'s
+   pinned `id`/`resolution_id` — not a value re-derived mid-execution
+   — refetch to confirm the result matches
+   `expected_after_close`, and abort this proposal (not guess a
+   different transition) if the actual Jira instance rejects that
+   exact payload. Then — same principle, same write —
    refetch the survivor once more and reconfirm it still matches
    `survivor_before_close` immediately before posting the
    survivor-side `phase=closed` marker. Then update local artifacts
@@ -910,7 +989,7 @@ absorbed_links:
 Durable, idempotency-marked comments plus a state detector that infers
 progress from actual Jira state, not just comment text:
 
-```
+```text
 [RFE Creator Merge:v1] proposal=<proposal-id> phase=survivor-provenance part=1 total=3 body_sha256=<hash-of-chunk-1-payload>
 [RFE Creator Merge:v1] proposal=<proposal-id> phase=survivor-provenance part=2 total=3 body_sha256=<hash-of-chunk-2-payload>
 [RFE Creator Merge:v1] proposal=<proposal-id> phase=survivor-provenance part=3 total=3 body_sha256=<hash-of-chunk-3-payload>
@@ -1089,7 +1168,7 @@ remains searchable/accessible.
 
 Implementation paths are provisional pending PR #115:
 
-```
+```text
 Current layout:
   scripts/...
 
