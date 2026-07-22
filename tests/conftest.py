@@ -89,9 +89,11 @@ def jira(jira_emu):
     # Patch emulator seed data to include link types this project needs
     from jira_emulator.services import seed_service
     _extra_link_types = [
-        {"name": "Issue split",
-         "inward_description": "is split from",
-         "outward_description": "split to"},
+        {
+            "name": "Work item split",
+            "inward_description": "is split from",
+            "outward_description": "split to",
+        },
     ]
     _orig = seed_service.LINK_TYPES
     seed_service.LINK_TYPES = _orig + [
