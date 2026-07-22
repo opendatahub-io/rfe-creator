@@ -389,9 +389,13 @@ def main() -> int:
         # Basic auth sends the token base64-encoded, not encrypted -- over
         # plain HTTP that's the token in the clear on the wire. A typo'd
         # JIRA_SERVER (http:// instead of https://, or no scheme at all)
-        # should never silently proceed to send credentials.
+        # should never silently proceed to send credentials. Deliberately
+        # not echoing the configured value: a URL can carry userinfo
+        # (https://user:pass@host) or an internal-only hostname, and this
+        # message could end up in a shared log or pasted into a bug report.
         print(
-            f"JIRA_SERVER must be an https:// URL, got: {server!r}",
+            "JIRA_SERVER must be an https:// URL (check for a missing "
+            "scheme, a bare hostname, or an http:// typo).",
             file=sys.stderr,
         )
         return 1

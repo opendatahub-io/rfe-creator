@@ -468,3 +468,27 @@ def test_cli_rejects_non_https_server():
     )
     assert result.returncode == 1
     assert "must be an https://" in result.stderr
+
+
+def test_cli_https_error_never_echoes_the_configured_value():
+    """A URL can carry userinfo (user:pass@host) or an internal-only
+    hostname -- the rejection message must never repeat it, since stderr
+    can end up in a shared log or a pasted bug report (CWE-532/CWE-200)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("JIRA_")}
+    env.update(
+        {
+            "JIRA_SERVER": "http://secretuser:hunter2@internal-jira.corp.local",
+            "JIRA_USER": "u",
+            "JIRA_TOKEN": "t",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, SCRIPT, "RHAIRFE-1"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 1
+    assert "secretuser" not in result.stderr
+    assert "hunter2" not in result.stderr
+    assert "internal-jira.corp.local" not in result.stderr
