@@ -867,11 +867,22 @@ assessment persists until a fresh `/rfe.review` invocation.
 
 ### 5.5 split_submit.py Partial Failure Recovery
 
-If `split_submit.py` crashes after creating a child ticket but before creating
-the "Work item split" link, `discover_state()` Phase 2 recovery detects the orphan
-via both confirmation comments AND existing links (`split_submit.py:108-131`).
-The window for permanent inconsistency is narrow (crash between `create_issue`
-and `create_link` within a single loop iteration).
+`discover_state()` recovers Phase 2 progress via two mechanisms: confirmation
+comments (`[RFE Creator] Created as X, linked to parent`) and existing "Work
+item split" outward links (`split_submit.py:108-141`). Both are written AFTER
+`create_issue_link()`, so recovery works when the crash occurs after the link
+step (e.g., during the comment post or a later child iteration).
+
+**Known gap:** if `split_submit.py` crashes between `create_issue()` and
+`create_issue_link()` -- i.e., the child ticket exists but has no link and no
+confirmation comment -- `discover_state()` cannot detect the orphan. On rerun,
+a duplicate child ticket is created. This is the exact failure mode triggered
+by the Jul 2026 "Issue split" to "Work item split" link type rename: every
+crash left an orphaned child (e.g., RHAIRFE-2781) that reruns could not
+recover from. A robust fix would require a stable marker (e.g., a label or
+comment on the child) written immediately after `create_issue()` and before
+`create_issue_link()`, so that `discover_state()` can match orphans by marker
+on subsequent runs.
 
 ### 5.6 Speedrun `--headless` and Double-Announce
 
