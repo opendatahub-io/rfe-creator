@@ -129,7 +129,7 @@ def discover_state(server, user, token, parent_key, expected_children):
         ["issuelinks", "status", "components", "labels", "parent", "reporter"],
     )
     for link in issue.get("fields", {}).get("issuelinks", []):
-        if link.get("type", {}).get("name") != "Issue split":
+        if link.get("type", {}).get("name") != "Work item split":
             continue
         outward = link.get("outwardIssue")
         if not outward:
@@ -249,7 +249,7 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
                 print(f"           Parent: {state.parent_parent_key}")
             if state.parent_reporter_id:
                 print(f"           Reporter: {state.parent_reporter_id}")
-            print(f"           Would link to {parent_key} via 'Issue split'")
+            print(f"           Would link to {parent_key} via 'Work item split'")
             if attn_reason:
                 print("           Would post needs-attention comment")
             state.phase2_done[idx] = "RHAIRFE-DRY"
@@ -276,7 +276,7 @@ def phase2_create_link(server, user, token, parent_key, children, state, artifac
             print(f"           Parent: {state.parent_parent_key}")
 
         # 2. Link to parent
-        create_issue_link(server, user, token, "Issue split", parent_key, child_key)
+        create_issue_link(server, user, token, "Work item split", parent_key, child_key)
         print(f"           Linked {child_key} to {parent_key}")
 
         # 3. Post confirmation comment
