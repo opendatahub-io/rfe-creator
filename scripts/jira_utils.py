@@ -12,11 +12,20 @@ import base64
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import unicodedata
 import urllib.error
 import urllib.request
+
+ssl_ctx = ssl.create_default_context()
+try:
+    import certifi
+
+    ssl_ctx.load_verify_locations(certifi.where())
+except (ImportError, OSError):
+    pass
 
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
 
@@ -33,7 +42,7 @@ def make_request(url, user, token, body=None, method=None):
         headers["Content-Type"] = "application/json"
         data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=ssl_ctx) as resp:
         if resp.status == 204:
             return None
         resp_body = resp.read()
