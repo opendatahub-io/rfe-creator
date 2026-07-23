@@ -36,3 +36,7 @@ tmp/
 
 # Logs
 *.log
+
+# rfe.merge capability probe output — local diagnostic only, never commit
+# (see design-proposals/rfe-merge-design.md section 15: PII/fixture policy)
+merge-capability-probe.json
