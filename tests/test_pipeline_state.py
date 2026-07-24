@@ -856,8 +856,8 @@ class TestAgentPhaseGuard:
         ps._save_state(make_state(phase="ASSESS"))
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
         # Assess file exists but feasibility file missing
-        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
-        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+        os.makedirs("tmp/rfe-assess/single", exist_ok=True)
+        with open("tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
             f.write("assessed")
         # No feasibility file → pending on parallel phase
         with pytest.raises(SystemExit) as exc_info:
@@ -868,8 +868,8 @@ class TestAgentPhaseGuard:
         """advance proceeds when both main and parallel phases are complete."""
         ps._save_state(make_state(phase="ASSESS"))
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
-        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
-        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+        os.makedirs("tmp/rfe-assess/single", exist_ok=True)
+        with open("tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
             f.write("assessed")
         with open("artifacts/rfe-reviews/RHAIRFE-1001-feasibility.md", "w") as f:
             f.write("feasibility done")
@@ -1838,8 +1838,8 @@ class TestNextActionAgent:
         ps._save_state(make_state(phase="ASSESS", batch=1))
 
         # RHAIRFE-1001: assess complete, feasibility missing → still pending
-        os.makedirs("/tmp/rfe-assess/single", exist_ok=True)
-        with open("/tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
+        os.makedirs("tmp/rfe-assess/single", exist_ok=True)
+        with open("tmp/rfe-assess/single/RHAIRFE-1001.result.md", "w") as f:
             f.write("assessed")
         # RHAIRFE-1002: both missing → pending
 

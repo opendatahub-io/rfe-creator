@@ -126,8 +126,8 @@ PHASE_CONFIG = {
         " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {
             "KEY": "{ID}",
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
@@ -141,7 +141,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -175,8 +175,8 @@ PHASE_CONFIG = {
         " --ids-file tmp/pipeline-reassess-ids.txt",
         "vars": {
             "KEY": "{ID}",
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
@@ -190,7 +190,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -249,8 +249,8 @@ PHASE_CONFIG = {
         " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
             "KEY": "{ID}",
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
@@ -264,7 +264,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -296,8 +296,8 @@ PHASE_CONFIG = {
         " --ids-file tmp/pipeline-revise-ids.txt",
         "vars": {
             "KEY": "{ID}",
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
@@ -311,7 +311,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },

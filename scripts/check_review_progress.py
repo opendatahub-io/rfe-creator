@@ -17,7 +17,7 @@ from artifact_utils import read_frontmatter
 
 PHASE_CHECKS = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
-    "assess": lambda id: f"/tmp/rfe-assess/single/{id}.result.md",
+    "assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
     "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
     "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
     "revise": lambda id: f"artifacts/rfe-reviews/{id}-review.md",

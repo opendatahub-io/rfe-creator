@@ -55,8 +55,8 @@ def main():
 
         # Delete assessment files
         for assess_file in [
-            f"/tmp/rfe-assess/single/{child_id}.md",
-            f"/tmp/rfe-assess/single/{child_id}.result.md",
+            f"tmp/rfe-assess/single/{child_id}.md",
+            f"tmp/rfe-assess/single/{child_id}.result.md",
         ]:
             if os.path.exists(assess_file):
                 os.remove(assess_file)
