@@ -63,15 +63,15 @@ timestamp: "2026-04-02T19:54:37Z"
 bootstrapped_from: "20260402-195436"   # only present on bootstrap snapshots
 issues:
   # Current format (dict with processed flag)
-  RHAIRFE-1234:
+  PROJ-1234:
     hash: "a1b2c3..."
     processed: true
-  RHAIRFE-5678:
+  PROJ-5678:
     hash: "d4e5f6..."
     processed: false
 
   # Legacy format (plain string, still readable — treated as processed: true)
-  RHAIRFE-9999: "g7h8i9..."
+  PROJ-9999: "g7h8i9..."
 ```
 
 ## Content Hashing Pipeline

@@ -368,12 +368,12 @@ class TestReviewToRevise:
 
 class TestSplitPipeline:
     def test_split_review_filters_for_revision(self, tmp_dir, monkeypatch):
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
-        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RFE-001")
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001", "DRAFT-002"])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "DRAFT-001")
         state = make_state(phase="SPLIT_REVIEW")
         next_phase, _ = ps.advance(state)
         assert next_phase == "SPLIT_REVISE"
-        assert read_ids("tmp/pipeline-revise-ids.txt") == ["RFE-001"]
+        assert read_ids("tmp/pipeline-revise-ids.txt") == ["DRAFT-001"]
 
     def test_split_sequence_revise_to_reassess(self, tmp_dir):
         """SPLIT_FIXUP → SPLIT_SAVE → SPLIT_REASSESS → SPLIT_RE_REVIEW → SPLIT_RESTORE."""
@@ -399,12 +399,12 @@ class TestSplitFullCycle:
     def test_revised_children_are_re_reviewed(self, tmp_dir, monkeypatch):
         """Trace: SPLIT_REVIEW filters → SPLIT_REVISE → FIXUP → re-review."""
         # SPLIT_REVIEW: 1 of 3 children needs revision
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002", "RFE-003"])
-        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RFE-002")
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001", "DRAFT-002", "DRAFT-003"])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "DRAFT-002")
         state = make_state(phase="SPLIT_REVIEW")
         next_phase, _ = ps.advance(state)
         assert next_phase == "SPLIT_REVISE"
-        assert read_ids("tmp/pipeline-revise-ids.txt") == ["RFE-002"]
+        assert read_ids("tmp/pipeline-revise-ids.txt") == ["DRAFT-002"]
 
         # Walk through the full post-revise sequence
         expected_phases = [
@@ -425,7 +425,7 @@ class TestSplitFullCycle:
 
     def test_no_revision_skips_reassess(self, tmp_dir, monkeypatch):
         """When no children need revision, re-review phases are no-ops."""
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001"])
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001"])
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
         state = make_state(phase="SPLIT_REVIEW")
         next_phase, _ = ps.advance(state)
@@ -453,24 +453,24 @@ class TestSplitFullCycle:
 
 class TestSplitCorrectionCheck:
     def test_undersized_loops_back(self, tmp_dir, monkeypatch):
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
-        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=RFE-001")
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001", "DRAFT-002"])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=DRAFT-001")
         state = make_state(phase="SPLIT_CORRECTION_CHECK", correction_cycle=0)
         next_phase, summary = ps.advance(state)
         assert next_phase == "SPLIT"
         assert state["correction_cycle"] == 1
-        assert read_ids("tmp/pipeline-split-ids.txt") == ["RFE-001"]
+        assert read_ids("tmp/pipeline-split-ids.txt") == ["DRAFT-001"]
 
     def test_no_undersized_goes_to_batch_done(self, tmp_dir, monkeypatch):
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001"])
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001"])
         monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=")
         state = make_state(phase="SPLIT_CORRECTION_CHECK", correction_cycle=0)
         next_phase, _ = ps.advance(state)
         assert next_phase == "BATCH_DONE"
 
     def test_max_correction_cycle_exits(self, tmp_dir, monkeypatch):
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001"])
-        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=RFE-001")
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001"])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RESPLIT=DRAFT-001")
         state = make_state(phase="SPLIT_CORRECTION_CHECK", correction_cycle=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "BATCH_DONE"
@@ -506,7 +506,7 @@ class TestCollect:
 
 class TestSplitCollect:
     def test_children_exist(self, tmp_dir):
-        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001"])
+        write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001"])
         state = make_state(phase="SPLIT_COLLECT")
         next_phase, _ = ps.advance(state)
         assert next_phase == "SPLIT_PIPELINE_START"
@@ -1272,7 +1272,7 @@ class TestDispatchLoopE2E:
         # SPLIT_COLLECT writes child IDs
         def subprocess_mock(cmd, **kw):
             if "split_collect.py" in cmd:
-                write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
+                write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001", "DRAFT-002"])
             return type("R", (), {"returncode": 0})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
@@ -1363,7 +1363,7 @@ class TestDispatchLoopE2E:
             if "check_right_sized.py" in cmd:
                 correction_checks["count"] += 1
                 if correction_checks["count"] == 1:
-                    return "RESPLIT=RFE-001"  # undersized on first check
+                    return "RESPLIT=DRAFT-001"  # undersized on first check
                 return "RESPLIT="  # all pass on second check
             if "batch_summary.py" in cmd:
                 return "submit=0"
@@ -1377,9 +1377,9 @@ class TestDispatchLoopE2E:
             if "split_collect.py" in cmd:
                 split_collect_calls["count"] += 1
                 if split_collect_calls["count"] == 1:
-                    write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
+                    write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-001", "DRAFT-002"])
                 else:
-                    write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-003", "RFE-004"])
+                    write_ids("tmp/pipeline-split-children-ids.txt", ["DRAFT-003", "DRAFT-004"])
             return type("R", (), {"returncode": 0})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)

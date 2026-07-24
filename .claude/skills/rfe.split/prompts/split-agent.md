@@ -10,7 +10,7 @@ Review file: {REVIEW_FILE}
 
 Read the task file and the review file. The review file's right-sizing feedback explains why this RFE needs splitting.
 
-**Before proceeding, check the Right-sized score.** If the score is **1/2** ("slightly broad at 1-2 strategy features"), splitting may not be appropriate. An RFE that maps to 2 tightly-coupled strategy features is acceptable — the decomposition into strategy features happens at the RHAISTRAT level, not the RHAIRFE level. Only proceed with splitting if:
+**Before proceeding, check the Right-sized score.** If the score is **1/2** ("slightly broad at 1-2 strategy features"), splitting may not be appropriate. An RFE that maps to 2 tightly-coupled strategy features is acceptable — the decomposition into strategy features happens at the strategy level, not the RFE level. Only proceed with splitting if:
 - The Right-sized score is **0/2** (clearly needs 3+ features), OR
 - The score is 1/2 AND the capabilities serve genuinely different customer segments or user scenarios that could be independently prioritized without harm
 
@@ -105,9 +105,9 @@ Using the recommended decomposition:
 python3 scripts/next_rfe_id.py <number_of_children>
 ```
 
-This prints one RFE-NNN ID per line. Use these IDs in order for your children. The script locks to prevent races — do NOT scan the directory yourself.
+This prints one DRAFT-NNN ID per line. Use these IDs in order for your children. The script locks to prevent races — do NOT scan the directory yourself.
 
-5. Write each to `artifacts/rfe-tasks/RFE-NNN.md`
+5. Write each to `artifacts/rfe-tasks/DRAFT-NNN.md`
 6. Set frontmatter on each child:
 
 ```bash
@@ -149,7 +149,7 @@ Always write `artifacts/rfe-reviews/{ID}-split-status.yaml` as your final step:
 status: completed
 action: split
 reason: "split into N children"
-children: [RFE-001, RFE-002]
+children: [DRAFT-001, DRAFT-002]
 ```
 
 Or if no split was needed:

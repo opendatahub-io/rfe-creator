@@ -57,7 +57,7 @@ read/write. Score ranges (0-10, 0-2) are agent-enforced conventions, not schema-
 
 | Field | Type | Required | Constraints | Default | Code Location |
 |---|---|---|---|---|---|
-| `rfe_id` | string | yes | pattern: `^(RFE-\d+\|RHAIRFE-\d+)$` | — | `artifact_utils.py:29-33` |
+| `rfe_id` | string | yes | pattern: `^(RFE-\d+\|[A-Z]+-\d+)$` | — | `artifact_utils.py:29-33` |
 | `title` | string | yes | — | — | `artifact_utils.py:34-36` |
 | `priority` | string | yes | enum: Blocker/Critical/Major/Normal/Minor/Undefined | — | `artifact_utils.py:37-43` |
 | `status` | string | yes | enum: Draft/Ready/Submitted/Archived | — | `artifact_utils.py:44-49` |
@@ -149,7 +149,7 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `SS_PHASE1_PERSIST` | Post archival comments on parent with child content; Phase 2 refuses if incomplete | `split_submit.py:153-174` |
 | `SS_PHASE2_CREATE_LINK` | Create child Jira tickets + "Work item split" links + post confirmation | `split_submit.py:176-262` |
 | `SS_PHASE3_CLOSE` | Label parent with split-original, transition to Closed (resolution: Obsolete); skips gracefully if no Closed transition | `split_submit.py:295-347` |
-| `SS_RENAME` | Post-submit: rename RFE-NNN.md -> RHAIRFE-NNNN.md, update frontmatter | `split_submit.py:507-518` |
+| `SS_RENAME` | Post-submit: rename RFE-NNN.md -> PROJ-NNNN.md, update frontmatter | `split_submit.py:507-518` |
 
 ### 1.10 Snapshot Per-Issue States
 
@@ -280,10 +280,10 @@ The `parent_key` exclusion ensures split children are only processed by
 | **SKIP (no changes)** | Content unchanged, no new labels needed | None | Marked processed |
 | **Label only** | Content unchanged but labels needed (existing label triggers OR new feasibility label needed OR stale feasibility label present in `original_labels`) | `remove_labels()` (if any) then `add_labels()` (if any) | Marked processed, but NO content hash recorded |
 | **Create** | `rfe_id` starts with `RFE-` | `create_issue()` + `rename_to_jira_key()` | Content hash recorded |
-| **Update** | Existing `RHAIRFE-` with content changes | `update_issue()` | Content hash recorded |
+| **Update** | Existing Jira key with content changes | `update_issue()` | Content hash recorded |
 
 Split parent detection requires ALL THREE conditions: `status=Archived` AND
-`rfe_id.startswith("RHAIRFE-")` AND `rfe_id` referenced by at least one task's
+`is_jira_key(rfe_id)` AND `rfe_id` referenced by at least one task's
 `parent_key`. Split parents are processed via `split_submit.py` in Phase 1,
 before regular submissions.
 
@@ -658,7 +658,7 @@ stateDiagram-v2
             SS_Create --> SS_Link : Phase 2: child tickets created
             SS_Link --> SS_Close : Work item split links created
             SS_Close --> SS_Rename : Phase 3: parent labeled +\ntransitioned to Closed
-            SS_Rename --> SS_Done : rename RFE-NNN.md →\nRHAIRFE-NNNN.md
+            SS_Rename --> SS_Done : rename RFE-NNN.md →\nPROJ-NNNN.md
         }
 
         Sub_Phase1 --> Sub_SplitSubmit
@@ -667,7 +667,7 @@ stateDiagram-v2
 
         state "Phase 2: Regular Submit" as Sub_RegularSubmit {
             RS_ConflictCheck --> RS_Create : new RFE (RFE- prefix)
-            RS_ConflictCheck --> RS_Update : existing (RHAIRFE- prefix)
+            RS_ConflictCheck --> RS_Update : existing (Jira key)
             RS_ConflictCheck --> RS_Skip : Jira conflict detected
             RS_Create --> RS_Rename : create_issue() succeeds
             RS_Rename --> RS_Done : rename_to_jira_key()\nstatus=Submitted
@@ -809,7 +809,7 @@ failures that may not surface until production runs.
 - **Content preservation filtering:** `submit.py` only posts `genuine`/`unclassified` removed-context blocks to Jira; `reworded`/`non-substantive` silently dropped (see 1.19).
 - **"Remove labels" path does NOT set `status=Submitted`** — exception to the label-only pattern. Only calls `remove_labels()` and marks processed.
 - **Conflict check is fail-open on exceptions** — Jira API error during conflict check → proceed with submission, not skip. Only content mismatch triggers skip.
-- **Phase 2 re-scans task files after Phase 1 splits** — `split_submit.py` may have renamed `RFE-NNN.md → RHAIRFE-NNNN.md`, so the task file set changes between phases.
+- **Phase 2 re-scans task files after Phase 1 splits** — `split_submit.py` may have renamed `RFE-NNN.md → PROJ-NNNN.md`, so the task file set changes between phases.
 - **Phase 3 completion guard:** `split_submit.py` Phase 3 refuses to close parent if any child not yet created in Jira (analogous to Phase 1 archival comment guard).
 - **`_collect_leaves()` recursively walks parent-child tree** for multi-level splits; intermediary Archived children are traversed (not submitted), only leaf children are submitted.
 - **Component and non-automation label inheritance:** Split children inherit the parent's component field and non-`rfe-creator-*` labels from the parent issue.
@@ -818,7 +818,7 @@ failures that may not surface until production runs.
 - **Needs-attention Jira comments:** Both `submit.py` and `split_submit.py` post explanatory Jira comments when `needs_attention=true`, with a deduplication guard: `_post_needs_attention_comment()` skips posting if `rfe-creator-needs-attention` is already in `original_labels`. Split refusals (exit codes 2/3) post on the parent; `split_submit.py` Phase 2 posts on the newly created child ticket.
 - **Phase 3 summary comment:** `split_submit.py` Phase 3 posts an ADF summary comment on the parent ticket with inlineCard smart links to all child tickets (`build_split_summary_adf()`).
 - **`split_submit.py` conflict check is also fail-open:** Same fail-open behavior as `submit.py` (catches non-`SystemExit` exceptions, prints warning, proceeds). The `SystemExit` re-raise at `split_submit.py:463-464` ensures `sys.exit(3)` from conflict detection is not swallowed.
-- **No originals file bypasses conflict AND content-change checks:** When `rfe-originals/{ID}.md` doesn't exist for an existing RHAIRFE, both checks are skipped and the RFE proceeds unconditionally to Create/Update (`submit.py:371,407`).
+- **No originals file bypasses conflict AND content-change checks:** When `rfe-originals/{ID}.md` doesn't exist for an existing Jira issue, both checks are skipped and the RFE proceeds unconditionally to Create/Update (`submit.py:371,407`).
 - **Phase 2 early exit:** When no submittable RFEs remain after filtering (all Archived/Submitted/parent_key), `submit.py` rebuilds the index and returns, skipping `SB_SNAPSHOT_REGULAR` and `SB_REPORT` (`submit.py:309-316`).
 
 ### 4.4 Cross-Concern Invariants
@@ -829,7 +829,7 @@ failures that may not surface until production runs.
 - **File prefix namespacing** (`autofix-`, `review-`, `split-`, `speedrun-`) prevents collisions during nested skill calls.
 - **Jira API retry policy:** All Jira HTTP operations use `api_call_with_retry` (`jira_utils.py:51-82`): max 3 retries, 429 rate-limiting (respects `Retry-After` header), 502/503/504 server errors (exponential backoff: 1s, 4s, 16s), and `URLError` network errors (same backoff). After exhausting retries, last error is re-raised. All requests have a 60-second timeout (`jira_utils.py:36`).
 - **`scan_task_files()` is the sole discovery mechanism for submit** — no ID list is passed. Excludes companion files, skips validation failures.
-- **Split parent detection requires triple condition:** `status=Archived` AND `rfe_id.startswith("RHAIRFE-")` AND referenced by a child's `parent_key` (see 1.18).
+- **Split parent detection requires triple condition:** `status=Archived` AND `is_jira_key(rfe_id)` AND referenced by a child's `parent_key` (see 1.18).
 
 ---
 

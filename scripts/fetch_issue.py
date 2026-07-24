@@ -6,12 +6,12 @@ Atlassian MCP server is unavailable. Outputs JSON to stdout for the
 calling skill to parse.
 
 Usage:
-    python3 scripts/fetch_issue.py RHAIRFE-1234 \\
+    python3 scripts/fetch_issue.py PROJ-1234 \\
         [--fields summary,description,comment,priority,labels,status] \\
         [--markdown]
 
     # Fetch everything and write all artifact files at once
-    python3 scripts/fetch_issue.py RHAIRFE-1234 --fetch-all artifacts
+    python3 scripts/fetch_issue.py PROJ-1234 --fetch-all artifacts
 
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
@@ -145,7 +145,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("issue_key", help="Jira issue key (e.g. RHAIRFE-1234)")
+    parser.add_argument("issue_key", help="Jira issue key (e.g. PROJ-1234)")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(

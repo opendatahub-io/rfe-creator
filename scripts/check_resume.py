@@ -19,7 +19,7 @@ Usage:
         --output-file tmp/autofix-process-ids.txt
 
     # Legacy positional args
-    python3 scripts/check_resume.py RHAIRFE-1234 RHAIRFE-5678
+    python3 scripts/check_resume.py PROJ-1234 PROJ-5678
 """
 
 import argparse

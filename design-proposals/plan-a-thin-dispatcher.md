@@ -686,10 +686,10 @@ BATCH_DONE → BATCH_START: batch=3/3 reason="more batches remain"
 Batch 3/3 complete: submit=45 revise=2 split=0 errors=3
 BATCH_DONE → ERROR_COLLECT: errors=3 retry_cycle=0/1 reason="error IDs found, retry not yet attempted"
 
-ERROR_COLLECT: retry batch 4 with 3 error IDs [RHAIRFE-1501, RHAIRFE-1522, RHAIRFE-1540]
-  RHAIRFE-1501: review_failed (original error preserved)
-  RHAIRFE-1522: revise_failed → task file restored from original
-  RHAIRFE-1540: split_failed → partial children cleaned
+ERROR_COLLECT: retry batch 4 with 3 error IDs [PROJ-1501, PROJ-1522, PROJ-1540]
+  PROJ-1501: review_failed (original error preserved)
+  PROJ-1522: revise_failed → task file restored from original
+  PROJ-1540: split_failed → partial children cleaned
   cleanup verified: 0 stale artifacts remain
 ERROR_COLLECT → BATCH_START: batch=4/4
 
@@ -728,7 +728,7 @@ retry_cycle: 0
 
 ```bash
 python3 scripts/verify_phase.py --phase assess --ids-file tmp/pipeline-active-ids.txt
-# stdout: FAILED=RHAIRFE-1501,RHAIRFE-1522
+# stdout: FAILED=PROJ-1501,PROJ-1522
 # (empty FAILED= if all passed)
 ```
 
@@ -806,8 +806,8 @@ This script is the fan-in join point for the split correction loop: all children
 Add `--errors` flag. Takes IDs as positional args (scopes which IDs to check). Reads review frontmatter for each ID and returns those with a non-null `error` field. Output:
 
 ```bash
-python3 scripts/collect_recommendations.py --errors RHAIRFE-1501 RHAIRFE-1522 RHAIRFE-1540
-# stdout: ERRORS=RHAIRFE-1501,RHAIRFE-1522
+python3 scripts/collect_recommendations.py --errors PROJ-1501 PROJ-1522 PROJ-1540
+# stdout: ERRORS=PROJ-1501,PROJ-1522
 # (empty ERRORS= if none have errors)
 ```
 

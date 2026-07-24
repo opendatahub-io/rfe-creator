@@ -11,7 +11,7 @@ Modes:
 Usage:
     python3 scripts/check_revised.py artifacts/rfe-originals/ID.md artifacts/rfe-tasks/ID.md
     python3 scripts/check_revised.py --batch
-    python3 scripts/check_revised.py --batch RHAIRFE-1504 RHAIRFE-1510
+    python3 scripts/check_revised.py --batch PROJ-1504 PROJ-1510
 """
 
 import os

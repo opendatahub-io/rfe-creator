@@ -15,7 +15,7 @@ Parse `$ARGUMENTS` for:
 - `--announce-complete`: Print completion marker when done (for CI / eval harnesses)
 - `--dry-run`: Skip Jira writes in submit
 - `--batch-size N`: Override batch size (default 5), passed to auto-fix
-- Remaining arguments: either a single Jira key (RHAIRFE-NNNN) or a free-text idea
+- Remaining arguments: either a single Jira key or a free-text idea
 
 Clean temp state and persist parsed flags. `batch_size` MUST always be a concrete integer — if the user did not pass `--batch-size`, substitute the speedrun default of `5`. Do not write `<N>`, `null`, or omit the field.
 
@@ -25,9 +25,18 @@ python3 scripts/prep_assess.py --clean-all
 python3 scripts/state.py init tmp/speedrun-config.yaml headless=<true/false> announce_complete=<true/false> dry_run=<true/false> batch_size=<N or 5> input_file=<path or null>
 ```
 
+### Resolve Jira Project
+
+Run:
+```bash
+python3 scripts/resolve_project.py
+```
+
+If it exits non-zero, ask the user: "What Jira project key should I use? ?" Then export `JIRA_PROJECT=<answer>` and re-run to confirm.
+
 Determine pipeline mode:
 - **Mode A (Batch YAML)**: `--input` flag present → batch create + auto-fix + submit
-- **Mode B (Existing RFE)**: argument is a Jira key (RHAIRFE-NNNN) → skip create, auto-fix + submit
+- **Mode B (Existing RFE)**: argument is a Jira key → skip create, auto-fix + submit
 - **Mode C (Single idea)**: free-text argument, no `--input` → single create + auto-fix + submit
 
 If no arguments provided, stop with usage instructions.
@@ -63,16 +72,16 @@ If this exits nonzero, stop and report the printed `ERROR:`/`WARNING:` lines to 
 Count entries and pre-allocate all IDs upfront:
 
 ```bash
-python3 scripts/next_rfe_id.py --from-batch <input_file>   # input_file = the --input path; prints one RFE ID per entry
+python3 scripts/next_rfe_id.py --from-batch <input_file>   # input_file = the --input path; prints one DRAFT ID per entry
 ```
 
 For each entry, launch an Agent to invoke `/rfe.create`. Pass the pre-assigned ID so each Agent knows which ID to use:
 
 ```
-Agent for entry 1:  /rfe.create --headless --rfe-id RFE-001 [--priority <priority>] <prompt>
-Agent for entry 2:  /rfe.create --headless --rfe-id RFE-002 [--priority <priority>] <prompt>
+Agent for entry 1:  /rfe.create --headless --rfe-id DRAFT-001 [--priority <priority>] <prompt>
+Agent for entry 2:  /rfe.create --headless --rfe-id DRAFT-002 [--priority <priority>] <prompt>
 ...
-Agent for entry N:  /rfe.create --headless --rfe-id RFE-<N> [--priority <priority>] <prompt>
+Agent for entry N:  /rfe.create --headless --rfe-id DRAFT-<N> [--priority <priority>] <prompt>
 ```
 
 Each entry is a single business need — `/rfe.create` must produce exactly one RFE per invocation. Wait for all N agents to complete. You must have exactly N RFE IDs — if fewer were created, retry the missing entries. **Never delete or re-create task files during Phase 1** — quality issues are addressed in Phase 2 (Auto-fix).
@@ -120,7 +129,7 @@ After auto-fix returns, verify all RFEs were processed:
 python3 scripts/check_autofix_complete.py
 ```
 
-If incomplete (exit code 1), the output shows `MISSING_IDS=RFE-006,RFE-007,...`. Re-invoke auto-fix with only the missing IDs:
+If incomplete (exit code 1), the output shows `MISSING_IDS=DRAFT-006,DRAFT-007,...`. Re-invoke auto-fix with only the missing IDs:
 
 ```text
 /rfe.auto-fix [--headless] [--batch-size N] <missing_IDs>
@@ -184,7 +193,7 @@ If headless, output a brief machine-readable summary. If interactive, output:
 - Split: N (into M children)
 
 ### Submitted
-- RHAIRFE-NNNN: <title> [created/updated/dry-run]
+- <PROJECT>-NNNN: <title> [created/updated/dry-run]
 
 ### Reports
 - Run report: artifacts/auto-fix-runs/<timestamp>.yaml

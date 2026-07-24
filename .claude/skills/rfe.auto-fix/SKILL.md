@@ -14,6 +14,15 @@ Parse `$ARGUMENTS` for:
 - `--headless`, `--announce-complete`, `--reprocess`, `--random N`
 - Remaining arguments: explicit RFE IDs
 
+### Resolve Jira Project
+
+Run:
+```bash
+python3 scripts/resolve_project.py
+```
+
+If it exits non-zero, ask the user: "What Jira project key should I use? ?" Then export `JIRA_PROJECT=<answer>` and re-run to confirm.
+
 ### 1. Init
 
 ```bash
@@ -122,12 +131,12 @@ agents:
   - subagent_type: rfe-scorer
     prompt_file: .claude/skills/rfe.review/prompts/assess-agent.md
     vars: |
-      DATA_FILE=/tmp/rfe-assess/single/RHAIRFE-1234.md
+      DATA_FILE=/tmp/rfe-assess/single/PROJ-1234.md
       RUN_DIR=/tmp/rfe-assess/single
       PROMPT_PATH=.context/assess-rfe/scripts/agent_prompt.md
   - prompt_file: .claude/skills/rfe-feasibility-review/SKILL.md
     vars: |
-      ID=RHAIRFE-1234
+      ID=PROJ-1234
 ```
 
 ## Teardown
