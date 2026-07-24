@@ -125,6 +125,7 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {
+            "KEY": "{ID}",
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
@@ -174,6 +175,7 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-reassess-ids.txt",
         "vars": {
+            "KEY": "{ID}",
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
@@ -247,6 +249,7 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
+            "KEY": "{ID}",
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
@@ -293,6 +296,7 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-revise-ids.txt",
         "vars": {
+            "KEY": "{ID}",
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
             "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
