@@ -82,7 +82,7 @@ python3 scripts/prep_assess.py <ID>
 **Launch assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer):
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=/tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=/tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
 ```
 
 **Launch feasibility agent** (model: opus, run_in_background: true) — one per ID:
@@ -105,7 +105,7 @@ python3 scripts/check_review_progress.py --phase feasibility --id-file tmp/rfe-p
 Sleep for the `NEXT_POLL` seconds reported by the script before polling again. Only output status when COMPLETED count changes. Wait for all to complete.
 
 After completion, check prerequisites for each ID via Glob:
-- If assess result (`/tmp/rfe-assess/single/<ID>.result.md`) is missing → write error: `assess_failed`
+- If assess result (`tmp/rfe-assess/single/<ID>.result.md`) is missing → write error: `assess_failed`
 - If feasibility file (`artifacts/rfe-reviews/<ID>-feasibility.md`) is missing → write error: `feasibility_failed`
 - If either is missing for an ID, write the error to review frontmatter and remove from processing list
 
@@ -114,7 +114,7 @@ After completion, check prerequisites for each ID via Glob:
 For each remaining ID, launch a **review agent** (model: opus, run_in_background: true):
 
 ```
-Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=true
+Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=true
 ```
 
 Launch all review agents in parallel.
@@ -212,7 +212,7 @@ python3 scripts/state.py write-ids tmp/review-reassess-ids.txt <all_reassess_IDs
 ```bash
 python3 scripts/preserve_review_state.py save <all_reassess_IDs>
 rm artifacts/rfe-reviews/<ID>-review.md  # for each reassess ID
-rm /tmp/rfe-assess/single/<ID>.result.md  # for each reassess ID
+rm tmp/rfe-assess/single/<ID>.result.md  # for each reassess ID
 ```
 
 **4b. Re-run assessment.** For each reassess ID, prepare and launch an assess agent — this is the same process as Review Step 2:
@@ -224,7 +224,7 @@ python3 scripts/prep_assess.py <ID>
 Launch an **assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer) for each reassess ID:
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=/tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=/tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
 ```
 
 Launch all assess agents in parallel.
@@ -247,7 +247,7 @@ python3 scripts/state.py read-ids tmp/review-reassess-ids.txt
 For each reassess ID, launch a **review agent** (model: opus, run_in_background: true):
 
 ```
-Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=/tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=false
+Read .claude/skills/rfe.review/prompts/review-agent.md and follow all instructions. Substitute: {ID}=<ID>, {ASSESS_PATH}=tmp/rfe-assess/single/<ID>.result.md, {FEASIBILITY_PATH}=artifacts/rfe-reviews/<ID>-feasibility.md, {FIRST_PASS}=false
 ```
 
 Launch all review agents in parallel.
