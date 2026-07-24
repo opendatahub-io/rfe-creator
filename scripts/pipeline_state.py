@@ -161,7 +161,6 @@ PHASE_CONFIG = {
     "REASSESS_SAVE": {
         "type": "script",
         "command": "python3 scripts/reassess_save.py",
-        "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     "REASSESS_ASSESS": {
         "type": "agent",
