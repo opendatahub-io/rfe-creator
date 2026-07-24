@@ -127,7 +127,7 @@ PHASE_CONFIG = {
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "REVIEW": {
@@ -176,7 +176,7 @@ PHASE_CONFIG = {
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "REASSESS_REVIEW": {
@@ -249,7 +249,7 @@ PHASE_CONFIG = {
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "SPLIT_REVIEW": {
@@ -295,7 +295,7 @@ PHASE_CONFIG = {
         "vars": {
             "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
             "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "SPLIT_RE_REVIEW": {
