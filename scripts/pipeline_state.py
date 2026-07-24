@@ -227,7 +227,6 @@ PHASE_CONFIG = {
     "SPLIT_COLLECT": {
         "type": "script",
         "command": "python3 scripts/split_collect.py",
-        "ids_file": "tmp/pipeline-split-ids.txt",
     },
     "SPLIT_PIPELINE_START": {"type": "noop"},
     "SPLIT_ASSESS": {
