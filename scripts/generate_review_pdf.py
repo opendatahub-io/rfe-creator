@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate an HTML review report from RFE review artifacts."""
 
+import difflib
 import os
 import re
-import subprocess
 import sys
 from collections import Counter
 
@@ -61,24 +61,19 @@ def generate_diff(rfe_id, tasks_dir, originals_dir):
     if not os.path.exists(orig) or not os.path.exists(revised):
         return None
 
+    with open(orig) as f:
+        orig_lines = f.readlines()
+
     with open(revised) as f:
         revised_content = f.read()
     if revised_content.startswith("---"):
         parts = revised_content.split("---", 2)
         if len(parts) >= 3:
             revised_content = parts[2].lstrip("\n")
+    revised_lines = revised_content.splitlines(keepends=True)
 
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
-        tmp.write(revised_content)
-        tmp_path = tmp.name
-
-    try:
-        result = subprocess.run(["diff", "-u", orig, tmp_path], capture_output=True, text=True)
-        return result.stdout
-    finally:
-        os.unlink(tmp_path)
+    diff = difflib.unified_diff(orig_lines, revised_lines, fromfile=orig, tofile=revised)
+    return "".join(diff)
 
 
 def html_escape(text):
