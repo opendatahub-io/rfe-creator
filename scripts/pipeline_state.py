@@ -21,7 +21,6 @@ import argparse
 import glob
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -104,10 +103,10 @@ PHASE_CONFIG = {
     },
     "SETUP": {
         "type": "script",
-        "command": (
-            "bash scripts/bootstrap-assess-rfe.sh &"
-            " bash scripts/fetch-architecture-context.sh & wait"
-        ),
+        "commands": [
+            ["bash", "scripts/bootstrap-assess-rfe.sh"],
+            ["bash", "scripts/fetch-architecture-context.sh"],
+        ],
     },
     "ASSESS": {
         "type": "agent",
@@ -156,14 +155,14 @@ PHASE_CONFIG = {
     },
     "FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     # --- Reassess loop ---
     "REASSESS_CHECK": {"type": "noop"},
     "REASSESS_SAVE": {
         "type": "script",
-        "command": "python3 scripts/reassess_save.py",
+        "command": ["python3", "scripts/reassess_save.py"],
     },
     "REASSESS_ASSESS": {
         "type": "agent",
@@ -198,7 +197,7 @@ PHASE_CONFIG = {
     },
     "REASSESS_RESTORE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py restore",
+        "command": ["python3", "scripts/preserve_review_state.py", "restore"],
         "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     "REASSESS_REVISE": {
@@ -210,7 +209,7 @@ PHASE_CONFIG = {
     },
     "REASSESS_FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
         "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     # --- Collect + Split ---
@@ -228,7 +227,7 @@ PHASE_CONFIG = {
     },
     "SPLIT_COLLECT": {
         "type": "script",
-        "command": "python3 scripts/split_collect.py",
+        "command": ["python3", "scripts/split_collect.py"],
     },
     "SPLIT_PIPELINE_START": {"type": "noop"},
     "SPLIT_ASSESS": {
@@ -278,12 +277,12 @@ PHASE_CONFIG = {
     },
     "SPLIT_FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_SAVE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py save",
+        "command": ["python3", "scripts/preserve_review_state.py", "save"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_REASSESS": {
@@ -318,7 +317,7 @@ PHASE_CONFIG = {
     },
     "SPLIT_RESTORE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py restore",
+        "command": ["python3", "scripts/preserve_review_state.py", "restore"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},
@@ -326,16 +325,19 @@ PHASE_CONFIG = {
     "BATCH_DONE": {"type": "noop"},
     "ERROR_COLLECT": {
         "type": "script",
-        "command": "python3 scripts/error_collect.py",
+        "command": ["python3", "scripts/error_collect.py"],
     },
     # --- Terminal ---
     "REPORT": {
         "type": "script",
-        "command": (
-            "python3 scripts/generate_run_report.py"
-            " --start-time {start_time}"
-            " --batch-size {batch_size}"
-        ),
+        "command": [
+            "python3",
+            "scripts/generate_run_report.py",
+            "--start-time",
+            "{start_time}",
+            "--batch-size",
+            "{batch_size}",
+        ],
     },
 }
 
@@ -683,6 +685,7 @@ def cmd_get_phase_config(args):
     config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
     config["phase"] = phase
     config.pop("command", None)
+    config.pop("commands", None)
     config.pop("pre_script", None)
     config.pop("post_verify", None)
     if config.get("type") == "script":
@@ -700,6 +703,9 @@ def cmd_run_phase(args):
     Loads state, resolves the command from PHASE_CONFIG, appends IDs
     from ids_file if configured, and runs the command. The orchestrator
     never sees the underlying script name.
+
+    All execution uses argv lists (shell=False) to prevent shell
+    injection (CWE-78) via format_map state interpolation.
     """
     state = _load_state()
     phase = state["phase"]
@@ -708,25 +714,34 @@ def cmd_run_phase(args):
     if phase_type != "script":
         print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'", file=sys.stderr)
         sys.exit(1)
-    cmd = config["command"].format_map(state)
+
+    # Handle parallel commands (e.g., SETUP runs multiple scripts concurrently)
+    if "commands" in config:
+        cmd_lists = [[arg.format_map(state) for arg in cmd] for cmd in config["commands"]]
+        print(f"[run-phase] {phase}")
+        procs = [subprocess.Popen(cmd) for cmd in cmd_lists]
+        returncodes = [p.wait() for p in procs]
+        failed = [rc for rc in returncodes if rc != 0]
+        if failed:
+            sys.exit(failed[0])
+        with open(DISPATCH_MARKER, "w") as f:
+            f.write(phase)
+        return
+
+    cmd_argv = [arg.format_map(state) for arg in config["command"]]
     if config.get("ids_file"):
         ids = _read_ids(config["ids_file"])
         if ids:
             _validate_ids(ids)
-            # Use argv execution (shell=False) to prevent shell injection
-            # (CWE-78) when appending IDs from files.
-            cmd_argv = shlex.split(cmd) + ids
+            cmd_argv = cmd_argv + ids
         else:
             print(f"[run-phase] {phase}: no IDs, skipping")
             # Write dispatch marker and return — nothing to do
             with open(DISPATCH_MARKER, "w") as f:
                 f.write(phase)
             return
-        print(f"[run-phase] {phase}")
-        result = subprocess.run(cmd_argv)
-    else:
-        print(f"[run-phase] {phase}")
-        result = subprocess.run(cmd, shell=True)
+    print(f"[run-phase] {phase}")
+    result = subprocess.run(cmd_argv)
     if result.returncode != 0:
         sys.exit(result.returncode)
     # Write dispatch marker — advance checks this for script phases

@@ -645,7 +645,7 @@ class TestGetPhaseConfig:
 
 class TestRunPhase:
     def test_executes_script(self, tmp_dir, monkeypatch):
-        """REPORT (no ids_file) runs the correct command."""
+        """REPORT (no ids_file) runs the correct command as argv list."""
         ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
@@ -660,7 +660,8 @@ class TestRunPhase:
         with redirect_stdout(buf):
             ps.cmd_run_phase([])
         assert len(calls) == 1
-        assert "generate_run_report.py" in calls[0]
+        assert isinstance(calls[0], list), "all phases must use argv (list), not shell string"
+        assert any("generate_run_report.py" in arg for arg in calls[0])
         assert "[run-phase] REPORT" in buf.getvalue()
 
     def test_appends_ids(self, tmp_dir, monkeypatch):
@@ -686,7 +687,7 @@ class TestRunPhase:
         assert "shell" not in kw or not kw["shell"]
 
     def test_substitutes_state_vars(self, tmp_dir, monkeypatch):
-        """REPORT substitutes {start_time} and {batch_size}."""
+        """REPORT substitutes {start_time} and {batch_size} in argv list."""
         ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
@@ -699,9 +700,10 @@ class TestRunPhase:
 
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
-        assert "2026-04-09T00:00:00Z" in calls[0]
-        assert "{start_time}" not in calls[0]
-        assert "50" in calls[0]
+        cmd_str = " ".join(str(a) for a in calls[0])
+        assert "2026-04-09T00:00:00Z" in cmd_str
+        assert "{start_time}" not in cmd_str
+        assert "50" in cmd_str
 
     def test_rejects_agent_phase(self, tmp_dir):
         """Agent phases cannot be run via run-phase."""
@@ -759,8 +761,8 @@ class TestRunPhase:
                 ps.cmd_run_phase([])
         assert exc_info.value.code == 42
 
-    def test_no_ids_file_uses_shell(self, tmp_dir, monkeypatch):
-        """Phases without ids_file still use shell=True (needed for SETUP's & wait)."""
+    def test_no_ids_file_uses_argv(self, tmp_dir, monkeypatch):
+        """Phases without ids_file use argv list (no shell=True, CWE-78)."""
         ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
@@ -774,8 +776,36 @@ class TestRunPhase:
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
         cmd, kw = calls[0]
-        assert isinstance(cmd, str), "no-ids_file phases use shell string"
-        assert kw.get("shell") is True
+        assert isinstance(cmd, list), "all phases must use argv (list), not shell string"
+        assert "shell" not in kw or not kw["shell"]
+
+    def test_parallel_commands_use_popen(self, tmp_dir, monkeypatch):
+        """SETUP runs parallel commands via Popen (no shell=True)."""
+        ps._save_state(make_state(phase="SETUP"))
+        popen_calls = []
+
+        class MockPopen:
+            def __init__(self, cmd, **kw):
+                popen_calls.append((cmd, kw))
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(subprocess, "Popen", MockPopen)
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        assert len(popen_calls) == 2
+        # Both calls use argv lists, not shell strings
+        for cmd, kw in popen_calls:
+            assert isinstance(cmd, list), "parallel commands must use argv (list)"
+            assert "shell" not in kw or not kw["shell"]
+        # Verify the correct scripts are invoked
+        all_args = [" ".join(cmd) for cmd, _ in popen_calls]
+        assert any("bootstrap-assess-rfe.sh" in a for a in all_args)
+        assert any("fetch-architecture-context.sh" in a for a in all_args)
 
     def test_reassess_fixup_uses_argv(self, tmp_dir, monkeypatch):
         """REASSESS_FIXUP appends IDs as argv list (shell=False)."""
@@ -1184,6 +1214,16 @@ class TestDispatchLoopE2E:
         # Step 2: dispatch based on type
         if phase_type == "script":
             monkeypatch.setattr(subprocess, "run", subprocess_mock)
+
+            # Mock Popen for parallel-command phases (e.g. SETUP)
+            class _MockPopen:
+                def __init__(self, cmd, **kw):
+                    subprocess_mock(cmd, **kw)
+
+                def wait(self):
+                    return 0
+
+            monkeypatch.setattr(subprocess, "Popen", _MockPopen)
             buf = io.StringIO()
             with redirect_stdout(buf):
                 ps.cmd_run_phase([])
@@ -1406,7 +1446,8 @@ class TestDispatchLoopE2E:
 
         # SPLIT_COLLECT writes child IDs
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
             return type("R", (), {"returncode": 0})()
 
@@ -1509,7 +1550,8 @@ class TestDispatchLoopE2E:
         split_collect_calls = {"count": 0}
 
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 split_collect_calls["count"] += 1
                 if split_collect_calls["count"] == 1:
                     write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
@@ -1560,7 +1602,8 @@ class TestDispatchLoopE2E:
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            if "error_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "error_collect.py" in cmd_str:
                 # Simulate what error_collect.py does: set retry_cycle,
                 # increment total_batches, write retry batch file
                 state = ps._load_state()
@@ -1607,7 +1650,8 @@ class TestDispatchLoopE2E:
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 # No children produced — empty file
                 write_ids("tmp/pipeline-split-children-ids.txt", [])
             return type("R", (), {"returncode": 0})()
