@@ -209,7 +209,7 @@ PHASE_CONFIG = {
     "REASSESS_FIXUP": {
         "type": "script",
         "command": "python3 scripts/check_revised.py --batch",
-        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     # --- Collect + Split ---
     "COLLECT": {"type": "noop"},

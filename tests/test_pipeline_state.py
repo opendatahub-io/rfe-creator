@@ -249,6 +249,20 @@ class TestReassessLoop:
         next_phase, _ = ps.advance(state)
         assert next_phase == "REASSESS_CHECK"
 
+    def test_reassess_fixup_uses_reassess_ids_file(self, tmp_dir):
+        """REASSESS_FIXUP must use pipeline-reassess-ids.txt, not pipeline-revise-ids.txt.
+
+        This is distinct from the initial FIXUP which correctly uses
+        pipeline-revise-ids.txt. All REASSESS_* phases operate on reassess IDs.
+        """
+        config = ps.PHASE_CONFIG["REASSESS_FIXUP"]
+        assert config["ids_file"] == "tmp/pipeline-reassess-ids.txt", (
+            "REASSESS_FIXUP ids_file should be tmp/pipeline-reassess-ids.txt"
+            " (copy-paste error: was tmp/pipeline-revise-ids.txt)"
+        )
+        # Verify initial FIXUP still uses revise IDs (sanity check)
+        assert ps.PHASE_CONFIG["FIXUP"]["ids_file"] == "tmp/pipeline-revise-ids.txt"
+
     def test_last_cycle_skips_revise(self, tmp_dir, monkeypatch):
         """On cycle 2 (max), REASSESS_RESTORE writes empty revise IDs."""
         write_ids("tmp/pipeline-reassess-ids.txt", ["A", "B"])
