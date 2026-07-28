@@ -20,6 +20,8 @@ Usage:
 import argparse
 import glob
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -389,6 +391,22 @@ def _run_script(cmd):
     return result.stdout.strip()
 
 
+_VALID_ID_RE = re.compile(r"^(RFE-\d+|RHAIRFE-\d+)$")
+
+
+def _validate_ids(ids):
+    """Validate that all IDs match expected RFE ID patterns.
+
+    Rejects IDs that don't match ^(RFE-\\d+|RHAIRFE-\\d+)$ to prevent
+    shell injection (CWE-78) when IDs are passed as command arguments.
+    """
+    invalid = [id_ for id_ in ids if not _VALID_ID_RE.match(id_)]
+    if invalid:
+        print(f"Invalid RFE IDs rejected: {invalid}", file=sys.stderr)
+        sys.exit(1)
+    return ids
+
+
 def _parse_line_ids(output, prefix):
     """Parse IDs from a KEY=ID1,ID2 output line."""
     for line in output.splitlines():
@@ -694,15 +712,21 @@ def cmd_run_phase(args):
     if config.get("ids_file"):
         ids = _read_ids(config["ids_file"])
         if ids:
-            cmd += " " + " ".join(ids)
+            _validate_ids(ids)
+            # Use argv execution (shell=False) to prevent shell injection
+            # (CWE-78) when appending IDs from files.
+            cmd_argv = shlex.split(cmd) + ids
         else:
             print(f"[run-phase] {phase}: no IDs, skipping")
             # Write dispatch marker and return — nothing to do
             with open(DISPATCH_MARKER, "w") as f:
                 f.write(phase)
             return
-    print(f"[run-phase] {phase}")
-    result = subprocess.run(cmd, shell=True)
+        print(f"[run-phase] {phase}")
+        result = subprocess.run(cmd_argv)
+    else:
+        print(f"[run-phase] {phase}")
+        result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
         sys.exit(result.returncode)
     # Write dispatch marker — advance checks this for script phases

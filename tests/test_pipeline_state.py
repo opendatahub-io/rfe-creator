@@ -664,22 +664,26 @@ class TestRunPhase:
         assert "[run-phase] REPORT" in buf.getvalue()
 
     def test_appends_ids(self, tmp_dir, monkeypatch):
-        """FIXUP reads IDs from ids_file and appends them."""
+        """FIXUP reads IDs from ids_file and appends them as argv (shell=False)."""
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         calls = []
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
         )
         import io
         from contextlib import redirect_stdout
 
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
-        assert "RHAIRFE-1001" in calls[0]
-        assert "RHAIRFE-1002" in calls[0]
+        cmd, kw = calls[0]
+        # IDs passed as argv list, not shell string (CWE-78 mitigation)
+        assert isinstance(cmd, list), "ids_file phases must use argv (list), not shell string"
+        assert "RHAIRFE-1001" in cmd
+        assert "RHAIRFE-1002" in cmd
+        assert "shell" not in kw or not kw["shell"]
 
     def test_substitutes_state_vars(self, tmp_dir, monkeypatch):
         """REPORT substitutes {start_time} and {batch_size}."""
@@ -754,6 +758,123 @@ class TestRunPhase:
             with redirect_stdout(io.StringIO()):
                 ps.cmd_run_phase([])
         assert exc_info.value.code == 42
+
+    def test_no_ids_file_uses_shell(self, tmp_dir, monkeypatch):
+        """Phases without ids_file still use shell=True (needed for SETUP's & wait)."""
+        ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        cmd, kw = calls[0]
+        assert isinstance(cmd, str), "no-ids_file phases use shell string"
+        assert kw.get("shell") is True
+
+    def test_reassess_fixup_uses_argv(self, tmp_dir, monkeypatch):
+        """REASSESS_FIXUP appends IDs as argv list (shell=False)."""
+        ps._save_state(make_state(phase="REASSESS_FIXUP"))
+        write_ids("tmp/pipeline-reassess-ids.txt", ["RHAIRFE-2685"])
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        cmd, kw = calls[0]
+        assert isinstance(cmd, list)
+        assert "RHAIRFE-2685" in cmd
+        assert "shell" not in kw or not kw["shell"]
+
+
+# ---------- ID validation ----------
+
+
+class TestIdValidation:
+    """Verify IDs are validated against ^(RFE-\\d+|RHAIRFE-\\d+)$ before use."""
+
+    def test_valid_rhairfe_ids(self):
+        """RHAIRFE-NNNN IDs pass validation."""
+        result = ps._validate_ids(["RHAIRFE-1001", "RHAIRFE-2685", "RHAIRFE-99"])
+        assert result == ["RHAIRFE-1001", "RHAIRFE-2685", "RHAIRFE-99"]
+
+    def test_valid_rfe_ids(self):
+        """RFE-NNN IDs pass validation."""
+        result = ps._validate_ids(["RFE-001", "RFE-1", "RFE-9999"])
+        assert result == ["RFE-001", "RFE-1", "RFE-9999"]
+
+    def test_mixed_valid_ids(self):
+        """Mix of RFE and RHAIRFE IDs pass validation."""
+        result = ps._validate_ids(["RHAIRFE-100", "RFE-001"])
+        assert result == ["RHAIRFE-100", "RFE-001"]
+
+    def test_empty_ids(self):
+        """Empty list passes validation."""
+        assert ps._validate_ids([]) == []
+
+    def test_rejects_shell_metacharacters(self):
+        """IDs with shell metacharacters are rejected (CWE-78)."""
+        with pytest.raises(SystemExit) as exc_info:
+            ps._validate_ids(["RHAIRFE-1001", "$(whoami)"])
+        assert exc_info.value.code == 1
+
+    def test_rejects_semicolon_injection(self):
+        """IDs with semicolons are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001; rm -rf /"])
+
+    def test_rejects_pipe_injection(self):
+        """IDs with pipes are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001 | cat /etc/passwd"])
+
+    def test_rejects_backtick_injection(self):
+        """IDs with backticks are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["`id`"])
+
+    def test_rejects_arbitrary_strings(self):
+        """Arbitrary strings that don't match the pattern are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["not-an-id"])
+
+    def test_rejects_partial_matches(self):
+        """IDs that partially match are rejected (must be full match)."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001-extra"])
+
+    def test_rejects_wrong_prefix(self):
+        """IDs with wrong prefix are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["JIRA-1001"])
+
+    def test_run_phase_rejects_invalid_ids(self, tmp_dir, monkeypatch):
+        """run-phase rejects invalid IDs before running the command."""
+        ps._save_state(make_state(phase="FIXUP"))
+        write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001", "$(whoami)"])
+        # subprocess.run should NOT be called
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_run_phase([])
+        assert exc_info.value.code == 1
+        # Command was never executed
+        assert len(calls) == 0
 
 
 # ---------- Dispatch marker guard ----------
@@ -1538,7 +1659,9 @@ class TestDispatchLoopE2E:
         fixup_commands = []
 
         def subprocess_mock(cmd, **kw):
-            if "check_revised.py" in cmd:
+            # cmd may be a list (argv mode for ids_file phases) or string
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "check_revised.py" in cmd_str:
                 fixup_commands.append(cmd)
             return type("R", (), {"returncode": 0})()
 
@@ -1554,7 +1677,7 @@ class TestDispatchLoopE2E:
         # Verify we got fixup calls from cycle 1 (with IDs) but the
         # total count reflects that the empty-ID cycle was skipped.
         assert len(fixup_commands) >= 1  # at least cycle 1's FIXUP ran
-        # Cycle 1's fixup should have the ID
+        # Cycle 1's fixup should have the ID (cmd is argv list)
         assert "RHAIRFE-1001" in fixup_commands[0]
 
     def test_dispatch_context_hides_ids_file_for_scripts(self, tmp_dir):
