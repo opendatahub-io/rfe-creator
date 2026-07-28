@@ -901,6 +901,7 @@ def cmd_next_action(args):
         if phase_type == "agent":
             ids_file = config.get("ids_file", "")
             all_ids = _read_ids(ids_file)
+            _validate_ids(all_ids)
             poll_phase = config.get("poll_phase", "")
 
             # Build list of all phases to check (main + parallel)

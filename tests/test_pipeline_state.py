@@ -1898,8 +1898,8 @@ class TestNextActionNoop:
 
     def test_multi_batch_noop_chain(self, tmp_dir, monkeypatch):
         """BATCH_DONE → BATCH_START → FETCH chains across batch boundary."""
-        write_ids("tmp/pipeline-active-ids.txt", ["A"])
-        write_ids("tmp/pipeline-batch-2-ids.txt", ["B"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-5001"])
+        write_ids("tmp/pipeline-batch-2-ids.txt", ["RHAIRFE-5002"])
 
         def mock_run_script(cmd):
             cmd_str = " ".join(cmd)
@@ -1922,8 +1922,8 @@ class TestNextActionNoop:
     def test_state_saved_per_iteration(self, tmp_dir, monkeypatch):
         """State is saved after each noop advance — verified by checking
         that a crash mid-chain leaves correct phase on disk."""
-        write_ids("tmp/pipeline-batch-1-ids.txt", ["A"])
-        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+        write_ids("tmp/pipeline-batch-1-ids.txt", ["RHAIRFE-5001"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-5001"])
 
         advance_calls = {"count": 0}
         original_advance = ps.advance
@@ -2114,6 +2114,55 @@ class TestNextActionAgent:
         raw_output = buf.getvalue()
         # vars should use block scalar — contains | indicator
         assert "vars: |" in raw_output or "vars: |\n" in raw_output
+
+
+class TestNextActionIdValidation:
+    """Verify cmd_next_action validates IDs before {ID} substitution (CWE-20/CWE-22)."""
+
+    def test_rejects_traversal_ids_before_substitution(self, tmp_dir, monkeypatch):
+        """IDs with path traversal patterns are rejected before templating."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "../../outside"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_rejects_shell_injection_ids_in_agent_phase(self, tmp_dir, monkeypatch):
+        """IDs with shell metacharacters are rejected in agent phases."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "$(whoami)"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_rejects_arbitrary_strings_in_agent_phase(self, tmp_dir, monkeypatch):
+        """Arbitrary non-RFE strings are rejected before wave substitution."""
+        write_ids("tmp/pipeline-active-ids.txt", ["not-an-id"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_valid_ids_pass_through(self, tmp_dir, monkeypatch):
+        """Valid RFE IDs are accepted and proceed to wave launch."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        result = _run_next_action()
+        assert result["action"] == "launch_wave"
+        wave_ids = read_ids(ps.WAVE_IDS_FILE)
+        assert "RHAIRFE-1001" in wave_ids
 
 
 class TestNextActionWaveSize:
