@@ -9,6 +9,9 @@ Usage:
     # RFE-012
     # RFE-013
     # RFE-014
+
+    python3 scripts/next_rfe_id.py --from-batch batch.yaml
+    # allocates one ID per entry in the YAML batch file (avoids N=$(...) in skills)
 """
 
 import fcntl
@@ -34,12 +37,30 @@ def get_highest_rfe_number():
     return highest
 
 
+def count_batch_entries(path):
+    """Return the number of entries in a YAML batch file."""
+    import yaml
+
+    with open(path) as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, list):
+        print(f"Batch file {path} must contain a YAML list", file=sys.stderr)
+        sys.exit(2)
+    return len(data)
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: next_rfe_id.py <count>", file=sys.stderr)
+        print("Usage: next_rfe_id.py <count> | --from-batch <batch.yaml>", file=sys.stderr)
         sys.exit(2)
 
-    count = int(sys.argv[1])
+    if sys.argv[1] == "--from-batch":
+        if len(sys.argv) < 3:
+            print("Usage: next_rfe_id.py --from-batch <batch.yaml>", file=sys.stderr)
+            sys.exit(2)
+        count = count_batch_entries(sys.argv[2])
+    else:
+        count = int(sys.argv[1])
     if count < 1:
         print("Count must be >= 1", file=sys.stderr)
         sys.exit(2)

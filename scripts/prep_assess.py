@@ -9,13 +9,13 @@ Usage:
     python3 scripts/prep_assess.py RFE-001
 
 Outputs:
-    FILE=/tmp/rfe-assess/single/<ID>.md
+    FILE=tmp/rfe-assess/single/<ID>.md
 """
 
 import os
 import sys
 
-SINGLE_DIR = "/tmp/rfe-assess/single"
+SINGLE_DIR = "tmp/rfe-assess/single"
 TASK_DIR = os.path.join("artifacts", "rfe-tasks")
 
 

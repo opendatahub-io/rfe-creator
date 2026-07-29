@@ -103,7 +103,7 @@ python3 scripts/state.py read tmp/split-config.yaml
 If `correction_cycle` is 1 or higher, stop and report remaining right-sizing concerns. Otherwise, re-derive child IDs:
 
 ```bash
-python3 scripts/collect_children.py $(python3 scripts/state.py read-ids tmp/split-all-ids.txt)
+python3 scripts/collect_children.py --ids-file tmp/split-all-ids.txt
 ```
 
 Check right-sized scores. For each child:

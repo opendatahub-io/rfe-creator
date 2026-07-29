@@ -93,7 +93,7 @@ def jira(jira_emu):
 
     _extra_link_types = [
         {
-            "name": "Issue split",
+            "name": "Work item split",
             "inward_description": "is split from",
             "outward_description": "split to",
         },

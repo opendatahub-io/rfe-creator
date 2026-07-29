@@ -760,8 +760,6 @@ def main():
                     update_frontmatter(
                         review_path,
                         {
-                            "needs_attention": True,
-                            "needs_attention_reason": f"Submit failed: {msg}",
                             "error": f"submit_failed: {msg}",
                         },
                         "rfe-review",

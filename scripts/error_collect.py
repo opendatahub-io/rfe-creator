@@ -126,8 +126,8 @@ def main():
         for path in [
             f"artifacts/rfe-reviews/{rfe_id}-review.md",
             f"artifacts/rfe-reviews/{rfe_id}-feasibility.md",
-            f"/tmp/rfe-assess/single/{rfe_id}.md",
-            f"/tmp/rfe-assess/single/{rfe_id}.result.md",
+            f"tmp/rfe-assess/single/{rfe_id}.md",
+            f"tmp/rfe-assess/single/{rfe_id}.result.md",
         ]:
             if os.path.exists(path):
                 os.remove(path)
@@ -152,7 +152,7 @@ def main():
     warnings = []
     for rfe_id in error_ids:
         for path in [
-            f"/tmp/rfe-assess/single/{rfe_id}.result.md",
+            f"tmp/rfe-assess/single/{rfe_id}.result.md",
             f"artifacts/rfe-reviews/{rfe_id}-review.md",
             f"artifacts/rfe-reviews/{rfe_id}-feasibility.md",
         ]:

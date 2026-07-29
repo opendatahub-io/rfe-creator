@@ -51,9 +51,7 @@
       "Bash(python3 scripts/submit.py *)",
       "Bash(python3 scripts/split_submit.py *)",
       "Edit(artifacts/**)",
-      "Edit(/tmp/rfe-assess/**)",
-      "Write(artifacts/**)",
-      "Write(/tmp/rfe-assess/**)"
+      "Edit(/tmp/rfe-assess/**)"
     ],
     "additionalDirectories": [
       "/tmp/rfe-assess",

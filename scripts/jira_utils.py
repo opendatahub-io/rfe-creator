@@ -12,11 +12,20 @@ import base64
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import unicodedata
 import urllib.error
 import urllib.request
+
+ssl_ctx = ssl.create_default_context()
+try:
+    import certifi
+
+    ssl_ctx.load_verify_locations(certifi.where())
+except (ImportError, OSError):
+    pass
 
 # ─── HTTP Layer ───────────────────────────────────────────────────────────────
 
@@ -33,7 +42,7 @@ def make_request(url, user, token, body=None, method=None):
         headers["Content-Type"] = "application/json"
         data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=ssl_ctx) as resp:
         if resp.status == 204:
             return None
         resp_body = resp.read()
@@ -131,6 +140,7 @@ def create_issue(
     labels=None,
     components=None,
     parent_key=None,
+    reporter_account_id=None,
 ):
     """POST /rest/api/3/issue — returns the created issue key."""
     body = {
@@ -148,7 +158,20 @@ def create_issue(
         body["fields"]["components"] = [{"name": c} for c in components]
     if parent_key:
         body["fields"]["parent"] = {"key": parent_key}
-    result = api_call_with_retry(server, "/issue", user, token, body=body)
+    if reporter_account_id and reporter_account_id.strip():
+        body["fields"]["reporter"] = {"accountId": reporter_account_id.strip()}
+    try:
+        result = api_call_with_retry(server, "/issue", user, token, body=body)
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 403) and "reporter" in body["fields"]:
+            print(
+                f"  WARNING: Could not set reporter ({e.code}) — retrying without reporter field.",
+                file=sys.stderr,
+            )
+            del body["fields"]["reporter"]
+            result = api_call_with_retry(server, "/issue", user, token, body=body)
+        else:
+            raise
     return result["key"]
 
 

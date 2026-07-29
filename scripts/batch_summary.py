@@ -7,26 +7,33 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from artifact_utils import read_frontmatter
+from artifact_utils import read_frontmatter, resolve_ids
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Aggregate RFE review results for batch summaries."
     )
-    parser.add_argument("ids", nargs="+", help="RFE IDs (e.g. RHAIRFE-100)")
+    parser.add_argument("ids", nargs="*", help="RFE IDs (e.g. RHAIRFE-100)")
+    parser.add_argument(
+        "--ids-file", help="Read RFE IDs from a file (one per line) instead of positional args"
+    )
     parser.add_argument(
         "--counts-only", action="store_true", help="Print only the counts line, no per-ID details"
     )
     args = parser.parse_args()
 
+    ids = resolve_ids(args.ids, args.ids_file)
+    if not ids:
+        parser.error("no RFE IDs provided (pass positionally or via --ids-file)")
+
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
     reviews_dir = os.path.join(artifacts_dir, "rfe-reviews")
 
     # Expand to include split children
-    all_ids = list(args.ids)
+    all_ids = list(ids)
     id_set = set(all_ids)
-    for rfe_id in args.ids:
+    for rfe_id in ids:
         task_path = os.path.join(artifacts_dir, "rfe-tasks", f"{rfe_id}.md")
         try:
             data, _ = read_frontmatter(task_path)

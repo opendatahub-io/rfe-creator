@@ -538,12 +538,26 @@ def advance(current_phase, state):
     # seq[:-1] to reach explicit decision handlers below. REVIEW, REASSESS_RESTORE,
     # and SPLIT_REVIEW are also in these sequences but are intercepted above.
     MAIN_SEQUENCE = ["FETCH", "SETUP", "ASSESS", "REVIEW", "REVISE", "FIXUP"]
-    REASSESS_SEQUENCE = ["REASSESS_SAVE", "REASSESS_ASSESS", "REASSESS_REVIEW",
-                         "REASSESS_RESTORE", "REASSESS_REVISE", "REASSESS_FIXUP"]
-    SPLIT_SEQUENCE = ["SPLIT_PIPELINE_START", "SPLIT_ASSESS",
-                      "SPLIT_REVIEW", "SPLIT_REVISE", "SPLIT_FIXUP",
-                      "SPLIT_SAVE", "SPLIT_REASSESS", "SPLIT_RE_REVIEW",
-                      "SPLIT_RESTORE", "SPLIT_CORRECTION_CHECK"]
+    REASSESS_SEQUENCE = [
+        "REASSESS_SAVE",
+        "REASSESS_ASSESS",
+        "REASSESS_REVIEW",
+        "REASSESS_RESTORE",
+        "REASSESS_REVISE",
+        "REASSESS_FIXUP",
+    ]
+    SPLIT_SEQUENCE = [
+        "SPLIT_PIPELINE_START",
+        "SPLIT_ASSESS",
+        "SPLIT_REVIEW",
+        "SPLIT_REVISE",
+        "SPLIT_FIXUP",
+        "SPLIT_SAVE",
+        "SPLIT_REASSESS",
+        "SPLIT_RE_REVIEW",
+        "SPLIT_RESTORE",
+        "SPLIT_CORRECTION_CHECK",
+    ]
 
     for seq in [MAIN_SEQUENCE, REASSESS_SEQUENCE, SPLIT_SEQUENCE]:
         if current_phase in seq[:-1]:
@@ -918,7 +932,9 @@ if phase == "revise":
     if data.get("auto_revised"):
         return "completed"
     if data.get("recommendation") == "split":
-        return "completed"  # revise agent can't fix right-sizing; completion expected without changes
+        return (
+            "completed"  # revise agent can't fix right-sizing; completion expected without changes
+        )
     return "pending"
 ```
 

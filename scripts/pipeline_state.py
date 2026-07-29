@@ -125,9 +125,10 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-active-ids.txt",
         "vars": {
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "KEY": "{ID}",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "REVIEW": {
@@ -140,7 +141,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -161,7 +162,6 @@ PHASE_CONFIG = {
     "REASSESS_SAVE": {
         "type": "script",
         "command": "python3 scripts/reassess_save.py",
-        "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     "REASSESS_ASSESS": {
         "type": "agent",
@@ -174,9 +174,10 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-reassess-ids.txt",
         "vars": {
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "KEY": "{ID}",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "REASSESS_REVIEW": {
@@ -189,7 +190,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -226,7 +227,6 @@ PHASE_CONFIG = {
     "SPLIT_COLLECT": {
         "type": "script",
         "command": "python3 scripts/split_collect.py",
-        "ids_file": "tmp/pipeline-split-ids.txt",
     },
     "SPLIT_PIPELINE_START": {"type": "noop"},
     "SPLIT_ASSESS": {
@@ -247,9 +247,10 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-split-children-ids.txt",
         "vars": {
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "KEY": "{ID}",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "SPLIT_REVIEW": {
@@ -262,7 +263,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },
@@ -293,9 +294,10 @@ PHASE_CONFIG = {
         "post_verify": "python3 scripts/verify_phase.py --phase assess"
         " --ids-file tmp/pipeline-revise-ids.txt",
         "vars": {
-            "DATA_FILE": "/tmp/rfe-assess/single/{ID}.md",
-            "RUN_DIR": "/tmp/rfe-assess/single",
-            "PROMPT_PATH": ".context/assess-rfe/scripts/agent_prompt.md",
+            "KEY": "{ID}",
+            "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
+            "RUN_DIR": "tmp/rfe-assess/single",
+            "PROMPT_PATH": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
         },
     },
     "SPLIT_RE_REVIEW": {
@@ -308,7 +310,7 @@ PHASE_CONFIG = {
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
-            "ASSESS_PATH": "/tmp/rfe-assess/single/{ID}.result.md",
+            "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": "artifacts/rfe-reviews/{ID}-feasibility.md",
         },
     },

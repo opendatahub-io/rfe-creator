@@ -142,6 +142,27 @@ def cmd_read_ids(args):
     print(" ".join(ids))
 
 
+def cmd_copy_ids(args):
+    """Copy IDs from one file to another (one per line, deduped).
+
+    Avoids `write-ids DST $(read-ids SRC)` command substitution, which
+    triggers headless permission denials.
+    """
+    if len(args) != 2:
+        print("Usage: state.py copy-ids <src-file> <dst-file>", file=sys.stderr)
+        sys.exit(1)
+    src, dst = args
+    # Route through the shared reader so copy-ids and --ids-file parse IDs identically.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from artifact_utils import read_ids_file
+
+    ids = read_ids_file(src)
+    os.makedirs(os.path.dirname(dst) or "tmp", exist_ok=True)
+    with open(dst, "w") as f:
+        for id_ in ids:
+            f.write(f"{id_}\n")
+
+
 def cmd_timestamp(args):
     """Print current UTC timestamp in ISO 8601 format."""
     from datetime import datetime, timezone
@@ -177,6 +198,7 @@ COMMANDS = {
     "read": cmd_read,
     "write-ids": cmd_write_ids,
     "read-ids": cmd_read_ids,
+    "copy-ids": cmd_copy_ids,
     "timestamp": cmd_timestamp,
     "clean": cmd_clean,
 }
