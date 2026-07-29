@@ -20,6 +20,7 @@ Usage:
 import argparse
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -96,16 +97,22 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/fetch-agent.md",
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "fetch",
-        "post_verify": "python3 scripts/verify_phase.py --phase fetch"
-        " --ids-file tmp/pipeline-active-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "fetch",
+            "--ids-file",
+            "tmp/pipeline-active-ids.txt",
+        ],
         "vars": {"KEY": "{ID}"},
     },
     "SETUP": {
         "type": "script",
-        "command": (
-            "bash scripts/bootstrap-assess-rfe.sh &"
-            " bash scripts/fetch-architecture-context.sh & wait"
-        ),
+        "commands": [
+            ["bash", "scripts/bootstrap-assess-rfe.sh"],
+            ["bash", "scripts/fetch-architecture-context.sh"],
+        ],
     },
     "ASSESS": {
         "type": "agent",
@@ -121,9 +128,15 @@ PHASE_CONFIG = {
             },
         ],
         "parallel_timeout": 300,
-        "pre_script": "python3 scripts/prep_assess.py {ID}",
-        "post_verify": "python3 scripts/verify_phase.py --phase assess"
-        " --ids-file tmp/pipeline-active-ids.txt",
+        "pre_script": ["python3", "scripts/prep_assess.py", "{ID}"],
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "assess",
+            "--ids-file",
+            "tmp/pipeline-active-ids.txt",
+        ],
         "vars": {
             "KEY": "{ID}",
             "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
@@ -136,8 +149,14 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
         "ids_file": "tmp/pipeline-active-ids.txt",
         "poll_phase": "review",
-        "post_verify": "python3 scripts/verify_phase.py --phase review"
-        " --ids-file tmp/pipeline-active-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "review",
+            "--ids-file",
+            "tmp/pipeline-active-ids.txt",
+        ],
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
@@ -154,14 +173,14 @@ PHASE_CONFIG = {
     },
     "FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     # --- Reassess loop ---
     "REASSESS_CHECK": {"type": "noop"},
     "REASSESS_SAVE": {
         "type": "script",
-        "command": "python3 scripts/reassess_save.py",
+        "command": ["python3", "scripts/reassess_save.py"],
     },
     "REASSESS_ASSESS": {
         "type": "agent",
@@ -169,10 +188,16 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-reassess-ids.txt",
         "subagent_type": "rfe-scorer",
         "poll_phase": "assess",
-        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        "pre_script": ["python3", "scripts/prep_assess.py", "{ID}"],
         # NO "parallel" — feasibility NOT re-checked (invariant 4.2/5.4)
-        "post_verify": "python3 scripts/verify_phase.py --phase assess"
-        " --ids-file tmp/pipeline-reassess-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "assess",
+            "--ids-file",
+            "tmp/pipeline-reassess-ids.txt",
+        ],
         "vars": {
             "KEY": "{ID}",
             "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
@@ -185,8 +210,14 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
         "ids_file": "tmp/pipeline-reassess-ids.txt",
         "poll_phase": "review",
-        "post_verify": "python3 scripts/verify_phase.py --phase review"
-        " --ids-file tmp/pipeline-reassess-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "review",
+            "--ids-file",
+            "tmp/pipeline-reassess-ids.txt",
+        ],
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
@@ -196,7 +227,7 @@ PHASE_CONFIG = {
     },
     "REASSESS_RESTORE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py restore",
+        "command": ["python3", "scripts/preserve_review_state.py", "restore"],
         "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     "REASSESS_REVISE": {
@@ -208,8 +239,8 @@ PHASE_CONFIG = {
     },
     "REASSESS_FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
-        "ids_file": "tmp/pipeline-revise-ids.txt",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
+        "ids_file": "tmp/pipeline-reassess-ids.txt",
     },
     # --- Collect + Split ---
     "COLLECT": {"type": "noop"},
@@ -226,7 +257,7 @@ PHASE_CONFIG = {
     },
     "SPLIT_COLLECT": {
         "type": "script",
-        "command": "python3 scripts/split_collect.py",
+        "command": ["python3", "scripts/split_collect.py"],
     },
     "SPLIT_PIPELINE_START": {"type": "noop"},
     "SPLIT_ASSESS": {
@@ -235,7 +266,7 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-split-children-ids.txt",
         "subagent_type": "rfe-scorer",
         "poll_phase": "assess",
-        "pre_script": "python3 scripts/prep_assess.py {ID}",
+        "pre_script": ["python3", "scripts/prep_assess.py", "{ID}"],
         "parallel": [
             {
                 "prompt": ".claude/skills/rfe-feasibility-review/SKILL.md",
@@ -244,8 +275,14 @@ PHASE_CONFIG = {
             },
         ],
         "parallel_timeout": 300,
-        "post_verify": "python3 scripts/verify_phase.py --phase assess"
-        " --ids-file tmp/pipeline-split-children-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "assess",
+            "--ids-file",
+            "tmp/pipeline-split-children-ids.txt",
+        ],
         "vars": {
             "KEY": "{ID}",
             "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
@@ -258,8 +295,14 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
         "ids_file": "tmp/pipeline-split-children-ids.txt",
         "poll_phase": "review",
-        "post_verify": "python3 scripts/verify_phase.py --phase review"
-        " --ids-file tmp/pipeline-split-children-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "review",
+            "--ids-file",
+            "tmp/pipeline-split-children-ids.txt",
+        ],
         "vars": {
             "FIRST_PASS": "true",
             "ID": "{ID}",
@@ -276,12 +319,12 @@ PHASE_CONFIG = {
     },
     "SPLIT_FIXUP": {
         "type": "script",
-        "command": "python3 scripts/check_revised.py --batch",
+        "command": ["python3", "scripts/check_revised.py", "--batch"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_SAVE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py save",
+        "command": ["python3", "scripts/preserve_review_state.py", "save"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_REASSESS": {
@@ -290,9 +333,15 @@ PHASE_CONFIG = {
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "subagent_type": "rfe-scorer",
         "poll_phase": "assess",
-        "pre_script": "python3 scripts/prep_assess.py {ID}",
-        "post_verify": "python3 scripts/verify_phase.py --phase assess"
-        " --ids-file tmp/pipeline-revise-ids.txt",
+        "pre_script": ["python3", "scripts/prep_assess.py", "{ID}"],
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "assess",
+            "--ids-file",
+            "tmp/pipeline-revise-ids.txt",
+        ],
         "vars": {
             "KEY": "{ID}",
             "DATA_FILE": "tmp/rfe-assess/single/{ID}.md",
@@ -305,8 +354,14 @@ PHASE_CONFIG = {
         "prompt": ".claude/skills/rfe.review/prompts/review-agent.md",
         "ids_file": "tmp/pipeline-revise-ids.txt",
         "poll_phase": "review",
-        "post_verify": "python3 scripts/verify_phase.py --phase review"
-        " --ids-file tmp/pipeline-revise-ids.txt",
+        "post_verify": [
+            "python3",
+            "scripts/verify_phase.py",
+            "--phase",
+            "review",
+            "--ids-file",
+            "tmp/pipeline-revise-ids.txt",
+        ],
         "vars": {
             "FIRST_PASS": "false",
             "ID": "{ID}",
@@ -316,7 +371,7 @@ PHASE_CONFIG = {
     },
     "SPLIT_RESTORE": {
         "type": "script",
-        "command": "python3 scripts/preserve_review_state.py restore",
+        "command": ["python3", "scripts/preserve_review_state.py", "restore"],
         "ids_file": "tmp/pipeline-revise-ids.txt",
     },
     "SPLIT_CORRECTION_CHECK": {"type": "noop"},
@@ -324,16 +379,19 @@ PHASE_CONFIG = {
     "BATCH_DONE": {"type": "noop"},
     "ERROR_COLLECT": {
         "type": "script",
-        "command": "python3 scripts/error_collect.py",
+        "command": ["python3", "scripts/error_collect.py"],
     },
     # --- Terminal ---
     "REPORT": {
         "type": "script",
-        "command": (
-            "python3 scripts/generate_run_report.py"
-            " --start-time {start_time}"
-            " --batch-size {batch_size}"
-        ),
+        "command": [
+            "python3",
+            "scripts/generate_run_report.py",
+            "--start-time",
+            "{start_time}",
+            "--batch-size",
+            "{batch_size}",
+        ],
     },
 }
 
@@ -379,14 +437,30 @@ def _copy_ids(src, dst):
 
 
 def _run_script(cmd):
-    """Run a script and return stdout lines."""
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    """Run a script (argv list) and return stdout lines."""
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Script failed (exit code {result.returncode})", file=sys.stderr)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         sys.exit(1)
     return result.stdout.strip()
+
+
+_VALID_ID_RE = re.compile(r"^(RFE-\d+|RHAIRFE-\d+)$")
+
+
+def _validate_ids(ids):
+    """Validate that all IDs match expected RFE ID patterns.
+
+    Rejects IDs that don't match ^(RFE-\\d+|RHAIRFE-\\d+)$ to prevent
+    shell injection (CWE-78) when IDs are passed as command arguments.
+    """
+    invalid = [id_ for id_ in ids if not _VALID_ID_RE.match(id_)]
+    if invalid:
+        print(f"Invalid RFE IDs rejected: {invalid}", file=sys.stderr)
+        sys.exit(1)
+    return ids
 
 
 def _parse_line_ids(output, prefix):
@@ -447,7 +521,7 @@ def advance(state, dry_run=False):
     if phase == "REVIEW":
         if not dry_run:
             active_ids = _read_ids("tmp/pipeline-active-ids.txt")
-            out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(active_ids)}")
+            out = _run_script(["python3", "scripts/filter_for_revision.py"] + active_ids)
             revise_ids = out.split() if out else []
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REVISE", "REVIEW → REVISE"
@@ -460,9 +534,7 @@ def advance(state, dry_run=False):
                 _write_ids("tmp/pipeline-revise-ids.txt", [])
             else:
                 reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
-                out = _run_script(
-                    f"python3 scripts/filter_for_revision.py {' '.join(reassess_ids)}"
-                )
+                out = _run_script(["python3", "scripts/filter_for_revision.py"] + reassess_ids)
                 revise_ids = out.split() if out else []
                 _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "REASSESS_REVISE", "REASSESS_RESTORE → REASSESS_REVISE"
@@ -470,7 +542,7 @@ def advance(state, dry_run=False):
     if phase == "SPLIT_REVIEW":
         if not dry_run:
             child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
-            out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(child_ids)}")
+            out = _run_script(["python3", "scripts/filter_for_revision.py"] + child_ids)
             revise_ids = out.split() if out else []
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
         return "SPLIT_REVISE", "SPLIT_REVIEW → SPLIT_REVISE"
@@ -489,7 +561,7 @@ def advance(state, dry_run=False):
     if phase == "REASSESS_CHECK":
         active_ids = _read_ids("tmp/pipeline-active-ids.txt")
         out = _run_script(
-            f"python3 scripts/collect_recommendations.py --reassess {' '.join(active_ids)}"
+            ["python3", "scripts/collect_recommendations.py", "--reassess"] + active_ids
         )
         reassess_ids = _parse_line_ids(out, "REASSESS")
         cycle = state.get("reassess_cycle", 0)
@@ -510,7 +582,7 @@ def advance(state, dry_run=False):
     # --- COLLECT decision ---
     if phase == "COLLECT":
         active_ids = _read_ids("tmp/pipeline-active-ids.txt")
-        out = _run_script(f"python3 scripts/collect_recommendations.py {' '.join(active_ids)}")
+        out = _run_script(["python3", "scripts/collect_recommendations.py"] + active_ids)
         split_ids = _parse_line_ids(out, "SPLIT")
         # Build summary counts from collect output
         counts = {}
@@ -542,7 +614,7 @@ def advance(state, dry_run=False):
     if phase == "SPLIT_CORRECTION_CHECK":
         child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
         if child_ids:
-            out = _run_script(f"python3 scripts/check_right_sized.py {' '.join(child_ids)}")
+            out = _run_script(["python3", "scripts/check_right_sized.py"] + child_ids)
             undersized = out.split("RESPLIT=")[1].split() if "RESPLIT=" in out else []
         else:
             undersized = []
@@ -569,7 +641,7 @@ def advance(state, dry_run=False):
         if active_ids:
             try:
                 out = _run_script(
-                    f"python3 scripts/batch_summary.py --counts-only {' '.join(active_ids)}"
+                    ["python3", "scripts/batch_summary.py", "--counts-only"] + active_ids
                 )
                 batch_stats = out.strip()
             except Exception:
@@ -582,7 +654,7 @@ def advance(state, dry_run=False):
             all_ids = _read_ids("tmp/pipeline-all-ids.txt")
             if all_ids:
                 out = _run_script(
-                    f"python3 scripts/collect_recommendations.py --errors {' '.join(all_ids)}"
+                    ["python3", "scripts/collect_recommendations.py", "--errors"] + all_ids
                 )
                 error_ids = _parse_line_ids(out, "ERRORS")
                 if error_ids:
@@ -605,7 +677,7 @@ def advance(state, dry_run=False):
     # --- REPORT → DONE (optional announce) ---
     if phase == "REPORT":
         if not dry_run and state.get("announce_complete"):
-            _run_script("python3 scripts/finish.py")
+            _run_script(["python3", "scripts/finish.py"])
         return "DONE", "REPORT → DONE"
 
     print(f"No transition defined for phase: {phase}", file=sys.stderr)
@@ -665,6 +737,7 @@ def cmd_get_phase_config(args):
     config = dict(PHASE_CONFIG.get(phase, {"type": "noop"}))
     config["phase"] = phase
     config.pop("command", None)
+    config.pop("commands", None)
     config.pop("pre_script", None)
     config.pop("post_verify", None)
     if config.get("type") == "script":
@@ -682,6 +755,9 @@ def cmd_run_phase(args):
     Loads state, resolves the command from PHASE_CONFIG, appends IDs
     from ids_file if configured, and runs the command. The orchestrator
     never sees the underlying script name.
+
+    All execution uses argv lists (shell=False) to prevent shell
+    injection (CWE-78) via format_map state interpolation.
     """
     state = _load_state()
     phase = state["phase"]
@@ -690,11 +766,26 @@ def cmd_run_phase(args):
     if phase_type != "script":
         print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'", file=sys.stderr)
         sys.exit(1)
-    cmd = config["command"].format_map(state)
+
+    # Handle parallel commands (e.g., SETUP runs multiple scripts concurrently)
+    if "commands" in config:
+        cmd_lists = [[arg.format_map(state) for arg in cmd] for cmd in config["commands"]]
+        print(f"[run-phase] {phase}")
+        procs = [subprocess.Popen(cmd) for cmd in cmd_lists]
+        returncodes = [p.wait() for p in procs]
+        failed = [rc for rc in returncodes if rc != 0]
+        if failed:
+            sys.exit(failed[0])
+        with open(DISPATCH_MARKER, "w") as f:
+            f.write(phase)
+        return
+
+    cmd_argv = [arg.format_map(state) for arg in config["command"]]
     if config.get("ids_file"):
         ids = _read_ids(config["ids_file"])
         if ids:
-            cmd += " " + " ".join(ids)
+            _validate_ids(ids)
+            cmd_argv = cmd_argv + ids
         else:
             print(f"[run-phase] {phase}: no IDs, skipping")
             # Write dispatch marker and return — nothing to do
@@ -702,7 +793,7 @@ def cmd_run_phase(args):
                 f.write(phase)
             return
     print(f"[run-phase] {phase}")
-    result = subprocess.run(cmd, shell=True)
+    result = subprocess.run(cmd_argv)
     if result.returncode != 0:
         sys.exit(result.returncode)
     # Write dispatch marker — advance checks this for script phases
@@ -810,6 +901,7 @@ def cmd_next_action(args):
         if phase_type == "agent":
             ids_file = config.get("ids_file", "")
             all_ids = _read_ids(ids_file)
+            _validate_ids(all_ids)
             poll_phase = config.get("poll_phase", "")
 
             # Build list of all phases to check (main + parallel)
@@ -848,7 +940,7 @@ def cmd_next_action(args):
             # Run pre_script for each ID in the wave
             if config.get("pre_script"):
                 for rfe_id in wave_ids:
-                    cmd = config["pre_script"].replace("{ID}", rfe_id)
+                    cmd = [arg.replace("{ID}", rfe_id) for arg in config["pre_script"]]
                     _run_script(cmd)
 
             # Write wave IDs

@@ -249,6 +249,20 @@ class TestReassessLoop:
         next_phase, _ = ps.advance(state)
         assert next_phase == "REASSESS_CHECK"
 
+    def test_reassess_fixup_uses_reassess_ids_file(self, tmp_dir):
+        """REASSESS_FIXUP must use pipeline-reassess-ids.txt, not pipeline-revise-ids.txt.
+
+        This is distinct from the initial FIXUP which correctly uses
+        pipeline-revise-ids.txt. All REASSESS_* phases operate on reassess IDs.
+        """
+        config = ps.PHASE_CONFIG["REASSESS_FIXUP"]
+        assert config["ids_file"] == "tmp/pipeline-reassess-ids.txt", (
+            "REASSESS_FIXUP ids_file should be tmp/pipeline-reassess-ids.txt"
+            " (copy-paste error: was tmp/pipeline-revise-ids.txt)"
+        )
+        # Verify initial FIXUP still uses revise IDs (sanity check)
+        assert ps.PHASE_CONFIG["FIXUP"]["ids_file"] == "tmp/pipeline-revise-ids.txt"
+
     def test_last_cycle_skips_revise(self, tmp_dir, monkeypatch):
         """On cycle 2 (max), REASSESS_RESTORE writes empty revise IDs."""
         write_ids("tmp/pipeline-reassess-ids.txt", ["A", "B"])
@@ -534,9 +548,10 @@ class TestBatchDone:
         write_ids("tmp/pipeline-all-ids.txt", ["A", "B"])
 
         def mock_run(cmd):
-            if "batch_summary" in cmd:
+            cmd_str = " ".join(cmd)
+            if "batch_summary" in cmd_str:
                 return "TOTAL=1 PASSED=1"
-            if "collect_recommendations" in cmd:
+            if "collect_recommendations" in cmd_str:
                 return "ERRORS=B"
             return ""
 
@@ -551,7 +566,7 @@ class TestBatchDone:
         monkeypatch.setattr(
             ps,
             "_run_script",
-            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=",
+            lambda cmd: "TOTAL=1 PASSED=1" if any("batch_summary" in a for a in cmd) else "ERRORS=",
         )
         state = make_state(phase="BATCH_DONE", batch=1, total_batches=1)
         next_phase, _ = ps.advance(state)
@@ -563,7 +578,9 @@ class TestBatchDone:
         monkeypatch.setattr(
             ps,
             "_run_script",
-            lambda cmd: "TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=B",
+            lambda cmd: (
+                "TOTAL=1 PASSED=1" if any("batch_summary" in a for a in cmd) else "ERRORS=B"
+            ),
         )
         state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, retry_cycle=1)
         next_phase, _ = ps.advance(state)
@@ -631,7 +648,7 @@ class TestGetPhaseConfig:
 
 class TestRunPhase:
     def test_executes_script(self, tmp_dir, monkeypatch):
-        """REPORT (no ids_file) runs the correct command."""
+        """REPORT (no ids_file) runs the correct command as argv list."""
         ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
@@ -646,29 +663,34 @@ class TestRunPhase:
         with redirect_stdout(buf):
             ps.cmd_run_phase([])
         assert len(calls) == 1
-        assert "generate_run_report.py" in calls[0]
+        assert isinstance(calls[0], list), "all phases must use argv (list), not shell string"
+        assert any("generate_run_report.py" in arg for arg in calls[0])
         assert "[run-phase] REPORT" in buf.getvalue()
 
     def test_appends_ids(self, tmp_dir, monkeypatch):
-        """FIXUP reads IDs from ids_file and appends them."""
+        """FIXUP reads IDs from ids_file and appends them as argv (shell=False)."""
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001", "RHAIRFE-1002"])
         calls = []
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
         )
         import io
         from contextlib import redirect_stdout
 
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
-        assert "RHAIRFE-1001" in calls[0]
-        assert "RHAIRFE-1002" in calls[0]
+        cmd, kw = calls[0]
+        # IDs passed as argv list, not shell string (CWE-78 mitigation)
+        assert isinstance(cmd, list), "ids_file phases must use argv (list), not shell string"
+        assert "RHAIRFE-1001" in cmd
+        assert "RHAIRFE-1002" in cmd
+        assert "shell" not in kw or not kw["shell"]
 
     def test_substitutes_state_vars(self, tmp_dir, monkeypatch):
-        """REPORT substitutes {start_time} and {batch_size}."""
+        """REPORT substitutes {start_time} and {batch_size} in argv list."""
         ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
         calls = []
         monkeypatch.setattr(
@@ -681,9 +703,11 @@ class TestRunPhase:
 
         with redirect_stdout(io.StringIO()):
             ps.cmd_run_phase([])
-        assert "2026-04-09T00:00:00Z" in calls[0]
-        assert "{start_time}" not in calls[0]
-        assert "50" in calls[0]
+        cmd = calls[0]
+        assert isinstance(cmd, list)
+        assert any("2026-04-09T00:00:00Z" in arg for arg in cmd)
+        assert any("50" in arg for arg in cmd)
+        assert all("{start_time}" not in arg for arg in cmd)
 
     def test_rejects_agent_phase(self, tmp_dir):
         """Agent phases cannot be run via run-phase."""
@@ -740,6 +764,151 @@ class TestRunPhase:
             with redirect_stdout(io.StringIO()):
                 ps.cmd_run_phase([])
         assert exc_info.value.code == 42
+
+    def test_no_ids_file_uses_argv(self, tmp_dir, monkeypatch):
+        """Phases without ids_file use argv list (no shell=True, CWE-78)."""
+        ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        cmd, kw = calls[0]
+        assert isinstance(cmd, list), "all phases must use argv (list), not shell string"
+        assert "shell" not in kw or not kw["shell"]
+
+    def test_parallel_commands_use_popen(self, tmp_dir, monkeypatch):
+        """SETUP runs parallel commands via Popen (no shell=True)."""
+        ps._save_state(make_state(phase="SETUP"))
+        popen_calls = []
+
+        class MockPopen:
+            def __init__(self, cmd, **kw):
+                popen_calls.append((cmd, kw))
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(subprocess, "Popen", MockPopen)
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        assert len(popen_calls) == 2
+        # Both calls use argv lists, not shell strings
+        for cmd, kw in popen_calls:
+            assert isinstance(cmd, list), "parallel commands must use argv (list)"
+            assert "shell" not in kw or not kw["shell"]
+        # Verify the correct scripts are invoked
+        all_args = [" ".join(cmd) for cmd, _ in popen_calls]
+        assert any("bootstrap-assess-rfe.sh" in a for a in all_args)
+        assert any("fetch-architecture-context.sh" in a for a in all_args)
+
+    def test_reassess_fixup_uses_argv(self, tmp_dir, monkeypatch):
+        """REASSESS_FIXUP appends IDs as argv list (shell=False)."""
+        ps._save_state(make_state(phase="REASSESS_FIXUP"))
+        write_ids("tmp/pipeline-reassess-ids.txt", ["RHAIRFE-2685"])
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append((cmd, kw)), type("R", (), {"returncode": 0})())[1],
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        cmd, kw = calls[0]
+        assert isinstance(cmd, list)
+        assert "RHAIRFE-2685" in cmd
+        assert "shell" not in kw or not kw["shell"]
+
+
+# ---------- ID validation ----------
+
+
+class TestIdValidation:
+    """Verify IDs are validated against ^(RFE-\\d+|RHAIRFE-\\d+)$ before use."""
+
+    def test_valid_rhairfe_ids(self):
+        """RHAIRFE-NNNN IDs pass validation."""
+        result = ps._validate_ids(["RHAIRFE-1001", "RHAIRFE-2685", "RHAIRFE-99"])
+        assert result == ["RHAIRFE-1001", "RHAIRFE-2685", "RHAIRFE-99"]
+
+    def test_valid_rfe_ids(self):
+        """RFE-NNN IDs pass validation."""
+        result = ps._validate_ids(["RFE-001", "RFE-1", "RFE-9999"])
+        assert result == ["RFE-001", "RFE-1", "RFE-9999"]
+
+    def test_mixed_valid_ids(self):
+        """Mix of RFE and RHAIRFE IDs pass validation."""
+        result = ps._validate_ids(["RHAIRFE-100", "RFE-001"])
+        assert result == ["RHAIRFE-100", "RFE-001"]
+
+    def test_empty_ids(self):
+        """Empty list passes validation."""
+        assert ps._validate_ids([]) == []
+
+    def test_rejects_shell_metacharacters(self):
+        """IDs with shell metacharacters are rejected (CWE-78)."""
+        with pytest.raises(SystemExit) as exc_info:
+            ps._validate_ids(["RHAIRFE-1001", "$(whoami)"])
+        assert exc_info.value.code == 1
+
+    def test_rejects_semicolon_injection(self):
+        """IDs with semicolons are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001; rm -rf /"])
+
+    def test_rejects_pipe_injection(self):
+        """IDs with pipes are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001 | cat /etc/passwd"])
+
+    def test_rejects_backtick_injection(self):
+        """IDs with backticks are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["`id`"])
+
+    def test_rejects_arbitrary_strings(self):
+        """Arbitrary strings that don't match the pattern are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["not-an-id"])
+
+    def test_rejects_partial_matches(self):
+        """IDs that partially match are rejected (must be full match)."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["RHAIRFE-1001-extra"])
+
+    def test_rejects_wrong_prefix(self):
+        """IDs with wrong prefix are rejected."""
+        with pytest.raises(SystemExit):
+            ps._validate_ids(["JIRA-1001"])
+
+    def test_run_phase_rejects_invalid_ids(self, tmp_dir, monkeypatch):
+        """run-phase rejects invalid IDs before running the command."""
+        ps._save_state(make_state(phase="FIXUP"))
+        write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001", "$(whoami)"])
+        # subprocess.run should NOT be called
+        calls = []
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_run_phase([])
+        assert exc_info.value.code == 1
+        # Command was never executed
+        assert len(calls) == 0
 
 
 # ---------- Dispatch marker guard ----------
@@ -1049,6 +1218,16 @@ class TestDispatchLoopE2E:
         # Step 2: dispatch based on type
         if phase_type == "script":
             monkeypatch.setattr(subprocess, "run", subprocess_mock)
+
+            # Mock Popen for parallel-command phases (e.g. SETUP)
+            class _MockPopen:
+                def __init__(self, cmd, **kw):
+                    self.result = subprocess_mock(cmd, **kw)
+
+                def wait(self):
+                    return self.result.returncode
+
+            monkeypatch.setattr(subprocess, "Popen", _MockPopen)
             buf = io.StringIO()
             with redirect_stdout(buf):
                 ps.cmd_run_phase([])
@@ -1120,18 +1299,19 @@ class TestDispatchLoopE2E:
 
         # Mock _run_script for advance() decision scripts
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return "RHAIRFE-1001 RHAIRFE-1002"  # 2 need revision
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001 RHAIRFE-1002 RHAIRFE-1003"
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return (
                     "SUBMIT=RHAIRFE-1001 RHAIRFE-1002 RHAIRFE-1003\n"
                     "SPLIT=\nREVISE=\nREJECT=\nERRORS="
                 )
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=3 split=0 revise=0 reject=0 errors=0"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
             return ""
 
@@ -1180,18 +1360,19 @@ class TestDispatchLoopE2E:
         reassess_calls = {"count": 0}
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return "RHAIRFE-1001"  # 1 needs revision each time
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 reassess_calls["count"] += 1
                 if reassess_calls["count"] <= 2:
                     return "REASSESS=RHAIRFE-1001\nDONE=RHAIRFE-1002"
                 return "REASSESS=\nDONE=RHAIRFE-1001 RHAIRFE-1002"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=RHAIRFE-1001 RHAIRFE-1002\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=2"
             return ""
 
@@ -1250,20 +1431,21 @@ class TestDispatchLoopE2E:
         current_batch = {"n": 0}
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return "RHAIRFE-1001"  # 1 needs revision
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001 RHAIRFE-1002"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 if current_batch["n"] == 0:
                     current_batch["n"] = 1
                     return "SUBMIT=RHAIRFE-1001\nSPLIT=RHAIRFE-1002\nREVISE=\nREJECT=\nERRORS="
                 return "SUBMIT=RHAIRFE-1003\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "check_right_sized.py" in cmd:
+            if "check_right_sized.py" in cmd_str:
                 return "RESPLIT="  # no undersized children
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
             return ""
 
@@ -1271,7 +1453,8 @@ class TestDispatchLoopE2E:
 
         # SPLIT_COLLECT writes child IDs
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
             return type("R", (), {"returncode": 0})()
 
@@ -1312,15 +1495,16 @@ class TestDispatchLoopE2E:
             return type("R", (), {"returncode": 0})()
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return ""  # no revisions
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=RHAIRFE-1001\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
             return ""
 
@@ -1352,20 +1536,21 @@ class TestDispatchLoopE2E:
         correction_checks = {"count": 0}
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return "RHAIRFE-1001"
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=\nSPLIT=RHAIRFE-1001\nREVISE=\nREJECT=\nERRORS="
-            if "check_right_sized.py" in cmd:
+            if "check_right_sized.py" in cmd_str:
                 correction_checks["count"] += 1
                 if correction_checks["count"] == 1:
                     return "RESPLIT=RFE-001"  # undersized on first check
                 return "RESPLIT="  # all pass on second check
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=0"
             return ""
 
@@ -1374,7 +1559,8 @@ class TestDispatchLoopE2E:
         split_collect_calls = {"count": 0}
 
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 split_collect_calls["count"] += 1
                 if split_collect_calls["count"] == 1:
                     write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
@@ -1407,25 +1593,27 @@ class TestDispatchLoopE2E:
         batch_done_calls = {"count": 0}
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return ""
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001 RHAIRFE-1002"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 batch_done_calls["count"] += 1
                 if batch_done_calls["count"] == 1:
                     return "ERRORS=RHAIRFE-1002"  # error on first pass
                 return "ERRORS="  # clean on retry
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=RHAIRFE-1001 RHAIRFE-1002\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=2"
             return ""
 
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            if "error_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "error_collect.py" in cmd_str:
                 # Simulate what error_collect.py does: set retry_cycle,
                 # increment total_batches, write retry batch file
                 state = ps._load_state()
@@ -1457,22 +1645,24 @@ class TestDispatchLoopE2E:
         write_ids("tmp/pipeline-all-ids.txt", ids)
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return ""
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=RHAIRFE-1001"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=\nSPLIT=RHAIRFE-1001\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=0"
             return ""
 
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            if "split_collect.py" in cmd:
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "split_collect.py" in cmd_str:
                 # No children produced — empty file
                 write_ids("tmp/pipeline-split-children-ids.txt", [])
             return type("R", (), {"returncode": 0})()
@@ -1503,18 +1693,19 @@ class TestDispatchLoopE2E:
         reassess_calls = {"count": 0}
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return "RHAIRFE-1001"
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 reassess_calls["count"] += 1
                 if reassess_calls["count"] <= 2:
                     return "REASSESS=RHAIRFE-1001\nDONE="
                 return "REASSESS=\nDONE=RHAIRFE-1001"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=RHAIRFE-1001\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
             return ""
 
@@ -1524,7 +1715,9 @@ class TestDispatchLoopE2E:
         fixup_commands = []
 
         def subprocess_mock(cmd, **kw):
-            if "check_revised.py" in cmd:
+            # cmd may be a list (argv mode for ids_file phases) or string
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+            if "check_revised.py" in cmd_str:
                 fixup_commands.append(cmd)
             return type("R", (), {"returncode": 0})()
 
@@ -1540,7 +1733,7 @@ class TestDispatchLoopE2E:
         # Verify we got fixup calls from cycle 1 (with IDs) but the
         # total count reflects that the empty-ID cycle was skipped.
         assert len(fixup_commands) >= 1  # at least cycle 1's FIXUP ran
-        # Cycle 1's fixup should have the ID
+        # Cycle 1's fixup should have the ID (cmd is argv list)
         assert "RHAIRFE-1001" in fixup_commands[0]
 
     def test_dispatch_context_hides_ids_file_for_scripts(self, tmp_dir):
@@ -1593,15 +1786,16 @@ class TestDispatchLoopE2E:
         ps._save_state(state)
 
         def mock_run_script(cmd):
-            if "filter_for_revision.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "filter_for_revision.py" in cmd_str:
                 return ""
-            if "collect_recommendations.py --reassess" in cmd:
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=" + " ".join(ids)
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=" + " ".join(ids) + "\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=3"
             return ""
 
@@ -1682,13 +1876,14 @@ class TestNextActionNoop:
         write_ids("tmp/pipeline-all-ids.txt", ["A"])
 
         def mock_run_script(cmd):
-            if "collect_recommendations.py --reassess" in cmd:
+            cmd_str = " ".join(cmd)
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=A"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
             return ""
 
@@ -1703,13 +1898,14 @@ class TestNextActionNoop:
 
     def test_multi_batch_noop_chain(self, tmp_dir, monkeypatch):
         """BATCH_DONE → BATCH_START → FETCH chains across batch boundary."""
-        write_ids("tmp/pipeline-active-ids.txt", ["A"])
-        write_ids("tmp/pipeline-batch-2-ids.txt", ["B"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-5001"])
+        write_ids("tmp/pipeline-batch-2-ids.txt", ["RHAIRFE-5002"])
 
         def mock_run_script(cmd):
-            if "batch_summary.py" in cmd:
+            cmd_str = " ".join(cmd)
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
             return ""
 
@@ -1726,8 +1922,8 @@ class TestNextActionNoop:
     def test_state_saved_per_iteration(self, tmp_dir, monkeypatch):
         """State is saved after each noop advance — verified by checking
         that a crash mid-chain leaves correct phase on disk."""
-        write_ids("tmp/pipeline-batch-1-ids.txt", ["A"])
-        write_ids("tmp/pipeline-active-ids.txt", ["A"])
+        write_ids("tmp/pipeline-batch-1-ids.txt", ["RHAIRFE-5001"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-5001"])
 
         advance_calls = {"count": 0}
         original_advance = ps.advance
@@ -1765,13 +1961,14 @@ class TestNextActionScript:
             f.write("FIXUP")
 
         def mock_run_script(cmd):
-            if "collect_recommendations.py --reassess" in cmd:
+            cmd_str = " ".join(cmd)
+            if "collect_recommendations.py --reassess" in cmd_str:
                 return "REASSESS=\nDONE=A"
-            if "collect_recommendations.py --errors" in cmd:
+            if "collect_recommendations.py --errors" in cmd_str:
                 return "ERRORS="
-            if "collect_recommendations.py" in cmd:
+            if "collect_recommendations.py" in cmd_str:
                 return "SUBMIT=A\nSPLIT=\nREVISE=\nREJECT=\nERRORS="
-            if "batch_summary.py" in cmd:
+            if "batch_summary.py" in cmd_str:
                 return "submit=1"
             return ""
 
@@ -1809,7 +2006,7 @@ class TestNextActionAgent:
         original_run_script = ps._run_script
 
         def mock_run_script(cmd):
-            if "prep_assess.py" in cmd:
+            if any("prep_assess.py" in a for a in cmd):
                 return ""
             return original_run_script(cmd)
 
@@ -1846,7 +2043,7 @@ class TestNextActionAgent:
         original_run_script = ps._run_script
 
         def mock_run_script(cmd):
-            if "prep_assess.py" in cmd:
+            if any("prep_assess.py" in a for a in cmd):
                 return ""
             return original_run_script(cmd)
 
@@ -1890,7 +2087,7 @@ class TestNextActionAgent:
         verify_calls = []
 
         def mock_run_script(cmd):
-            if "verify_phase.py" in cmd:
+            if any("verify_phase.py" in a for a in cmd):
                 verify_calls.append(cmd)
             return ""
 
@@ -1898,7 +2095,8 @@ class TestNextActionAgent:
 
         _run_next_action()
         # FETCH has post_verify — should have been called
-        assert any("verify_phase.py" in c for c in verify_calls)
+        assert len(verify_calls) > 0
+        assert any("verify_phase.py" in a for a in verify_calls[0])
 
     def test_vars_block_scalar(self, tmp_dir, monkeypatch):
         """vars field uses YAML block scalar (|) for multi-line strings."""
@@ -1916,6 +2114,55 @@ class TestNextActionAgent:
         raw_output = buf.getvalue()
         # vars should use block scalar — contains | indicator
         assert "vars: |" in raw_output or "vars: |\n" in raw_output
+
+
+class TestNextActionIdValidation:
+    """Verify cmd_next_action validates IDs before {ID} substitution (CWE-20/CWE-22)."""
+
+    def test_rejects_traversal_ids_before_substitution(self, tmp_dir, monkeypatch):
+        """IDs with path traversal patterns are rejected before templating."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "../../outside"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_rejects_shell_injection_ids_in_agent_phase(self, tmp_dir, monkeypatch):
+        """IDs with shell metacharacters are rejected in agent phases."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001", "$(whoami)"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_rejects_arbitrary_strings_in_agent_phase(self, tmp_dir, monkeypatch):
+        """Arbitrary non-RFE strings are rejected before wave substitution."""
+        write_ids("tmp/pipeline-active-ids.txt", ["not-an-id"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        with pytest.raises(SystemExit) as exc_info:
+            ps.cmd_next_action([])
+        assert exc_info.value.code == 1
+
+    def test_valid_ids_pass_through(self, tmp_dir, monkeypatch):
+        """Valid RFE IDs are accepted and proceed to wave launch."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1001"])
+        ps._save_state(make_state(phase="ASSESS", batch=1))
+
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+
+        result = _run_next_action()
+        assert result["action"] == "launch_wave"
+        wave_ids = read_ids(ps.WAVE_IDS_FILE)
+        assert "RHAIRFE-1001" in wave_ids
 
 
 class TestNextActionWaveSize:
