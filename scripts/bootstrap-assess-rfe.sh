@@ -8,6 +8,8 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
 fi
 
 CONTEXT_DIR=".context/assess-rfe"
+RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
+LEGACY_RUBRIC_LINK="$CONTEXT_DIR/scripts/agent_prompt.md"
 # Scripts now live under each skill dir (assess-rfe moved them out of the repo
 # root in opendatahub-io/assess-rfe#5 "move-scripts-to-skill-dirs").
 RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
@@ -24,6 +26,11 @@ if [ ! -f "$RUBRIC_FILE" ]; then
   exit 1
 fi
 
+# Backward-compat symlink for callers using the pre-restructure path
+mkdir -p "$CONTEXT_DIR/scripts"
+ln -sfn ../skills/assess-rfe/scripts/agent_prompt.md "$LEGACY_RUBRIC_LINK"
+
+# Copy all skills from the plugin
 # Copy all skills from the plugin, including their bundled scripts/ so the
 # copied SKILL.md's ${CLAUDE_SKILL_DIR}/scripts/... references resolve at
 # runtime (scripts are co-located with each SKILL.md as of assess-rfe#5).
@@ -40,5 +47,10 @@ if [ -d "$CONTEXT_DIR/agents" ]; then
   cp "$CONTEXT_DIR"/agents/*.md .claude/agents/
 fi
 
+# Export rubric to artifacts (path moved in upstream restructure)
+EXPORT_RUBRIC="$CONTEXT_DIR/skills/export-rubric/scripts/export_rubric.py"
+if [ -f "$EXPORT_RUBRIC" ]; then
+  python3 "$EXPORT_RUBRIC" 2>/dev/null || true
+fi
 # Export rubric to artifacts
 python3 "$CONTEXT_DIR/skills/export-rubric/scripts/export_rubric.py" 2>/dev/null || true
