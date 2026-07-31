@@ -142,7 +142,11 @@ outputs:
 traces:
   stdout: true
   stderr: true
-  events: false
+  # events: true is required for reasoning_quality judge ({{ conversation }}).
+  # WARNING: event traces capture raw prompts including {{ input }} content.
+  # For runs against real (non-synthetic) data, apply redaction to trace output
+  # and restrict access/retention on the trace store.
+  events: true
   metrics: true
 
 judges:
@@ -383,6 +387,176 @@ judges:
       - **2**: Below standard — multiple quality issues or scores systematically off
       - **1**: Poor — fails basic RFE standards or pipeline scores unreliable
 
+  - name: evidence_grounding
+    description: |
+      Did the RFE ground its WHY in specific evidence from the input?
+    prompt: |
+      You are evaluating the EVIDENCE QUALITY in an RFE (Request for Enhancement).
+
+      **Original input:**
+
+      {{ input }}
+
+      **Produced RFE artifacts:**
+
+      {{ outputs }}
+
+      Focus ONLY on evidence grounding — how well the RFE justifies WHY
+      this work matters using specific evidence from the input.
+
+      Assess:
+      1. **Named stakeholders** — Are specific customers, teams, or users
+         from the input cited by name in the RFE?
+      2. **Quantitative evidence** — Do revenue figures, cluster counts,
+         latency numbers, or other metrics from the input appear?
+      3. **Synthesis vs copying** — Did the agent reframe and analyze the
+         evidence, or just paste input text verbatim?
+      4. **Coverage** — Were all stakeholder perspectives from the input
+         represented, or were some ignored?
+      5. **Deal/revenue linkage** — Does the WHY section connect to specific
+         business outcomes, not just generic "customer demand"?
+
+      Score 1-5:
+      - **5**: Every stakeholder cited by name, quantitative evidence
+        synthesized into compelling business case, no generic language
+      - **4**: Most evidence used with attribution, minor gaps
+      - **3**: Some specific evidence but mixed with generic justification
+      - **2**: Mostly generic, a few specifics buried in boilerplate
+      - **1**: No input evidence used, entirely fabricated justification
+
+  - name: feasibility_quality
+    description: |
+      Assess feasibility analysis depth and platform specificity.
+    prompt: |
+      You are evaluating the feasibility analysis produced by an RFE creation
+      pipeline.
+
+      Here are the produced artifacts:
+
+      {{ outputs }}
+
+      If no feasibility review was produced, score 1.
+
+      Assess the feasibility analysis on:
+      - **Risk identification depth**: Does it find real risks, or just say
+        "feasible, no blockers"?
+      - **Platform specificity**: Does it reference actual platform components,
+        APIs, or architectural constraints?
+      - **Actionability**: Could an engineer use this to plan implementation?
+      - **Completeness**: Does it cover technical, organizational, and
+        timeline risks?
+      - **Mitigation quality**: Are risk mitigations specific and actionable,
+        or generic "monitor and address"?
+
+      Score 1-5:
+      - **5**: Deep, platform-specific analysis with actionable mitigations,
+        covers technical + org + timeline risks
+      - **4**: Good risk identification, mostly specific, minor gaps
+      - **3**: Surface-level analysis, generic risks, some platform awareness
+      - **2**: Minimal effort, templated response, no real risk analysis
+      - **1**: Missing or useless
+
+  - name: self_consistency
+    description: |
+      Does the RFE align with the pipeline's own review and feasibility assessment?
+    prompt: |
+      You are evaluating the INTERNAL CONSISTENCY of an RFE creation pipeline.
+      The pipeline produced three things: an RFE, a review of that RFE, and
+      a feasibility assessment. These should be consistent with each other.
+
+      Here are all the produced artifacts:
+
+      {{ outputs }}
+
+      Assess internal consistency:
+
+      1. **Score vs content** - If the review gave high scores, does the RFE
+         actually deserve them? If it flagged issues, were they fixed in the
+         final version?
+      2. **Feasibility vs scope** - If feasibility flagged risks or complexity,
+         does the RFE scope reflect that (e.g. phased approach, reduced scope)?
+         Or does the RFE ignore its own feasibility findings?
+      3. **Recommendation vs outcome** - If the review recommended "revise",
+         was a revision actually performed? If it said "submit", is the RFE
+         actually submission-ready?
+      4. **No contradictions** - Does the RFE claim something the review
+         contradicts, or vice versa?
+
+      Score 1-5:
+      - **5**: Fully consistent - review findings reflected in final RFE,
+        feasibility risks addressed in scope, recommendation matches outcome
+      - **4**: Mostly consistent, minor misalignments
+      - **3**: Noticeable gaps - review flagged issues the RFE ignored
+      - **2**: Significant contradictions between artifacts
+      - **1**: Pipeline outputs contradict each other
+
+  - name: input_evidence_used
+    description: |
+      Did specific evidence from the input flow into the RFE?
+    prompt: |
+      You are evaluating whether an RFE creation agent properly incorporated
+      evidence from its input into the final RFE output.
+
+      **Original input (what the agent was given):**
+
+      {{ input }}
+
+      **Produced RFE artifacts (what the agent output):**
+
+      {{ outputs }}
+
+      Compare the input against the output. Assess whether the agent:
+
+      1. **Used specific details** - Did customer names, version numbers,
+         cluster counts, latency figures, or other concrete details from the
+         input comments appear in the RFE? Or did the agent write generic text?
+      2. **Synthesized vs copied** - Did the agent reframe evidence into
+         business justification, or just paste input text verbatim?
+      3. **Covered all sources** - Did the agent use evidence from multiple
+         commenters, or ignore some stakeholder perspectives?
+      4. **Customer impact grounded** - Is the customer impact section backed
+         by specifics from the input, or is it vague hand-waving?
+
+      Score 1-5:
+      - **5**: Every stakeholder's evidence synthesized into the RFE with
+        attribution, quantitative details preserved, analytical value added
+      - **4**: Good use of evidence, mostly specific, minor gaps in coverage
+      - **3**: Some evidence used but generic in places, or missed sources
+      - **2**: Minimal evidence, mostly generic business language
+      - **1**: No input evidence used, entirely fabricated justification
+
+  - name: reasoning_quality
+    description: |
+      Score the agent's thinking chain quality (requires conversation trace).
+    prompt: |
+      You are evaluating the REASONING PROCESS of an AI agent that was asked
+      to create an RFE (Request for Enhancement).
+
+      Here is the agent's conversation trace (thinking + tool calls):
+
+      {{ conversation }}
+
+      Here are the test case annotations (expected scores, difficulty, tags):
+
+      {{ annotations }}
+
+      Score the quality of the agent's THINKING PROCESS (not the output):
+
+      - Did the agent plan before acting, or just start writing immediately?
+      - Did the thinking reference specific details from the input (customer
+        names, revenue figures, technical specifics) or was it generic?
+      - Did the agent reason about WHICH rubric criteria matter and how to
+        address them?
+      - Was the thinking chain coherent and task-specific?
+
+      Score 1-5:
+      - **5**: Deliberate planning, references specific input details by name,
+        reasons about which rubric criteria matter most for this case
+      - **4**: Shows planning, mostly specific, some rubric awareness
+      - **3**: Some reasoning but largely generic or templated
+      - **2**: Minimal reasoning, mostly mechanical execution
+      - **1**: No visible reasoning or planning
+
   - name: revision_quality
     description: |
       Assess whether auto-revisions improved the RFE without losing content.
@@ -453,5 +627,15 @@ thresholds:
     min_pass_rate: 1.0
   rfe_quality:
     min_mean: 3.5
+  evidence_grounding:
+    min_mean: 3.0
+  feasibility_quality:
+    min_mean: 3.0
+  self_consistency:
+    min_mean: 3.0
+  input_evidence_used:
+    min_mean: 3.0
+  reasoning_quality:
+    min_mean: 3.0
   revision_quality:
     min_mean: 3.5
