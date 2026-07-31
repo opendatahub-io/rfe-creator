@@ -27,9 +27,10 @@ venv/
 artifacts/
 tmp/
 
-# Vendored skills (fetched at runtime)
+# Vendored skills and agents (fetched at runtime)
 .claude/skills/assess-rfe/
 .claude/skills/export-rubric/
+.claude/agents/rfe-scorer.md
 
 # Ruff cache
 .ruff_cache/
