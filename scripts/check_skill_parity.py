@@ -91,10 +91,15 @@ RULES = [
 
 
 def _read_skill(skill, skills_dir):
-    """Return the SKILL.md text for a skill dir, or '' if it does not exist."""
+    """Return the SKILL.md text for a skill dir, or None if the file is absent.
+
+    None (missing) is deliberately distinct from "" (present but empty): a
+    monitored skill that has vanished — e.g. renamed without updating the rule —
+    is a structural failure, not an empty comparison.
+    """
     path = os.path.join(skills_dir, skill, "SKILL.md")
     if not os.path.isfile(path):
-        return ""
+        return None
     with open(path, encoding="utf-8") as f:
         return f.read()
 
@@ -103,6 +108,9 @@ def evaluate_rule(rule, skills_dir):
     """Evaluate one rule.
 
     Returns (status, message) where status is one of:
+      "missing"   -> a paired SKILL.md does not exist; the rule cannot be
+                     evaluated. Always a failure, never baseline-suppressible
+                     (fix the rule or restore the skill).
       "ok"        -> parity holds
       "violation" -> an invariant is present in one fork but missing in the other
       "warning"   -> pattern absent from both forks (rule may be stale, or a
@@ -111,6 +119,15 @@ def evaluate_rule(rule, skills_dir):
     rfe_skill, init_skill = rule["pair"]
     rfe_text = _read_skill(rfe_skill, skills_dir)
     init_text = _read_skill(init_skill, skills_dir)
+
+    absent = [s for s, t in ((rfe_skill, rfe_text), (init_skill, init_text)) if t is None]
+    if absent:
+        return "missing", (
+            "monitored skill file(s) not found: "
+            + ", ".join(f"{s}/SKILL.md" for s in absent)
+            + f" — cannot check '{rule['pattern']}' ({rule['desc']})"
+        )
+
     rfe_n = len(re.findall(rule["pattern"], rfe_text))
     init_n = len(re.findall(rule["pattern"], init_text))
 
@@ -153,11 +170,15 @@ def load_baseline(path):
 def run(skills_dir=DEFAULT_SKILLS_DIR, baseline_path=DEFAULT_BASELINE, strict=False):
     """Run all rules. Return (exit_code, report) where report is a dict."""
     baseline = load_baseline(baseline_path)
-    report = {"new": [], "known": [], "warnings": [], "resolved": []}
+    report = {"new": [], "known": [], "warnings": [], "resolved": [], "missing": []}
 
     for rule in RULES:
         status, msg = evaluate_rule(rule, skills_dir)
-        if status == "violation":
+        if status == "missing":
+            # A vanished monitored skill always fails, regardless of baseline —
+            # it means a rule is stale or a skill was renamed/deleted.
+            report["missing"].append((rule["id"], msg))
+        elif status == "violation":
             if rule["id"] in baseline:
                 report["known"].append((rule["id"], msg))
             else:
@@ -176,7 +197,7 @@ def run(skills_dir=DEFAULT_SKILLS_DIR, baseline_path=DEFAULT_BASELINE, strict=Fa
         if status != "violation":
             report["resolved"].append((rid, "drift fixed — remove from baseline to lock it in"))
 
-    exit_code = 1 if report["new"] else 0
+    exit_code = 1 if (report["new"] or report["missing"]) else 0
     if strict and report["resolved"]:
         exit_code = 1
     return exit_code, report
@@ -184,20 +205,28 @@ def run(skills_dir=DEFAULT_SKILLS_DIR, baseline_path=DEFAULT_BASELINE, strict=Fa
 
 def _print_report(report, strict):
     for rid, msg in report["warnings"]:
-        print(f"  ⚠ WARN  [{rid}] {msg}")
+        print(f"  ⚠ WARN    [{rid}] {msg}")
     for rid, msg in report["known"]:
-        print(f"  ○ KNOWN [{rid}] {msg} (baselined)")
+        print(f"  ○ KNOWN   [{rid}] {msg} (baselined)")
     for rid, msg in report["resolved"]:
         tag = "FIXED" if not strict else "FIXED (strict → failing)"
         print(f"  ✓ {tag} [{rid}] {msg}")
+    for rid, msg in report["missing"]:
+        print(f"  ✗ MISSING [{rid}] {msg}")
     for rid, msg in report["new"]:
-        print(f"  ✗ DRIFT [{rid}] {msg}")
+        print(f"  ✗ DRIFT   [{rid}] {msg}")
 
-    if report["new"]:
+    if report["missing"] or report["new"]:
+        parts = []
+        if report["missing"]:
+            parts.append(f"{len(report['missing'])} missing skill file(s)")
+        if report["new"]:
+            parts.append(f"{len(report['new'])} new divergence(s)")
         print(
-            f"\nSkill-parity check FAILED: {len(report['new'])} new divergence(s). "
-            "A procedural invariant present in one fork is missing from its sibling. "
-            "Fix the copy, or (if intended) add the rule id to skill_parity_baseline.json."
+            f"\nSkill-parity check FAILED: {', '.join(parts)}. "
+            "A procedural invariant present in one fork is missing from its sibling, "
+            "or a monitored skill has vanished. Fix the copy / restore the skill / update "
+            "the rule, or (for an intended divergence) add the rule id to the baseline."
         )
     else:
         summary = "Skill-parity check passed"

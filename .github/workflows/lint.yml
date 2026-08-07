@@ -45,7 +45,7 @@ jobs:
       run: find . -name '*.sh' -type f -exec shellcheck {} +
 
     - name: Check skill parity (rfe.* vs initiative-*)
-      run: python3 scripts/check_skill_parity.py
+      run: python3 scripts/check_skill_parity.py --strict
 
     - name: Run tests
       run: python3 -m pytest tests/ -v -k "not integration"
