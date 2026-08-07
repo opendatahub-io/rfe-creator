@@ -1,0 +1,4 @@
+{
+  "_comment": "Known, intentional rfe.* / initiative-* skill-parity drifts, recorded so check_skill_parity.py can land green while a divergence is deliberately accepted. Each entry is a rule id from check_skill_parity.RULES; a NEW (unlisted) drift fails CI. The list is currently EMPTY: the drifts that PR #143 introduced and fixed (poll barrier, reassess cycle, --priority) all hold in both forks today, so the check is fully enforcing. Only add an id here for a divergence you intend to keep, and remove it once resolved (run with --strict to catch stale entries).",
+  "known_drifts": []
+}
