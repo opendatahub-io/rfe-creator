@@ -162,6 +162,8 @@ def test_missing_arg_parity_source_is_not_silently_ok(tmp_path):
     exit_code, report = _run(skills, tmp_path=tmp_path)
     assert exit_code == 1
     assert {rid for rid, _ in report["missing"]} >= {"speedrun:priority", "speedrun:labels"}
+    # Missing must be reported as missing, not as a spurious arg-parity drift.
+    assert not report["new"]
 
 
 def test_missing_is_not_suppressed_by_baseline(tmp_path):
@@ -179,3 +181,7 @@ def test_missing_is_not_suppressed_by_baseline(tmp_path):
     )
     assert exit_code == 1
     assert report["missing"]
+    # A missing+baselined rule is reported only as missing, not also as resolved.
+    missing_ids = {rid for rid, _ in report["missing"]}
+    resolved_ids = {rid for rid, _ in report["resolved"]}
+    assert not (missing_ids & resolved_ids)

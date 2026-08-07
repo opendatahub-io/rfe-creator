@@ -194,6 +194,10 @@ def run(skills_dir=DEFAULT_SKILLS_DIR, baseline_path=DEFAULT_BASELINE, strict=Fa
             report["resolved"].append((rid, "baseline id has no matching rule"))
             continue
         status, _ = evaluate_rule(rule, skills_dir)
+        if status == "missing":
+            # Already reported (and failing) via report["missing"]; a vanished
+            # skill is not a "resolved" drift.
+            continue
         if status != "violation":
             report["resolved"].append((rid, "drift fixed — remove from baseline to lock it in"))
 
