@@ -201,6 +201,122 @@ class TestSplitChildrenIncluded:
         assert report["per_rfe"][0]["id"] == "RHAIRFE-1234"
 
 
+REVISED_REVIEW_TEMPLATE = """\
+---
+rfe_id: {rfe_id}
+score: {score}
+pass: {pass_val}
+recommendation: {recommendation}
+feasibility: feasible
+auto_revised: true
+needs_attention: false
+before_score: {before_score}
+scores:
+  what: 2
+  why: 2
+  open_to_how: 2
+  not_a_task: 2
+  right_sized: {right_sized}
+before_scores:
+  what: 1
+  why: 1
+  open_to_how: 2
+  not_a_task: 2
+  right_sized: {right_sized}
+---
+
+## Feedback
+Revised.
+"""
+
+
+class TestScoreAveragePopulations:
+    """before/after averages must cover the same items.
+
+    An unrevised RFE has no before_score, so averaging only the items that
+    carry one compares 16 items against 17 and reports a regression that
+    never happened — what the 2026-08-10 run showed as "9.4 -> 9.2" when
+    nothing had been revised at all.
+    """
+
+    def _review(self, art_dir, rfe_id, score, right_sized=2):
+        _write(
+            f"{art_dir}/rfe-tasks/{rfe_id}.md",
+            TASK_TEMPLATE.format(rfe_id=rfe_id, extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/{rfe_id}-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id=rfe_id,
+                score=score,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=right_sized,
+            ),
+        )
+
+    def test_unrevised_low_scorer_does_not_fake_a_regression(self, art_dir):
+        for i in range(1, 4):
+            self._review(art_dir, f"RHAIRFE-{1000 + i}", 10)
+        # The odd one out: never revised, so no before_score, and a low score.
+        self._review(art_dir, "RHAIRFE-2000", 2)
+
+        ids = [f"RHAIRFE-{1000 + i}" for i in range(1, 4)] + ["RHAIRFE-2000"]
+        report = build_report(ids, "20260404-170041", 5, [], [], artifacts_dir=art_dir)
+
+        assert report["before_scores_avg"]["total"] == report["after_scores_avg"]["total"]
+        assert report["after_scores_avg"]["total"] == 8.0
+
+    def test_unrevised_item_omits_before_score_in_its_entry(self, art_dir):
+        self._review(art_dir, "RHAIRFE-2000", 7)
+        report = build_report(["RHAIRFE-2000"], "20260404-170041", 5, [], [], artifacts_dir=art_dir)
+        entry = report["per_rfe"][0]
+        assert "before_score" not in entry
+        assert entry["after_score"] == 7
+
+    def test_revised_item_still_shows_improvement(self, art_dir):
+        self._review(art_dir, "RHAIRFE-1001", 10)
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1002.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1002", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1002-review.md",
+            REVISED_REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1002",
+                score=10,
+                pass_val="true",
+                recommendation="submit",
+                before_score=4,
+                right_sized=2,
+            ),
+        )
+
+        report = build_report(
+            ["RHAIRFE-1001", "RHAIRFE-1002"], "20260404-170041", 5, [], [], artifacts_dir=art_dir
+        )
+
+        # (10 + 4) / 2 vs (10 + 10) / 2 — the unrevised item contributes 10 to
+        # both sides, so only the real revision moves the average.
+        assert report["before_scores_avg"]["total"] == 7.0
+        assert report["after_scores_avg"]["total"] == 10.0
+        # Per-criterion follows the same rule.
+        assert report["before_scores_avg"]["what"] == 1.5
+        assert report["after_scores_avg"]["what"] == 2.0
+
+    def test_criterion_averages_cover_the_same_items(self, art_dir):
+        for i in range(1, 4):
+            self._review(art_dir, f"RHAIRFE-{1000 + i}", 10)
+        self._review(art_dir, "RHAIRFE-2000", 8, right_sized=0)
+
+        ids = [f"RHAIRFE-{1000 + i}" for i in range(1, 4)] + ["RHAIRFE-2000"]
+        report = build_report(ids, "20260404-170041", 5, [], [], artifacts_dir=art_dir)
+
+        for field in ("what", "why", "open_to_how", "not_a_task", "right_sized"):
+            assert report["before_scores_avg"][field] == report["after_scores_avg"][field], field
+        assert report["after_scores_avg"]["right_sized"] == 1.5
+
+
 class TestParseRunId:
     def test_yyyymmdd_hhmmss_format(self):
         """YYYYMMDD-HHMMSS passes through unchanged."""

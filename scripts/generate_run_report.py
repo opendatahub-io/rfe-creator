@@ -144,7 +144,10 @@ def build_report(
         before = data.get("before_score")
         if before is not None:
             entry["before_score"] = before
-            before_score_list.append(before)
+        # An item that was never revised has no before_score, but its "before"
+        # is its "after". Averaging only the revised items would compare two
+        # different populations and report a phantom regression.
+        before_score_list.append(before if before is not None else score)
 
         if data.get("auto_revised") and before is not None and before != score:
             entry["revision_cycles"] = 1
@@ -152,13 +155,14 @@ def build_report(
             entry["revision_cycles"] = 0
 
         scores = data.get("scores") or {}
+        before_scores = data.get("before_scores") or {}
         for f in score_fields:
             if f in scores:
                 after_totals[f].append(scores[f])
-        before_scores = data.get("before_scores") or {}
-        for f in score_fields:
             if f in before_scores:
                 before_totals[f].append(before_scores[f])
+            elif f in scores:
+                before_totals[f].append(scores[f])
 
         kids = children_map.get(item_id)
         if kids:
