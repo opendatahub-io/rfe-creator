@@ -5,7 +5,6 @@ from collections import Counter
 import json
 import os
 import re
-import subprocess
 import sys
 import yaml
 
@@ -59,19 +58,20 @@ def generate_diff(rfe_id, tasks_dir, originals_dir):
         if len(parts) >= 3:
             revised_content = parts[2].lstrip('\n')
 
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as tmp:
-        tmp.write(revised_content)
-        tmp_path = tmp.name
+    with open(orig) as f:
+        orig_lines = f.readlines()
+    revised_lines = revised_content.splitlines(keepends=True)
 
-    try:
-        result = subprocess.run(
-            ['diff', '-u', orig, tmp_path],
-            capture_output=True, text=True
-        )
-        return result.stdout
-    finally:
-        os.unlink(tmp_path)
+    # difflib needs a trailing newline on the last line or it emits "\ No newline"
+    # markers mid-diff; normalize both sides the way diff -u effectively did.
+    if orig_lines and not orig_lines[-1].endswith('\n'):
+        orig_lines[-1] += '\n'
+    if revised_lines and not revised_lines[-1].endswith('\n'):
+        revised_lines[-1] += '\n'
+
+    import difflib
+    diff = difflib.unified_diff(orig_lines, revised_lines, fromfile=orig, tofile=revised)
+    return ''.join(diff)
 
 def html_escape(text):
     return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#x27;')
