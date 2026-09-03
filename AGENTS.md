@@ -140,7 +140,10 @@ Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, o
 
 When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 
-1. A text-only response (no tool call) during pipeline execution terminates the CI process.
+1. A text-only response (no tool call) ends your turn and hands control back.
+   You will only run again if an agent-completion notification wakes you, so
+   if the work you are waiting on cannot produce one, the run is over. Never
+   end a turn to "wait" — block on the barrier in rule 2 instead.
 2. After launching each wave of agents, your next Bash call MUST be
    `python3 scripts/pipeline_state.py wait-for-wave`. This is a blocking
    synchronization barrier that reads artifact files on disk. On exit 3,

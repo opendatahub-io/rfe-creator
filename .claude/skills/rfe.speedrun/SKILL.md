@@ -79,16 +79,30 @@ Count entries and pre-allocate all IDs upfront:
 python3 scripts/next_rfe_id.py --from-batch <input_file>   # input_file = the --input path; prints one RFE ID per entry
 ```
 
+Persist the pre-allocated IDs before launching any agents — the Phase 1 barrier below reads this file:
+
+```bash
+python3 scripts/state.py write-ids tmp/speedrun-all-ids.txt <all_IDs>
+```
+
 For each entry, launch an Agent to invoke `/rfe.create`. Pass the pre-assigned ID so each Agent knows which ID to use:
 
 ```
-Agent for entry 1:  /rfe.create --headless --rfe-id RFE-001 [--priority <priority>] <prompt>
-Agent for entry 2:  /rfe.create --headless --rfe-id RFE-002 [--priority <priority>] <prompt>
+Agent(prompt: "/rfe.create --headless --rfe-id RFE-001 [--priority <priority>] <prompt>")
+Agent(prompt: "/rfe.create --headless --rfe-id RFE-002 [--priority <priority>] <prompt>")
 ...
-Agent for entry N:  /rfe.create --headless --rfe-id RFE-<N> [--priority <priority>] <prompt>
+Agent(prompt: "/rfe.create --headless --rfe-id RFE-<N> [--priority <priority>] <prompt>")
 ```
 
-Each entry is a single business need — `/rfe.create` must produce exactly one RFE per invocation. Wait for all N agents to complete. You must have exactly N RFE IDs — if fewer were created, retry the missing entries. **Never delete or re-create task files during Phase 1** — quality issues are addressed in Phase 2 (Auto-fix).
+Each entry is a single business need — `/rfe.create` must produce exactly one RFE per invocation. Launch all N Agents in a single message so they run concurrently. Your next Bash call after that message MUST be the Phase 1 barrier — a blocking check that reads the task files on disk:
+
+```bash
+python3 scripts/check_review_progress.py --wait --phase create --id-file tmp/speedrun-all-ids.txt
+```
+
+Call it immediately, before any agent has reported. Do not count agent-completion notifications and do not track how many agents have finished — the barrier is the only completion signal for Phase 1.
+
+Exit 0 means all N task files exist, each with parseable frontmatter carrying its own `rfe_id` — Phase 1 is done. Exit 3 is a timeout, not a failure; it prints the still-pending IDs. A file that is half-written, unparseable, or holding the wrong `rfe_id` counts as pending, so it times out rather than releasing the barrier. Re-run the command as long as that pending list keeps shrinking. If the same IDs stay pending across 3 consecutive exit-3 results, those agents are dead and re-running will never clear them — launch a replacement Agent for each still-pending ID, then resume the barrier. You must have exactly N RFE IDs before moving on. **Never delete or re-create task files during Phase 1** — quality issues are addressed in Phase 2 (Auto-fix).
 
 **Mode B (Existing RFE)**: Skip Phase 1. The Jira key(s) from arguments become the processing list.
 
@@ -123,7 +137,7 @@ Skill(skill: "rfe.auto-fix", args: "--headless --announce-complete --batch-size 
 
 Pass `--headless` and `--announce-complete` through if set in the config. **Always** pass `--batch-size <batch_size>` using the value from `tmp/speedrun-config.yaml` — never omit it, never let auto-fix's own default take over. The speedrun default (5) was already pinned in Step 0; relying on it here is what makes runs reproducible.
 
-Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-assessment, splitting oversized RFEs, retry queue, and report generation. The Skill call blocks until auto-fix completes — this is correct. **Do NOT stop, summarize, or skip remaining batches early** — the pipeline must process every ID through all phases. Never emit a text-only response (no tool call) during pipeline execution — this terminates the CI process.
+Auto-fix handles: assessment, feasibility checks, review, auto-revision, re-assessment, splitting oversized RFEs, retry queue, and report generation. The Skill call blocks until auto-fix completes — this is correct. **Do NOT stop, summarize, or skip remaining batches early** — the pipeline must process every ID through all phases. Never end a turn with a text-only response (no tool call) in order to wait for something — that hands control back, and you only run again if an agent-completion notification wakes you.
 
 **Bash discipline:** Issue exactly one operation per Bash call. Never use command substitution `$(...)` or chain commands with `;`, `&&`, or `||` — they trigger an approval prompt and are denied in headless mode. Instead, pass a value between commands by writing it to a `tmp/` file with `scripts/state.py` and reading it back in a separate call.
 

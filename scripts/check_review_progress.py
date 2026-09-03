@@ -17,6 +17,10 @@ from artifact_utils import read_frontmatter
 
 PHASE_CHECKS = {
     "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
+    # Same path as "fetch", but a stricter check — see check_id(). Create agents
+    # write the task file first and set frontmatter in a later tool call, so
+    # existence alone would release the barrier mid-write.
+    "create": lambda id: f"artifacts/rfe-tasks/{id}.md",
     "assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
     "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
     "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
@@ -37,6 +41,23 @@ def check_id(phase, rfe_id):
     path = PHASE_CHECKS[phase](rfe_id)
     if not os.path.exists(path):
         return "pending"
+    if phase == "create":
+        # Every not-yet-good state is "pending", never "error". The --wait loop
+        # exits on pending == 0 and never consults the error count, so an
+        # "error" here would release the barrier on the very file it rejected.
+        # Timing out into the relaunch path in rfe.speedrun is the recovery.
+        try:
+            data, _ = read_frontmatter(path)
+        except Exception:
+            return "pending"
+        # read_frontmatter returns {} for a file with no frontmatter block yet,
+        # which is a half-written file, not a finished one. The id has to be
+        # the one asked about: a task file carrying a different rfe_id is not
+        # this ID's create output, and accepting it would break the
+        # one-RFE-per-preallocated-ID contract the barrier exists to enforce.
+        if not data or data.get("rfe_id") != rfe_id:
+            return "pending"
+        return "completed"
     if phase in ("review", "initiative-review"):
         try:
             data, _ = read_frontmatter(path)
