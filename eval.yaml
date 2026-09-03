@@ -272,6 +272,144 @@ judges:
               errors.append(f"{fname}: feasibility=infeasible but recommendation=submit")
       return (len(errors) == 0, "; ".join(errors[:5]) if errors else f"{len(reviews)} reviews consistent")
 
+  - name: revision_flag_consistency
+    description: |
+      Verify auto_revised agrees with the evidence. The flag drives the
+      auto-revised Jira label, so a revision the flag misses ships unlabeled.
+      Proof of a revision (a leftover review-state file, a recorded revision
+      history, a moved score, or a removed-context companion) fails an unset
+      flag; a saved original only clears a set one, since -originals/ is also the
+      fetch baseline for existing issues. Reads only shared artifacts, so the
+      identical check runs on both pipelines.
+    check: |
+      import json
+      import os
+
+      import yaml
+
+      files = outputs.get("files", {})
+      reviews = {k: v for k, v in files.items() if k.endswith("-review.md")}
+      if not reviews:
+          return (False, "No review files to check")
+      # Index by basename: the two pipelines use different directory names
+      # (rfe-tasks/rfe-originals vs initiatives/initiative-originals).
+      names = {os.path.basename(k) for k in files}
+      originals = {os.path.basename(k) for k in files if "-originals/" in k}
+      # revision_cycles per item from the shared run report. Iterate sorted and merge
+      # with max so a stale report can't nondeterministically mask a newer one's
+      # revision evidence with a 0.
+      cycles = {}
+      for k in sorted(files):
+          v = files[k]
+          if not (k.startswith("artifacts/auto-fix-runs/") and k.endswith(".yaml")):
+              continue
+          # Snapshot files (issue-snapshot-*, initiative-snapshot-*) are fetch
+          # artifacts, not run reports.
+          if "-snapshot-" in os.path.basename(k):
+              continue
+          try:
+              report = yaml.safe_load(v) or {}
+          except yaml.YAMLError:
+              continue
+          # A malformed report must skip this signal, not raise - an uncaught error
+          # drops the whole case from the 1.0 gate silently. Validate the nested
+          # shapes too: a non-list section or non-int revision_cycles would otherwise
+          # raise a TypeError below.
+          if not isinstance(report, dict):
+              continue
+          entries = []
+          for key in ("per_rfe", "per_initiative"):
+              section = report.get(key)
+              if isinstance(section, list):
+                  entries += section
+          for entry in entries:
+              if not isinstance(entry, dict):
+                  continue
+              item = entry.get("id")
+              if not isinstance(item, str) or not item:
+                  continue
+              rc = entry.get("revision_cycles")
+              if isinstance(rc, bool) or not isinstance(rc, int):
+                  rc = 0
+              cycles[item] = max(cycles.get(item, 0), rc)
+      errors = []
+      checked = 0
+      for fname, content in sorted(reviews.items()):
+          # Frontmatter is the leading ---...--- block; split on the closing fence
+          # only, so a literal --- inside a field value cannot truncate it.
+          if not content.startswith("---"):
+              continue
+          end = content.find("\n---", 3)
+          if end == -1:
+              continue
+          try:
+              fm = yaml.safe_load(content[3:end]) or {}
+          except yaml.YAMLError:
+              continue
+          if not isinstance(fm, dict):
+              continue
+          item_id = fm.get("rfe_id") or fm.get("initiative_id")
+          # A malformed id (list/dict) is truthy but unhashable; require a real
+          # string so cycles.get(item_id) below cannot raise and silently drop
+          # the case from the 1.0 gate.
+          if not isinstance(item_id, str) or not item_id:
+              continue
+          checked += 1
+          # Legacy artifacts stored the flag as `revised`; artifact_utils migrates it
+          # to `auto_revised` on read, but this parses raw YAML, so fall back here.
+          flag = bool(fm["auto_revised"] if "auto_revised" in fm else fm.get("revised"))
+          # Strong: proof a revision happened. Any of these with the flag unset is a
+          # missed revision (the flag drives the auto-revised Jira label, so a missed
+          # one ships unlabeled). Each both clears a set flag and raises an unset one,
+          # so it must never fire without a real revision.
+          strong = []
+          state = files.get(os.path.join(os.path.dirname(fname), f"{item_id}-review-state.json"))
+          if state is not None:
+              # restore() deletes the state file once a re-review cycle completes, so
+              # one left on disk is a save/restore cycle that never finished.
+              strong.append("leftover review-state file")
+              if isinstance(state, str):
+                  try:
+                      parsed = json.loads(state)
+                  except ValueError:
+                      parsed = None
+                  if isinstance(parsed, dict):
+                      history = parsed.get("revision_history")
+                      # Normally a string; guard non-str so .strip() cannot raise.
+                      if history.strip() if isinstance(history, str) else history:
+                          strong.append("review-state records a revision")
+          before, score = fm.get("before_score"), fm.get("score")
+          if before is not None and score is not None and before != score:
+              strong.append(f"before_score {before} != score {score}")
+          before_scores, cur_scores = fm.get("before_scores"), fm.get("scores")
+          if before_scores is not None and cur_scores is not None and before_scores != cur_scores:
+              strong.append("before_scores != scores")
+          # Written only when a revision removes content, so its presence proves a
+          # revision even if the re-score landed on the same number.
+          if f"{item_id}-removed-context.yaml" in names:
+              strong.append("removed-context companion")
+          # Cross-check only: the run report derives revision_cycles from auto_revised
+          # itself, so cycles>0 already implies the flag was set at report time. It
+          # cannot witness a never-set flag (the signals above do that); it only
+          # catches a run-report / frontmatter divergence.
+          if cycles.get(item_id, 0) > 0:
+              strong.append(f"run report revision_cycles={cycles[item_id]}")
+          # Weak: clears a set flag but cannot raise an unset one. A saved original is
+          # not proof - -originals/ is also the fetch baseline for existing Jira
+          # issues, so treating it as proof would false-fail on the 1.0 gate.
+          weak = list(strong)
+          if f"{item_id}.md" in originals:
+              weak.append("pre-revision original saved")
+          if strong and not flag:
+              errors.append(f"{item_id}: auto_revised=false but revised ({'; '.join(strong)})")
+          elif flag and not weak:
+              errors.append(f"{item_id}: auto_revised=true with no trace of a revision")
+      if checked == 0:
+          return (False, "No review files to check")
+      return (
+          len(errors) == 0,
+          "; ".join(errors[:5]) if errors else f"{checked} reviews: auto_revised matches evidence",
+      )
   - name: pipeline_flow
     description: |
       Verify expected execution flow from stdout: all phases ran,
@@ -519,6 +657,8 @@ thresholds:
   run_report_exists:
     min_pass_rate: 1.0
   recommendation_consistency:
+    min_pass_rate: 1.0
+  revision_flag_consistency:
     min_pass_rate: 1.0
   pipeline_flow:
     min_pass_rate: 1.0
