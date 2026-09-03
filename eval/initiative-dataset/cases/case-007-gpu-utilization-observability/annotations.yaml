@@ -1,16 +1,23 @@
 difficulty: null
 expected_alignment: not_assessed
 expected_feasibility: null
-expected_pass: null
+expected_pass: false
 expected_recommendation: revise
 expected_scores:
   what: null
   why: null
   scope: null
-  open_to_how: null
+  open_to_how: 0
   right_sized: null
 expected_total: null
-known_issues: []
+known_issues:
+  - 'Mandates a settled implementation stack (Telegraf, InfluxDB, Superset, Kapacitor) and
+    tells engineering not to reopen it. Should score open_to_how 0 and fail on the no-zeros
+    rule despite strong what/why/scope.'
+  - 'Designed to exercise the recoverable revise path: prescriptive technology choices can be
+    reframed into suggestive language, so revision should lift the score rather than flag for
+    a human.'
 tags:
   - infrastructure
   - prescriptive
+  - revise-candidate

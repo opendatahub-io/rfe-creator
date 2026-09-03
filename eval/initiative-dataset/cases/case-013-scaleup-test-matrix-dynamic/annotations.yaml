@@ -1,15 +1,30 @@
 difficulty: null
 expected_alignment: not_assessed
 expected_feasibility: null
-expected_pass: null
-expected_recommendation: null
+expected_pass: false
+expected_recommendation: revise
 expected_scores:
   what: null
-  why: null
+  why: 0
   scope: null
   open_to_how: null
   right_sized: null
 expected_total: null
-known_issues: []
+known_issues:
+  - 'Circular justification -- it should be dynamic because it is static -- with the input
+    explicitly stating no measurement, tickets, or complaints exist. Should score why 0 and
+    fail on the no-zeros rule despite strong what/scope/open_to_how/right_sized.'
+  - 'Designed to exercise the terminal end of the revise path: the revise agent is forbidden
+    from inventing evidence, so revision should mark the gap and set needs_attention rather
+    than recover the score.'
+  - 'The input negates the structural argument, not just the evidence. Withholding numbers
+    alone scored why 1 twice: the create agent reconstructed drift, combinatorial burden,
+    slow turnaround, and no-single-source-of-truth from the deliverable itself, and the
+    assessor credited those as plausible mechanisms. The context now states the list is
+    edited twice a year, no run has failed on a stale configuration, changes land same-day,
+    and no team has been blocked, so those mechanisms cannot be asserted without
+    contradicting the source.'
 tags:
   - infrastructure
+  - no-evidence
+  - revise-candidate
