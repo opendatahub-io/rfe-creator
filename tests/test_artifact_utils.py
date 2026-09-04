@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from artifact_utils import (
     SCHEMAS,
     ValidationError,
+    _body_without_frontmatter,
+    _looks_like_frontmatter_block,
     _migrate_fields,
     apply_defaults,
     read_frontmatter,
@@ -58,6 +60,32 @@ VALID_REVIEW_FM = {
         "right_sized": 0,
     },
 }
+
+# A hand-written block whose free-text value carries an unquoted colon — the
+# shape seen in eval runs, where review agents wrote frontmatter themselves
+# instead of leaving it to scripts/frontmatter.py.
+CORRUPT_REVIEW = (
+    "---\n"
+    "rfe_id: RFE-015\n"
+    "needs_attention_reason: Blocked: needs architecture input\n"
+    "---\n"
+    "## Assessor Feedback\n\nKeep this body.\n"
+)
+
+# An empty block written before any fields are stamped, followed by a body that
+# contains a markdown horizontal rule — the shape review agents produce when they
+# write the body first. The rule is what the old regex mistook for the closing
+# delimiter, handing the score table to yaml.safe_load.
+EMPTY_BLOCK_REVIEW = (
+    "---\n"
+    "---\n"
+    "### RFE-015 Review\n\n"
+    "| Criterion | Score |\n"
+    "| --- | --- |\n"
+    "| WHAT | 2/2 |\n\n"
+    "---\n\n"
+    "## Assessor Feedback\n\nKeep this body.\n"
+)
 
 
 # ── Schema & Validation ──────────────────────────────────────────────────────
@@ -180,6 +208,83 @@ class TestReadFrontmatter:
         data, _ = read_frontmatter("test.md")
         assert data["auto_revised"] is True
 
+    def test_unparseable_raises_validation_error(self, tmp_dir):
+        _write("review.md", CORRUPT_REVIEW)
+        with pytest.raises(ValidationError):
+            read_frontmatter("review.md")
+
+    def test_error_locates_the_offending_line(self, tmp_dir):
+        _write("review.md", CORRUPT_REVIEW)
+        with pytest.raises(ValidationError) as exc_info:
+            read_frontmatter("review.md")
+        message = str(exc_info.value)
+        assert "review.md" in message
+        assert "line 2" in message
+        assert "needs architecture input" in message
+
+    def test_error_is_a_single_line(self, tmp_dir):
+        """A raw PyYAML traceback is unreadable once agent logs truncate it."""
+        _write("review.md", CORRUPT_REVIEW)
+        with pytest.raises(ValidationError) as exc_info:
+            read_frontmatter("review.md")
+        assert "\n" not in str(exc_info.value)
+
+    def test_empty_block_followed_by_horizontal_rule(self, tmp_dir):
+        """An empty block plus a later `---` must not swallow the body as YAML.
+
+        This is the crash a review agent hits when it writes the review body
+        before the frontmatter: the score table's `---` separator became the
+        closing delimiter and yaml.safe_load raised ScannerError.
+        """
+        _write("review.md", EMPTY_BLOCK_REVIEW)
+        data, body = read_frontmatter("review.md")
+        assert data == {}
+        assert "### RFE-015 Review" in body
+        assert "| WHAT | 2/2 |" in body
+        # The empty block is consumed, so a later write replaces rather than
+        # duplicates it.
+        assert not body.startswith("---")
+
+    def test_empty_block_with_no_later_rule(self, tmp_dir):
+        _write("review.md", "---\n---\nBody only.\n")
+        data, body = read_frontmatter("review.md")
+        assert data == {}
+        assert body == "Body only.\n"
+
+    def test_body_horizontal_rule_preserved(self, tmp_dir):
+        _write("test.md", "---\ntitle: Hello\n---\nIntro.\n\n---\n\nMore.\n")
+        data, body = read_frontmatter("test.md")
+        assert data["title"] == "Hello"
+        assert body == "Intro.\n\n---\n\nMore.\n"
+
+    def test_scalar_block_is_not_frontmatter(self, tmp_dir):
+        _write("test.md", "---\njust a string\n---\nBody.\n")
+        data, body = read_frontmatter("test.md")
+        assert data == {}
+        assert body.startswith("---")
+
+    def test_crlf_line_endings(self, tmp_dir):
+        _write("test.md", "---\r\ntitle: Hello\r\n---\r\nBody.\r\n")
+        data, body = read_frontmatter("test.md")
+        assert data["title"] == "Hello"
+        assert "Body." in body
+
+    def test_regex_handles_raw_crlf(self):
+        """The `\\r?` in _FRONTMATTER_RE is what makes CRLF work — exercise it.
+
+        read_frontmatter opens files in universal-newline mode, which strips
+        every `\\r` before the content reaches the regex, so a file round-trip
+        cannot prove the `\\r?` branch fires. Match the regex against a raw CRLF
+        string to guard that robustness directly.
+        """
+        from artifact_utils import _FRONTMATTER_RE
+
+        raw = "---\r\ntitle: Hello\r\n---\r\nBody.\r\n"
+        match = _FRONTMATTER_RE.match(raw)
+        assert match is not None
+        assert match.group(1) == "title: Hello\r\n"
+        assert raw[match.end() :] == "Body.\r\n"
+
 
 # ── read_frontmatter_validated ────────────────────────────────────────────────
 
@@ -268,6 +373,13 @@ class TestWriteFrontmatter:
         write_frontmatter("a/b/c/out.md", VALID_REVIEW_FM.copy(), "rfe-review")
         assert os.path.exists("a/b/c/out.md")
 
+    def test_overwrites_unparseable_block_keeping_body(self, tmp_dir):
+        _write("review.md", CORRUPT_REVIEW)
+        write_frontmatter("review.md", VALID_REVIEW_FM.copy(), "rfe-review")
+        data, body = read_frontmatter("review.md")
+        assert data["rfe_id"] == "RHAIRFE-1234"
+        assert "Keep this body." in body
+
 
 # ── update_frontmatter ────────────────────────────────────────────────────────
 
@@ -301,6 +413,223 @@ class TestUpdateFrontmatter:
         write_frontmatter("review.md", VALID_REVIEW_FM.copy(), "rfe-review")
         with pytest.raises(ValidationError):
             update_frontmatter("review.md", {"recommendation": "invalid"}, "rfe-review")
+
+
+class TestUpdateFrontmatterRepair:
+    """An unparseable block must be repairable through frontmatter.py.
+
+    update_frontmatter is the only writer, so if it refuses on corrupt input
+    the caller's only recourse is hand-editing YAML — the thing that corrupted
+    the file to begin with.
+    """
+
+    # What review-agent.md Step 4 actually passes: no auto_revised, which the
+    # schema defaults to False.
+    STEP_4_FIELDS = {
+        "rfe_id": "RFE-015",
+        "score": 8,
+        "pass": True,
+        "recommendation": "submit",
+        "feasibility": "feasible",
+        "needs_attention": True,
+        "needs_attention_reason": "Blocked: needs architecture input",
+        "scores": {"what": 2, "why": 2, "open_to_how": 2, "not_a_task": 1, "right_sized": 1},
+    }
+
+    def test_repairs_block_and_keeps_body(self, tmp_dir):
+        _write("review.md", CORRUPT_REVIEW)
+        update_frontmatter("review.md", dict(self.STEP_4_FIELDS), "rfe-review")
+        data, body = read_frontmatter("review.md")
+        assert data["rfe_id"] == "RFE-015"
+        assert data["auto_revised"] is False  # supplied by schema default
+        assert "Keep this body." in body
+
+    def test_repaired_value_with_colon_round_trips(self, tmp_dir):
+        """The colon that broke the file is fine once yaml.dump does the quoting."""
+        _write("review.md", CORRUPT_REVIEW)
+        update_frontmatter("review.md", dict(self.STEP_4_FIELDS), "rfe-review")
+        data, _ = read_frontmatter("review.md")
+        assert data["needs_attention_reason"] == "Blocked: needs architecture input"
+
+    def test_warns_that_the_block_was_replaced(self, tmp_dir, capsys):
+        _write("review.md", CORRUPT_REVIEW)
+        update_frontmatter("review.md", dict(self.STEP_4_FIELDS), "rfe-review")
+        assert "replacing unparseable frontmatter" in capsys.readouterr().err
+
+    def test_refuses_incomplete_updates(self, tmp_dir):
+        """Validation is the guard — a partial update must not silently drop fields.
+
+        This is the second Step 4 call, which normally relies on merging.
+        """
+        _write("review.md", CORRUPT_REVIEW)
+        with pytest.raises(ValidationError):
+            update_frontmatter("review.md", {"before_score": 8}, "rfe-review")
+
+    def test_leaves_file_untouched_when_it_refuses(self, tmp_dir):
+        _write("review.md", CORRUPT_REVIEW)
+        with pytest.raises(ValidationError):
+            update_frontmatter("review.md", {"before_score": 8}, "rfe-review")
+        with open("review.md") as f:
+            assert f.read() == CORRUPT_REVIEW
+
+    def test_stamping_over_an_empty_block_keeps_the_whole_body(self, tmp_dir):
+        """The recovery path slices on the same regex, so it truncated too.
+
+        With the old pattern the mis-detected delimiter sat in the middle of the
+        body, and everything above it — heading, score table — was dropped
+        silently instead of crashing.
+        """
+        _write("review.md", EMPTY_BLOCK_REVIEW)
+        update_frontmatter("review.md", dict(self.STEP_4_FIELDS), "rfe-review")
+        data, body = read_frontmatter("review.md")
+        assert data["rfe_id"] == "RFE-015"
+        assert body == EMPTY_BLOCK_REVIEW.split("---\n---\n", 1)[1]
+
+    def test_stamping_over_an_empty_block_leaves_one_block(self, tmp_dir):
+        _write("review.md", EMPTY_BLOCK_REVIEW)
+        update_frontmatter("review.md", dict(self.STEP_4_FIELDS), "rfe-review")
+        with open("review.md") as f:
+            content = f.read()
+        # The body's own horizontal rule is the only `---` line left below the
+        # block, so a duplicated empty block would show up as an extra one.
+        assert content.count("\n---\n") == 2
+
+
+class TestBodyRuleNotMistakenForDelimiter:
+    """A `---` horizontal rule in the body must never be taken for the closing
+    delimiter, or the lines above it are silently dropped — the exact
+    crash->silent-truncation failure the repair path was meant to avoid.
+    """
+
+    FIELDS = {
+        "rfe_id": "RFE-015",
+        "score": 8,
+        "pass": True,
+        "recommendation": "submit",
+        "feasibility": "feasible",
+        "needs_attention": False,
+        "scores": {"what": 2, "why": 2, "open_to_how": 2, "not_a_task": 1, "right_sized": 1},
+    }
+
+    # Body-only file (per Step 3) whose body opens with a thematic-break rule and
+    # a heading. The heading is a YAML comment, so the block parses to null — but
+    # it is NOT an empty block, and the second `---` is a body rule.
+    LEADING_RULE_BODY = "---\n## Assessor Feedback\n---\n\nScores look good. Submit.\n"
+
+    def test_read_preserves_leading_rule_section(self, tmp_dir):
+        _write("review.md", self.LEADING_RULE_BODY)
+        data, body = read_frontmatter("review.md")
+        assert data == {}
+        assert body == self.LEADING_RULE_BODY  # nothing consumed
+
+    def test_update_keeps_heading_above_body_rule(self, tmp_dir):
+        _write("review.md", self.LEADING_RULE_BODY)
+        update_frontmatter("review.md", dict(self.FIELDS), "rfe-review")
+        data, body = read_frontmatter("review.md")
+        assert data["rfe_id"] == "RFE-015"
+        assert "## Assessor Feedback" in body
+        assert "Scores look good. Submit." in body
+
+    def test_unparseable_block_without_clean_close_keeps_body(self, tmp_dir):
+        """No valid closing `---`; a body rule is the first one the regex sees.
+
+        On the pre-fix repair path this truncated the body to everything below
+        the body rule, silently dropping the paragraph above it.
+        """
+        content = (
+            "---\n"
+            "rfe_id: RHAIRFE-1595\n"
+            "score: 7\n"
+            "# Review Summary\n"
+            "\n"
+            "Important analysis a stakeholder must not lose.\n"
+            "\n"
+            "---\n"
+            "\n"
+            "## Detailed scores\n"
+        )
+        _write("review.md", content)
+        update_frontmatter("review.md", dict(self.FIELDS), "rfe-review")
+        with open("review.md") as f:
+            out = f.read()
+        assert "Important analysis a stakeholder must not lose." in out
+        # And the file is now valid frontmatter that round-trips.
+        assert read_frontmatter("review.md")[0]["rfe_id"] == "RFE-015"
+
+    def test_write_and_update_agree_on_scalar_block(self, tmp_dir):
+        """The two writers must not disagree on a non-mapping block; both keep
+        the content (lossless) rather than one dropping it.
+        """
+        original = "---\njust a string\n---\nReal body.\n"
+        _write("w.md", original)
+        _write("u.md", original)
+        write_frontmatter("w.md", dict(self.FIELDS), "rfe-review")
+        update_frontmatter("u.md", dict(self.FIELDS), "rfe-review")
+        with open("w.md") as f:
+            w = f.read()
+        with open("u.md") as f:
+            u = f.read()
+        assert w == u
+        assert "Real body." in w
+        assert read_frontmatter("w.md")[0]["rfe_id"] == "RFE-015"
+
+    def test_update_keeps_mapping_like_markdown_body(self, tmp_dir):
+        """A body that opens with `---`, a `key: value` line, and a `- ` list
+        item, then another `---`, is invalid YAML but must not be stripped.
+
+        The mapping key alone looks frontmatter-ish, but the top-level sequence
+        item makes it invalid YAML and never real frontmatter — so the region is
+        body and must survive the repair.
+        """
+        _write("review.md", "---\nSummary: needs review\n- investigate\n---\n\nReal body.\n")
+        update_frontmatter("review.md", dict(self.FIELDS), "rfe-review")
+        with open("review.md") as f:
+            out = f.read()
+        assert "Summary: needs review" in out
+        assert "- investigate" in out
+        assert "Real body." in out
+        assert read_frontmatter("review.md")[0]["rfe_id"] == "RFE-015"
+
+
+class TestLooksLikeFrontmatterBlock:
+    def test_key_value_lines_are_a_block(self):
+        assert _looks_like_frontmatter_block("rfe_id: RFE-1\nscore: 8\n")
+
+    def test_value_with_colon_is_a_block(self):
+        assert _looks_like_frontmatter_block("reason: Blocked: needs input\n")
+
+    def test_nested_mapping_is_a_block(self):
+        assert _looks_like_frontmatter_block("scores:\n  what: 2\n  why: 2\n")
+
+    def test_valid_list_value_is_a_block(self):
+        # yaml.dump writes list values as "- item" at column 0; the parse-to-dict
+        # fast path must still recognise this as real frontmatter.
+        assert _looks_like_frontmatter_block("labels:\n- a\n- b\n")
+
+    def test_mapping_then_top_level_sequence_is_not_a_block(self):
+        # A key line followed by a top-level "- " item is invalid YAML and never
+        # real frontmatter — it is a markdown body that must be preserved.
+        assert not _looks_like_frontmatter_block("Summary: needs review\n- investigate\n")
+
+    def test_blank_line_means_not_a_block(self):
+        assert not _looks_like_frontmatter_block("rfe_id: RFE-1\n\nprose\n")
+
+    def test_markdown_heading_is_not_a_block(self):
+        assert not _looks_like_frontmatter_block("## Assessor Feedback\n")
+
+    def test_prose_is_not_a_block(self):
+        assert not _looks_like_frontmatter_block("Some analysis without a colon\n")
+
+    def test_empty_is_not_a_block(self):
+        assert not _looks_like_frontmatter_block("")
+
+    def test_body_without_frontmatter_preserves_non_block(self, tmp_dir):
+        _write("f.md", "---\n## Heading\n---\nbody\n")
+        assert _body_without_frontmatter("f.md") == "---\n## Heading\n---\nbody\n"
+
+    def test_body_without_frontmatter_strips_real_block(self, tmp_dir):
+        _write("f.md", "---\nrfe_id: RFE-1\n---\nbody\n")
+        assert _body_without_frontmatter("f.md") == "body\n"
 
 
 # ── Initiative schemas ───────────────────────────────────────────────────────

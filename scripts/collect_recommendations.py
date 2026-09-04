@@ -8,7 +8,7 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import read_frontmatter, resolve_ids
+from artifact_utils import ValidationError, read_frontmatter, resolve_ids
 
 ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
@@ -19,17 +19,31 @@ def _review_dir(entry_type):
     return os.path.join(ARTIFACTS_DIR, subdir)
 
 
+def _read_review_data(path):
+    """Read a review's frontmatter, tolerating a missing file or corrupt block.
+
+    Returns the frontmatter dict, or None if the file is absent or its
+    frontmatter is unparseable. read_frontmatter raises ValidationError on a bad
+    YAML block (see artifact_utils), so every collection mode goes through here
+    and treats a malformed review as an error/no-op rather than letting one bad
+    file crash the whole batch.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        data, _ = read_frontmatter(path)
+    except (OSError, UnicodeError, yaml.YAMLError, ValidationError):
+        return None
+    return data
+
+
 def collect_default(ids, entry_type="rfe"):
     """Group IDs by recommendation field."""
     groups = {"SUBMIT": [], "SPLIT": [], "REVISE": [], "REJECT": [], "ERRORS": []}
     review_dir = _review_dir(entry_type)
     for item_id in ids:
-        path = os.path.join(review_dir, f"{item_id}-review.md")
-        if not os.path.exists(path):
-            groups["ERRORS"].append(item_id)
-            continue
-        data, _ = read_frontmatter(path)
-        if data.get("error"):
+        data = _read_review_data(os.path.join(review_dir, f"{item_id}-review.md"))
+        if data is None or data.get("error"):
             groups["ERRORS"].append(item_id)
             continue
         rec = data.get("recommendation", "").upper()
@@ -48,12 +62,10 @@ def collect_reassess(ids, entry_type="rfe"):
     reassess, done = [], []
     review_dir = _review_dir(entry_type)
     for item_id in ids:
-        path = os.path.join(review_dir, f"{item_id}-review.md")
-        if not os.path.exists(path):
-            done.append(item_id)
-            continue
-        data, _ = read_frontmatter(path)
-        if data.get("auto_revised") and not data.get("pass"):
+        data = _read_review_data(os.path.join(review_dir, f"{item_id}-review.md"))
+        # A missing or corrupt review is not reassessable — bucket it as done so
+        # the run continues; --errors is the mode that surfaces it.
+        if data and data.get("auto_revised") and not data.get("pass"):
             reassess.append(item_id)
         else:
             done.append(item_id)
@@ -62,20 +74,12 @@ def collect_reassess(ids, entry_type="rfe"):
 
 
 def collect_errors(ids, entry_type="rfe"):
-    """Collect IDs with non-null error field or missing review files."""
+    """Collect IDs with non-null error field, missing files, or corrupt reviews."""
     error_ids = []
     review_dir = _review_dir(entry_type)
     for item_id in ids:
-        path = os.path.join(review_dir, f"{item_id}-review.md")
-        if not os.path.exists(path):
-            error_ids.append(item_id)
-            continue
-        try:
-            data, _ = read_frontmatter(path)
-        except (OSError, UnicodeError, yaml.YAMLError):
-            error_ids.append(item_id)
-            continue
-        if data.get("error"):
+        data = _read_review_data(os.path.join(review_dir, f"{item_id}-review.md"))
+        if data is None or data.get("error"):
             error_ids.append(item_id)
     print(f"ERRORS={','.join(error_ids)}")
 

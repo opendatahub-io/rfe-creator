@@ -456,7 +456,91 @@ def get_schema_yaml(schema_type):
 
 # ─── Frontmatter Read/Write ────────────────────────────────────────────────────
 
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?\n)---\s*\n", re.DOTALL)
+# The closing delimiter must be anchored to the start of a line, and the block
+# body must be allowed to be empty. `(.*?\n)` requires at least one newline, so
+# on an empty block (`---\n---\n`) it consumes the closing delimiter and keeps
+# expanding to the next `---` in the body — swallowing markdown horizontal rules
+# and score tables into the YAML string. `[ \t]*` rather than `\s*` so a blank
+# line after the closing delimiter stays in the body.
+_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)^---[ \t]*\r?\n", re.DOTALL | re.MULTILINE)
+
+
+def _yaml_error_message(path, yaml_str, exc):
+    """Describe a frontmatter parse failure in one actionable line.
+
+    PyYAML's own traceback is unreadable in agent logs. Lead with the file and
+    the offending line so the message survives log truncation, and say how to
+    avoid it — the usual cause is a hand-written block whose free-text value
+    contains an unquoted ':'.
+    """
+    problem = getattr(exc, "problem", None) or str(exc)
+    mark = getattr(exc, "problem_mark", None)
+    if mark is None:
+        return f"Invalid YAML frontmatter in {path}: {problem}"
+
+    lines = yaml_str.splitlines()
+    source = lines[mark.line].strip() if 0 <= mark.line < len(lines) else ""
+    near = f" near {source!r}" if source else ""
+    return (
+        f"Invalid YAML frontmatter in {path}, line {mark.line + 1}{near} — {problem}. "
+        f"Set frontmatter with scripts/frontmatter.py rather than by hand; "
+        f"values containing ':' must be quoted."
+    )
+
+
+def _looks_like_frontmatter_block(text):
+    """Does `text` (the region between two `---` lines) hold real frontmatter,
+    rather than body prose a stray `---` rule was mistaken for?
+
+    Valid frontmatter parses cleanly to a mapping, so that is the fast path (and
+    covers list- or nested-map values). The repair path must also recognise a
+    *malformed* mapping — the unquoted-colon corruption this feature targets — so
+    a fallback accepts a contiguous run of `key: value` lines. Anything else
+    means the matched `---` is almost certainly a body horizontal rule, so the
+    region is body and must be preserved, not stripped:
+
+    - a blank line (frontmatter this tool writes has none),
+    - a top-level `- ` sequence item not under a key (never valid frontmatter for
+      these schemas, and the mixed map+sequence shape below is invalid YAML),
+    - a prose line or a markdown heading (`#` is a YAML comment).
+    """
+    try:
+        if isinstance(yaml.safe_load(text), dict):
+            return True
+    except yaml.YAMLError:
+        pass  # fall through to the malformed-but-recoverable mapping check
+    saw_key = False
+    for line in text.splitlines():
+        if not line.strip():
+            return False  # blank line — we have run past the real block into body
+        if line[0] in " \t":
+            continue  # indented continuation of a value
+        if re.match(r"[^\s:#][^:]*:(\s|$)", line):
+            saw_key = True
+            continue
+        return False  # prose, a markdown heading, or a top-level "- " list item
+    return saw_key
+
+
+def _body_without_frontmatter(path):
+    """Return the markdown body, ignoring a leading frontmatter block.
+
+    The delimiters are matched by regex, so the body is recoverable even when the
+    YAML between them does not parse. But a lone `---` horizontal rule in the body
+    can be mistaken for the closing delimiter, so the leading block is stripped
+    only when it is empty or actually looks like a YAML mapping. Otherwise the
+    whole content is returned unchanged — better to leave a stale block stacked in
+    the body than to silently drop real content sitting above a body rule.
+    """
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    match = _FRONTMATTER_RE.match(content)
+    if not match:
+        return content
+    region = match.group(1)
+    if region.strip() == "" or _looks_like_frontmatter_block(region):
+        return content[match.end() :]
+    return content
 
 
 def read_frontmatter(path):
@@ -464,7 +548,17 @@ def read_frontmatter(path):
 
     Returns:
         (data_dict, body_string) — frontmatter as dict, remainder as string.
-        Returns ({}, full_content) if no frontmatter found.
+        Returns ({}, full_content) if no frontmatter found. A genuinely empty
+        block (`---\\n---\\n`) is valid frontmatter with no fields, so it returns
+        ({}, body) with the delimiters consumed — otherwise write_frontmatter
+        would leave a stale block sitting in the body. A block that is present
+        but not a mapping (a bare scalar, or comment/heading-only content that
+        parses to null) returns ({}, full_content): the closing `---` we matched
+        may be a body horizontal rule, so the safe choice is to treat the whole
+        file as body rather than drop the region above the delimiter.
+
+    Raises:
+        ValidationError: if the frontmatter block is present but unparseable.
     """
     with open(path, encoding="utf-8") as f:
         content = f.read()
@@ -476,8 +570,23 @@ def read_frontmatter(path):
     yaml_str = match.group(1)
     body = content[match.end() :]
 
-    data = yaml.safe_load(yaml_str)
+    if yaml_str.strip() == "":
+        # A genuinely empty block is valid frontmatter with no fields. Consume
+        # the delimiters so a later write replaces it rather than stacking a
+        # second block on top. Only a *blank* block is consumed: content that
+        # merely parses to null is not — a markdown heading is a YAML comment, so
+        # `---\n## Heading\n---\nbody` also yields None, and the closing `---`
+        # there may be a body horizontal rule. Consuming up to it would silently
+        # drop the lines above.
+        return {}, body
+
+    try:
+        data = yaml.safe_load(yaml_str)
+    except yaml.YAMLError as exc:
+        raise ValidationError(_yaml_error_message(path, yaml_str, exc)) from exc
     if not isinstance(data, dict):
+        # Present but not a mapping (a bare scalar/list, or comment-only content
+        # that parsed to None). Preserve the whole file — see the docstring.
         return {}, content
 
     _migrate_fields(data)
@@ -544,10 +653,11 @@ def write_frontmatter(path, data, schema_type):
             "Frontmatter validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # Read existing body if file exists
+    # Read existing body if file exists. The data above is already validated
+    # and complete, so an unparseable existing block is simply overwritten.
     body = ""
     if os.path.exists(path):
-        _, body = read_frontmatter(path)
+        body = _body_without_frontmatter(path)
 
     yaml_str = yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
     content = f"---\n{yaml_str}---\n{body}"
@@ -570,11 +680,25 @@ def update_frontmatter(path, updates, schema_type):
         updates: dict of fields to add/update
         schema_type: schema to validate against
 
+    If the existing frontmatter block is unparseable, it is replaced rather
+    than merged. This is the only repair path available: every writer goes
+    through here, so refusing would leave the caller no way to fix the file
+    except hand-editing YAML — which is what corrupts it in the first place.
+    The validation below guards the *fields*: a partial update that does not
+    amount to a complete, valid record still fails. Body content is never
+    dropped — _body_without_frontmatter strips only a leading block it can
+    confidently identify as frontmatter and otherwise preserves the whole file.
+
     Raises:
         ValidationError: if merged data fails validation
         FileNotFoundError: if file doesn't exist
     """
-    data, body = read_frontmatter(path)
+    try:
+        data, body = read_frontmatter(path)
+    except ValidationError as exc:
+        print(f"Warning: replacing unparseable frontmatter — {exc}", file=sys.stderr)
+        data, body = {}, _body_without_frontmatter(path)
+
     for key, value in updates.items():
         if isinstance(value, dict) and isinstance(data.get(key), dict):
             data[key].update(value)
