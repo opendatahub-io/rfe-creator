@@ -1,6 +1,8 @@
 # Design Proposal: Request-Type Extensibility — Types as Data in Core
 
 **Status:** Superseded by `work-item-types-unified.md` (2026-08-12); kept as the design record for the manifest-registry candidate and its panel judgement
+
+> **Positions in this document that the unified design rejects or changes — do not implement from here:** permanent `initiative-*` alias families (the skills are deleted instead); "zero required CI changes, ever" (scoped to production pipelines; repository CI work is listed); the `types/strategy/` prototype (strat-creator is a peer pipeline of a different kind); per-type scorer agents (one type-agnostic scorer, coordinated); the prefix-only alignment condition (a named `parent_is_outcome` hook); tag-based rubric pins (immutable commit SHAs); prefix-keyed identity (`(project, issue_type)` with prefix lists and a post-fetch candidate resolution); the `RFE_CREATOR_EXTRA_TYPES` seam as an unrestricted runtime input (development/test only, allowlisted roots in protected runs)
 **Repo:** opendatahub-io/rfe-creator (analysis at merged main `8888b18`, post PR #143)
 **Provenance:** Synthesis of three independent designs (manifest-registry, plugin-per-type, layered-shim) judged by a 3-lens panel (end-user UX, provider DX, ops/migration). Winning base: **manifest-registry** (types-as-data in core). Best ideas from the non-winners are grafted in; panel disagreements are resolved explicitly in §0.1; fatal flaws found in the winning design are fixed and marked **[panel fix]**.
 
