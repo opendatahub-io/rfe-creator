@@ -22,6 +22,7 @@ Usage:
 import argparse
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -299,6 +300,11 @@ def _build_phase_config(pipeline_type):
         "REASSESS_FIXUP": {
             "type": "script",
             "command": fixup_cmd,
+            # Deliberately the revise file, not the reassess file: REASSESS_RESTORE
+            # narrows the reassess set through filter_for_revision into
+            # tmp/pipeline-revise-ids.txt, REASSESS_REVISE revises exactly that
+            # subset, and the fixup must check the same subset. Pinned by
+            # tests/test_pipeline_state.py::TestReassessFixupIds.
             "ids_file": "tmp/pipeline-revise-ids.txt",
         },
         # --- Collect + Split ---
@@ -401,7 +407,8 @@ def _build_phase_config(pipeline_type):
 
 
 def _get_config(state):
-    """Get PHASE_CONFIG for the pipeline type in the current state."""
+    """Get PHASE_CONFIG for the pipeline type in the current state (validated first)."""
+    _validate_state_values(state)
     return _build_phase_config(state.get("type", "rfe"))
 
 
@@ -442,16 +449,82 @@ def _save_state(state):
         yaml.dump(state, f, default_flow_style=False, sort_keys=False)
 
 
+_VALID_ID_RE = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")  # ASCII only: \d would admit e.g. RHAIRFE-١
+_START_TIME_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+_ASCII_DIGITS_RE = re.compile(r"[0-9]+")  # str.isdigit() accepts "²", which int() rejects
+
+
+def _validate_ids(ids, source=""):
+    """Reject any id that is not ``<PREFIX>-<digits>`` before it can reach a shell.
+
+    Every id list the pipeline reads — from ``tmp/*-ids.txt`` files or from a
+    decision script's stdout — is interpolated into ``shell=True`` commands or
+    becomes prompt variables and path components (``advance()``,
+    ``cmd_run_phase``, ``_save_originals``), so both are shell-injection and
+    path-traversal vectors. The grammar is
+    deliberately type-neutral: it accepts every local and Jira id shape the
+    pipeline produces (``RFE-001``, ``INIT-004``, ``RHAIRFE-2685``,
+    ``RHOAIENG-9876``) and nothing else. Per-type grammars belong to the type
+    registry (design-proposals/work-item-types-unified.md §3.2); this is the floor.
+    """
+    bad = [i for i in ids if not _VALID_ID_RE.fullmatch(i)]
+    if bad:
+        where = f" in {source}" if source else ""
+        # Show a bounded preview so the failure is diagnosable in a headless log
+        # (these files are written by the pipeline itself from Jira keys), but
+        # never echo a long line back verbatim.
+        preview = [b[:40] + ("…" if len(b) > 40 else "") for b in bad[:5]]
+        print(
+            f"[validate-ids] rejected {len(bad)} invalid id(s){where}: {preview!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return ids
+
+
+def _validate_state_values(state):
+    """Reject state values that are formatted into subprocess commands.
+
+    ``cmd_run_phase`` formats ``{start_time}`` and ``{batch_size}`` from
+    ``tmp/pipeline-state.yaml`` into the REPORT command, and the phase table is
+    selected by ``type``. These are formatted into ``shell=True`` commands, so a
+    tampered value could execute; the three fields ``init`` writes are checked
+    before use.
+    """
+    problems = []
+    ptype = state.get("type", "rfe")
+    if not isinstance(ptype, str) or ptype not in PIPELINE_TYPES:
+        problems.append(f"type={ptype!r} is not one of {sorted(PIPELINE_TYPES)}")
+    start_time = state.get("start_time", "")
+    if not isinstance(start_time, str) or not _START_TIME_RE.fullmatch(start_time):
+        problems.append("start_time is not an ISO-8601 UTC timestamp (YYYY-MM-DDTHH:MM:SSZ)")
+    else:
+        try:  # the regex checks shape only; reject impossible dates and clock values
+            datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            problems.append(f"start_time {start_time!r} is not a real date/time")
+    batch_size = state.get("batch_size", 50)
+    is_int = isinstance(batch_size, int) and not isinstance(batch_size, bool)
+    is_digits = isinstance(batch_size, str) and _ASCII_DIGITS_RE.fullmatch(batch_size)
+    if not (is_int or is_digits) or int(batch_size) < 1:
+        problems.append("batch_size is not a positive integer")
+    if problems:
+        print("[validate-state] refusing to run: " + "; ".join(problems), file=sys.stderr)
+        sys.exit(1)
+    return state
+
+
 def _read_ids(path):
-    """Read IDs from a file, one per line."""
+    """Read IDs from a file, one per line. Invalid ids abort (see _validate_ids)."""
     if not os.path.exists(path):
         return []
     with open(path) as f:
-        return [line.strip() for line in f if line.strip()]
+        return _validate_ids([line.strip() for line in f if line.strip()], source=path)
 
 
 def _write_ids(path, ids):
-    """Write IDs to a file, one per line."""
+    """Write IDs to a file, one per line. Validated first: nothing malformed is persisted."""
+    _validate_ids(ids, source=path)
     os.makedirs(os.path.dirname(path) or "tmp", exist_ok=True)
     with open(path, "w") as f:
         for id_ in ids:
@@ -471,6 +544,7 @@ def _save_originals(ids, pipeline_type):
     check_revised.py --batch can detect whether the revise agent changed
     anything.
     """
+    _validate_ids(ids, source="_save_originals")  # ids become path components below
     t = PIPELINE_TYPES[pipeline_type]
     tasks_dir = t["tasks_dir"]
     originals_dir = tasks_dir.replace("rfe-tasks", "rfe-originals").replace(
@@ -495,14 +569,21 @@ def _run_script(cmd):
     return result.stdout.strip()
 
 
+def _ids_from_output(output, source):
+    """Whitespace-separated ids printed by a decision script, validated."""
+    return _validate_ids(output.split() if output else [], source=source)
+
+
 def _parse_line_ids(output, prefix):
-    """Parse IDs from a KEY=ID1,ID2 output line."""
+    """Parse IDs from a KEY=ID1,ID2 output line, validated."""
     for line in output.splitlines():
         if line.startswith(f"{prefix}="):
             val = line.split("=", 1)[1].strip()
             if not val:
                 return []
-            return [x.strip() for x in val.split(",") if x.strip()]
+            return _validate_ids(
+                [x.strip() for x in val.split(",") if x.strip()], source=f"{prefix}= line"
+            )
     return []
 
 
@@ -536,6 +617,7 @@ def advance(state, dry_run=False):
 
     Returns (next_phase, summary_line).
     """
+    _validate_state_values(state)  # type/start_time/batch_size feed decision-script argv
     phase = state["phase"]
     pipeline_type = state.get("type", "rfe")
     type_flag = f"--type {pipeline_type}"
@@ -556,7 +638,7 @@ def advance(state, dry_run=False):
         if not dry_run:
             active_ids = _read_ids("tmp/pipeline-active-ids.txt")
             out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(active_ids)}")
-            revise_ids = out.split() if out else []
+            revise_ids = _ids_from_output(out, "filter_for_revision.py output")
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             if revise_ids:
                 _save_originals(revise_ids, pipeline_type)
@@ -573,7 +655,7 @@ def advance(state, dry_run=False):
                 out = _run_script(
                     f"python3 scripts/filter_for_revision.py {' '.join(reassess_ids)}"
                 )
-                revise_ids = out.split() if out else []
+                revise_ids = _ids_from_output(out, "filter_for_revision.py output")
                 _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
                 if revise_ids:
                     _save_originals(revise_ids, pipeline_type)
@@ -583,7 +665,7 @@ def advance(state, dry_run=False):
         if not dry_run:
             child_ids = _read_ids("tmp/pipeline-split-children-ids.txt")
             out = _run_script(f"python3 scripts/filter_for_revision.py {' '.join(child_ids)}")
-            revise_ids = out.split() if out else []
+            revise_ids = _ids_from_output(out, "filter_for_revision.py output")
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             if revise_ids:
                 _save_originals(revise_ids, pipeline_type)
@@ -815,7 +897,7 @@ def cmd_run_phase(args):
     from ids_file if configured, and runs the command. The orchestrator
     never sees the underlying script name.
     """
-    state = _load_state()
+    state = _validate_state_values(_load_state())
     phase = state["phase"]
     config = _get_config(state).get(phase, {"type": "noop"})
     phase_type = config.get("type", "noop")
