@@ -193,5 +193,7 @@ class TestCallersDeclareType:
         from pipeline_state import _build_phase_config
 
         for ptype in PIPELINE_TYPES:
-            command = _build_phase_config(ptype)["SETUP"]["command"]
-            assert f"bootstrap-assess-rfe.sh --type {ptype}" in command
+            setup = _build_phase_config(ptype)["SETUP"]
+            # SETUP runs its bootstrap steps as a concurrent "commands" list.
+            commands = setup.get("commands") or [setup["command"]]
+            assert any(f"bootstrap-assess-rfe.sh --type {ptype}" in c for c in commands)

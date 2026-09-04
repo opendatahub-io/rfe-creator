@@ -685,7 +685,7 @@ class TestRunPhase:
         with redirect_stdout(buf):
             ps.cmd_run_phase([])
         assert len(calls) == 1
-        assert "generate_run_report.py" in calls[0]
+        assert any("generate_run_report.py" in part for part in calls[0])
         assert "[run-phase] REPORT" in buf.getvalue()
 
     def test_appends_ids(self, tmp_dir, monkeypatch):
@@ -1076,7 +1076,32 @@ class TestDispatchLoopE2E:
 
         # Verify invariant: script phases never expose command or ids_file
         if phase_type == "script":
-            monkeypatch.setattr(subprocess, "run", subprocess_mock)
+            assert "command" not in config, f"command leaked in {phase} config"
+            assert "ids_file" not in config, f"ids_file leaked in {phase} config"
+
+        # Verify invariant: agent phases retain needed fields
+        if phase_type == "agent":
+            assert "prompt" in config, f"prompt missing from {phase} config"
+            assert "ids_file" in config, f"ids_file missing from {phase} config"
+            assert "poll_phase" in config, f"poll_phase missing from {phase} config"
+
+        # Step 2: dispatch based on type
+        if phase_type == "script":
+            # run-phase passes argument lists; the per-test fakes sniff the
+            # command as a string, so hand them the joined form.
+            monkeypatch.setattr(
+                subprocess,
+                "run",
+                lambda cmd, **kw: subprocess_mock(
+                    cmd if isinstance(cmd, str) else " ".join(cmd), **kw
+                ),
+            )
+            # SETUP launches its two commands via Popen; keep the loop hermetic.
+            monkeypatch.setattr(
+                subprocess,
+                "Popen",
+                lambda argv, **kw: type("P", (), {"wait": lambda self: 0})(),
+            )
             buf = io.StringIO()
             with redirect_stdout(buf):
                 ps.cmd_run_phase([])
@@ -2332,7 +2357,7 @@ class TestValidateStateValues:
 
     def test_valid_state_runs(self, tmp_dir, monkeypatch):
         calls = self._run_report(monkeypatch)
-        assert len(calls) == 1 and "generate_run_report.py" in calls[0]
+        assert len(calls) == 1 and any("generate_run_report.py" in p for p in calls[0])
 
     @pytest.mark.parametrize(
         "overrides",
@@ -2366,6 +2391,79 @@ class TestValidateStateValues:
     def test_string_digit_batch_size_is_accepted(self, tmp_dir, monkeypatch):
         calls = self._run_report(monkeypatch, batch_size="25")
         assert len(calls) == 1 and "25" in calls[0]
+
+
+# ---------- No shell anywhere ----------
+
+
+class TestNoShell:
+    """Commands are argument lists; nothing is interpreted by a shell."""
+
+    def test_run_script_uses_argv_without_shell(self, monkeypatch):
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["cmd"], seen["kw"] = cmd, kw
+            return type("R", (), {"returncode": 0, "stdout": "ok\n", "stderr": ""})()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        assert ps._run_script("python3 scripts/filter_for_revision.py RHAIRFE-1 RHAIRFE-2") == "ok"
+        assert seen["cmd"] == [
+            "python3",
+            "scripts/filter_for_revision.py",
+            "RHAIRFE-1",
+            "RHAIRFE-2",
+        ]
+        assert seen["kw"].get("shell") is not True
+
+    def test_run_phase_passes_state_values_as_separate_args(self, tmp_dir, monkeypatch):
+        ps._save_state(make_state(phase="REPORT", start_time="2026-04-09T00:00:00Z", batch_size=50))
+        seen = {}
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: (seen.update(cmd=cmd, kw=kw), type("R", (), {"returncode": 0})())[1],
+        )
+        import io
+        from contextlib import redirect_stdout
+
+        with redirect_stdout(io.StringIO()):
+            ps.cmd_run_phase([])
+        assert isinstance(seen["cmd"], list)
+        assert seen["cmd"][:2] == ["python3", "scripts/generate_run_report.py"]
+        assert seen["cmd"][seen["cmd"].index("--start-time") + 1] == "2026-04-09T00:00:00Z"
+        assert seen["kw"].get("shell") is not True
+
+    def test_setup_runs_both_commands_concurrently_and_logs_failures(
+        self, tmp_dir, monkeypatch, capsys
+    ):
+        ps._save_state(make_state(phase="SETUP"))
+        launched = []
+
+        class FakeProc:
+            def __init__(self, argv):
+                self.argv = argv
+
+            def wait(self):
+                return 3 if any("fetch-architecture-context" in a for a in self.argv) else 0
+
+        monkeypatch.setattr(
+            subprocess, "Popen", lambda argv, **kw: launched.append(argv) or FakeProc(argv)
+        )
+        ps.cmd_run_phase([])  # must not raise: exit codes are logged, not fatal
+        assert [a[:2] for a in launched] == [
+            ["bash", "scripts/bootstrap-assess-rfe.sh"],
+            ["bash", "scripts/fetch-architecture-context.sh"],
+        ]
+        assert all(isinstance(a, list) for a in launched)
+        assert "exit 3 from: bash scripts/fetch-architecture-context.sh" in capsys.readouterr().err
+        assert open(ps.DISPATCH_MARKER).read() == "SETUP"
+
+    def test_no_shell_true_left_in_module(self):
+        import inspect
+
+        src = inspect.getsource(ps)
+        assert "shell=True" not in src.replace("``shell=True``", "")
 
 
 # ---------- Ids parsed from script output are validated too ----------

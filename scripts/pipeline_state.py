@@ -23,6 +23,7 @@ import argparse
 import glob
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -223,10 +224,14 @@ def _build_phase_config(pipeline_type):
         },
         "SETUP": {
             "type": "script",
-            "command": (
-                f"bash scripts/bootstrap-assess-rfe.sh --type {pipeline_type} &"
-                " bash scripts/fetch-architecture-context.sh & wait"
-            ),
+            # Run concurrently. Exit codes are logged but do not fail the phase:
+            # the previous `a & b & wait` form returned wait's status, which is
+            # always 0, so this preserves behaviour. Fail-fast SETUP belongs to
+            # the registry's validate_types.py --verify gate.
+            "commands": [
+                f"bash scripts/bootstrap-assess-rfe.sh --type {pipeline_type}",
+                "bash scripts/fetch-architecture-context.sh",
+            ],
         },
         "ASSESS": {
             "type": "agent",
@@ -458,10 +463,9 @@ def _validate_ids(ids, source=""):
     """Reject any id that is not ``<PREFIX>-<digits>`` before it can reach a shell.
 
     Every id list the pipeline reads — from ``tmp/*-ids.txt`` files or from a
-    decision script's stdout — is interpolated into ``shell=True`` commands or
-    becomes prompt variables and path components (``advance()``,
-    ``cmd_run_phase``, ``_save_originals``), so both are shell-injection and
-    path-traversal vectors. The grammar is
+    decision script's stdout — becomes subprocess arguments, prompt variables,
+    or path components (``advance()``, ``cmd_run_phase``, ``_save_originals``),
+    so both are argument-injection and path-traversal vectors. The grammar is
     deliberately type-neutral: it accepts every local and Jira id shape the
     pipeline produces (``RFE-001``, ``INIT-004``, ``RHAIRFE-2685``,
     ``RHOAIENG-9876``) and nothing else. Per-type grammars belong to the type
@@ -487,9 +491,9 @@ def _validate_state_values(state):
 
     ``cmd_run_phase`` formats ``{start_time}`` and ``{batch_size}`` from
     ``tmp/pipeline-state.yaml`` into the REPORT command, and the phase table is
-    selected by ``type``. These are formatted into ``shell=True`` commands, so a
-    tampered value could execute; the three fields ``init`` writes are checked
-    before use.
+    selected by ``type``. Commands no longer go through a shell, but a tampered
+    value would still become extra argv tokens (``--start-time x --foo``), so the
+    three fields ``init`` writes are checked before use.
     """
     problems = []
     ptype = state.get("type", "rfe")
@@ -558,9 +562,14 @@ def _save_originals(ids, pipeline_type):
             shutil.copy2(task, orig)
 
 
+def _argv(cmd):
+    """Split a command template into an argument list; nothing goes through a shell."""
+    return shlex.split(cmd)
+
+
 def _run_script(cmd):
-    """Run a script and return stdout lines."""
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    """Run a script (given as a string, split with shlex, no shell) and return stdout."""
+    result = subprocess.run(_argv(cmd), capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Script failed (exit code {result.returncode})", file=sys.stderr)
         if result.stderr:
@@ -904,11 +913,23 @@ def cmd_run_phase(args):
     if phase_type != "script":
         print(f"run-phase: phase {phase} is type '{phase_type}', not 'script'", file=sys.stderr)
         sys.exit(1)
-    cmd = config["command"].format_map(state)
+    if config.get("commands"):
+        # Concurrent commands (SETUP). See the phase config for why exit codes
+        # are logged rather than fatal.
+        print(f"[run-phase] {phase}")
+        procs = [(c, subprocess.Popen(_argv(c.format_map(state)))) for c in config["commands"]]
+        for c, proc in procs:
+            rc = proc.wait()
+            if rc != 0:
+                print(f"[run-phase] {phase}: exit {rc} from: {c}", file=sys.stderr)
+        with open(DISPATCH_MARKER, "w") as f:
+            f.write(phase)
+        return
+    argv = _argv(config["command"].format_map(state))
     if config.get("ids_file"):
         ids = _read_ids(config["ids_file"])
         if ids:
-            cmd += " " + " ".join(ids)
+            argv += ids
         else:
             print(f"[run-phase] {phase}: no IDs, skipping")
             # Write dispatch marker and return — nothing to do
@@ -916,7 +937,7 @@ def cmd_run_phase(args):
                 f.write(phase)
             return
     print(f"[run-phase] {phase}")
-    result = subprocess.run(cmd, shell=True)
+    result = subprocess.run(argv)
     if result.returncode != 0:
         sys.exit(result.returncode)
     # Write dispatch marker — advance checks this for script phases
