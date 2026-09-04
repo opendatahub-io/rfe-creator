@@ -137,6 +137,8 @@ With `initiative-*` compat not required: RTE's "permanent alias families" policy
 
 ## 6. Recommended reconciliation
 
+> **Disposition (2026-09-03, after this comparison):** the maintainer ruled that the implementation is *transparent to production* — no Jira binding, project, issue type, label value, CI prompt or artifact changes in any implementation PR. P5 below (the flip) is therefore retained as target-state analysis only, not an implementation step, and D6 gates only a future decision to schedule it. The authoritative sequencing is `work-item-types-unified.md` §10.
+
 Keep **two documents with a hierarchy**, not a merge into one:
 
 1. **The ADR remains the decision record** for: one intake / many destinations; the RHAISTRAT flip as target state; the DoR-derived initiative rubric (with an explicit disposition for PR #10's rubric before discarding its 33 calibration examples); classification as eventual product behavior. Fold Appendix A's corrections into the body (the body currently loses arguments with its own appendix), and add the §5 errata.
@@ -146,7 +148,7 @@ Keep **two documents with a hierarchy**, not a merge into one:
    - P2 = the rubric track (ADR A.6's placement — before any skill collapse re-baselines eval) with the PR #10 disposition decided.
    - P3 = skill-layer collapse per §3.1's assessment (runtime-generic base; optionally keep `rfe.auto-fix` flat), *excluding create*, eval-gated with the threshold defined (A.5's open point).
    - P4 = RTE PR-3 (detection ladder + self-describing artifacts) — the flip prerequisite.
-   - P5 = the flip (ADR P3), gated on a `submit.py --dry-run` plan showing zero unexpected "Would create" (A.6), plus the §3.2 checklist including the two new blast sites and the assess dispatch change (or the one-scorer collapse, which dissolves it).
+   - P5 = *(unscheduled — target-state analysis only, per the 2026-09-03 ruling)* the flip (ADR P3), gated on a `submit.py --dry-run` plan showing zero unexpected "Would create" (A.6), plus the §3.2 checklist including the two new blast sites and the assess dispatch change (or the one-scorer collapse, which dissolves it).
    - P6 = classification with routing authority, gated on a labeled corpus and accuracy bar (A.5) — signal-only reporting can ship any time after P2 for free.
 4. **Cross-repo:** adopt one type-agnostic scorer (coordinated, both repos, no rename); pin rubric refs; converge PR #10's four detection mechanisms onto the explicit type marker.
 

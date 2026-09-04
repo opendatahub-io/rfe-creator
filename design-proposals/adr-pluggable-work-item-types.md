@@ -75,6 +75,8 @@ Declared once, read through one accessor (`scripts/work_type.py`). No script kee
 
 Both types stated in full, at today's bindings. Phase 3 changes the `jira:` block and nothing else.
 
+> *Superseded:* the identity model below (singular `key_prefix`, `also_reads`) is replaced by the tracker-discriminated `(project, issue_type)` identity with read/write prefix lists, full-match local-id patterns and post-fetch candidate resolution in `work-item-types-unified.md` §3.2/§5 — see Appendix A.1 for why.
+
 ```yaml
 # types/rfe.yaml   (shape, not final field names)
 id: rfe
@@ -146,6 +148,8 @@ A type owns `template.md`, `questions.md`, and *additive* overrides to the share
 
 ### 4.3 Classification as a pipeline step
 
+> *Superseded:* classification is staged in `work-item-types-unified.md` §6 — create-time only at first, then a non-authoritative reported signal; content-based classification of existing issues is not implementable before FETCH because the type binds at pipeline init (comparison §3.3, Appendix A.5), and it never selects directories, prompts or state without an explicit or deterministic type.
+
 At create time the skill classifies from the descriptors' `classify` blocks, states its reasoning, and asks for confirmation interactively; under `--headless` it classifies and records the decision. At intake of an existing issue, auto-fix and review classify from the issue's own content, so a mis-filed request is identified rather than scored against the wrong rubric. Reclassifying re-runs from the template step, not from zero.
 
 The signal already exists. The RFE rubric's `not_a_task` criterion scores 0 for task, chore or tech-debt framing — which under §1.1 is not a failing feature request, it is a well-formed Initiative arriving at the wrong door. Today the pipeline tells the author their RFE is bad when it should be telling them they wrote an Initiative.
@@ -181,7 +185,7 @@ Phase 1 pays for itself alone: it removes the drift class and turns phase 3 from
 
 ## 5. What Initiative supplies
 
-**Destination — RHAISTRAT.** Initiatives belong at the same hierarchy level as Features so everything visible during prioritization sits in one workspace. The binding moves; `also_reads: [RHOAIENG-]` keeps the ~665 existing Initiatives workable in place. No bulk migration. Confirm the RHAISTRAT Initiative issue-type id before phase 3 — 10103 is RHOAIENG's.
+**Destination — RHAISTRAT.** Initiatives belong at the same hierarchy level as Features so everything visible during prioritization sits in one workspace. The binding moves; `also_reads: [RHOAIENG-]` keeps the ~665 existing Initiatives workable in place. No bulk migration. Confirm the RHAISTRAT Initiative issue type before phase 3 — issue types are global in Jira Cloud (Initiative is 10103 in both RHOAIENG and RHAISTRAT, verified live 2026-09-03) and the create path sends the type by *name*, so the real risk is a name or workflow mismatch, not the id (see A.4).
 
 **Template — the full Definition of Ready.** The 26-line template is replaced. An Initiative does not meet DoR without: Overview; Explicit Goal with supporting goals; Non-Goals; Motivation as problem plus hypothesis; Impact across architecture, resources, teams and components; named Stakeholders; Success Criteria across technical, operational and customer; Assumptions and Constraints; and a verifiable Definition of Done. Engineering-driven, time-boxed to 3–6 months, complete when its dependent Epics close.
 
