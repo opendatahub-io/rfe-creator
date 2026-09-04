@@ -17,7 +17,7 @@ Parse `$ARGUMENTS` for:
 - `--batch-size N`: Override batch size (default 5), passed to auto-fix
 - Remaining arguments: either a single Jira key (RHOAIENG-NNNN) or a free-text objective
 
-Clean temp state and persist parsed flags:
+Clean temp state and persist parsed flags. `batch_size` MUST always be a concrete integer — if the user did not pass `--batch-size`, substitute the speedrun default of `5`. Do not write `<N>`, `null`, or omit the field.
 
 ```bash
 python3 scripts/state.py clean

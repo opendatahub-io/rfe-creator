@@ -50,7 +50,7 @@ Sleep for the `NEXT_POLL` seconds reported by the script before polling again. O
 After all fetch agents complete, verify task files exist via Glob. For any missing, write an error to the review file:
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/initiative-reviews/<ID>-review.md initiative_id=<ID> pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true error="fetch_failed: task file not created"
+python3 scripts/frontmatter.py set artifacts/initiative-reviews/<ID>-review.md initiative_id=<ID> score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true scores.what=0 scores.why=0 scores.scope=0 scores.open_to_how=0 scores.right_sized=0 error="fetch_failed: task file not created"
 ```
 
 Remove failed IDs from the processing list and continue with remaining IDs.
@@ -131,7 +131,7 @@ After completion, check prerequisites for each ID via Glob:
 For any missing prerequisite:
 
 ```bash
-python3 scripts/frontmatter.py set artifacts/initiative-reviews/<ID>-review.md initiative_id=<ID> pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true error="<assess_failed or feasibility_failed>: file not created"
+python3 scripts/frontmatter.py set artifacts/initiative-reviews/<ID>-review.md initiative_id=<ID> score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true scores.what=0 scores.why=0 scores.scope=0 scores.open_to_how=0 scores.right_sized=0 error="<assess_failed or feasibility_failed>: file not created"
 ```
 
 Remove failed IDs from the processing list and continue with remaining IDs.

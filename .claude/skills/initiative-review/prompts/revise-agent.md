@@ -34,11 +34,21 @@ Auto-revise initiative {ID} to address review findings.
 
 When reframing, add suggestive language ("such as", "could leverage", "one approach would be") rather than removing the technology reference entirely.
 
-**Do not invent missing evidence.** If Problem Statement is flagged for missing data, do not fabricate evidence — set `needs_attention=true` in Step 4 so the author is notified.
+**Do not invent missing evidence.** If Problem Statement is flagged for missing data, do not fabricate evidence — set `needs_attention=true` in Step 3 so the author is notified.
 
-**Never use HTML comments (`<!-- -->`) in the task file.** HTML comments are invisible when rendered in Jira — authors will never see them. If you need to flag something for the author, set `needs_attention=true` and `needs_attention_reason` in frontmatter (Step 4), which gets posted as a visible Jira comment during submission.
+**Never use HTML comments (`<!-- -->`) in the task file.** HTML comments are invisible when rendered in Jira — authors will never see them. If you need to flag something for the author, set `needs_attention=true` and `needs_attention_reason` in frontmatter (Step 3), which gets posted as a visible Jira comment during submission.
 
-## Step 3: Content Preservation
+## Step 3: Update Frontmatter
+
+**Immediately after editing the task file**, run:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/initiative-reviews/{ID}-review.md auto_revised=true needs_attention=<true/false> needs_attention_reason="<reason or null>"
+```
+
+Set `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide). When true, set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`. This is the most important step — do not skip it, and do not defer it until after Step 4.
+
+## Step 4: Content Preservation
 
 ```bash
 python3 scripts/check_content_preservation.py artifacts/initiative-originals/{ID}.md artifacts/initiatives/{ID}.md --write-yaml
@@ -50,16 +60,6 @@ If the file `artifacts/initiatives/{ID}-removed-context.yaml` exists after this,
 - **`non-substantive`**: Marketing filler or empty template placeholders.
 
 Verify no `type: unclassified` entries remain.
-
-## Step 4: Update Frontmatter
-
-**Immediately after editing the task file**, run:
-
-```bash
-python3 scripts/frontmatter.py set artifacts/initiative-reviews/{ID}-review.md auto_revised=true needs_attention=<true/false> needs_attention_reason="<reason or null>"
-```
-
-Set `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide). When true, set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`. This is the most important step — do not skip it.
 
 ## Step 5: Update Revision History
 
