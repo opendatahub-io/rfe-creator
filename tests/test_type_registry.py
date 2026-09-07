@@ -974,3 +974,22 @@ class TestCli:
         result = _cli("--extra-roots", str(extra), "list")
         assert result.returncode == 1
         assert "duplicate type 'rfe'" in result.stderr
+
+
+class TestDottedIndexParsing:
+    """List-index segments must be ASCII integers; str.isdigit() lookalikes must not raise."""
+
+    def test_non_ascii_or_malformed_index_returns_default(self):
+        reg = type_registry.load(extra_roots=[], env={})
+        desc = reg.get("rfe")
+        for segment in ("\u00b2", "\u0663", "--1", "1.5"):
+            assert desc.get(f"pipeline.dimensions.{segment}.name", default=None) is None
+            with pytest.raises(KeyError):
+                desc.get(f"pipeline.dimensions.{segment}.name")
+
+    def test_ascii_index_still_works(self):
+        desc = type_registry.load(extra_roots=[], env={}).get("rfe")
+        assert desc.get("pipeline.dimensions.0.name") == desc.get("pipeline.dimensions")[0]["name"]
+        assert (
+            desc.get("pipeline.dimensions.-1.name") == desc.get("pipeline.dimensions")[-1]["name"]
+        )

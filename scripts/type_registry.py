@@ -111,6 +111,10 @@ _LOCAL_PREFIX_RE = re.compile(r"^[A-Z][A-Z0-9]{0,31}-$")
 MISSING = object()
 
 
+# ASCII integers only: str.isdigit() also accepts "²" and Arabic-Indic digits that int() rejects.
+_INDEX_RE = re.compile(r"-?[0-9]+")
+
+
 class RegistryError(ValueError):
     """The registry could not be loaded (bad root, unreadable/invalid descriptor, duplicate)."""
 
@@ -192,7 +196,7 @@ class Descriptor:
         for segment in dotted.split("."):
             if isinstance(node, dict) and segment in node:
                 node = node[segment]
-            elif isinstance(node, list) and segment.lstrip("-").isdigit():
+            elif isinstance(node, list) and _INDEX_RE.fullmatch(segment):
                 try:
                     node = node[int(segment)]
                 except IndexError:

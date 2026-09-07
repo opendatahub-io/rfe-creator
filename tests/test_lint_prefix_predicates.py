@@ -523,3 +523,26 @@ class TestCli:
         assert "ERROR scripts/x.py: 4 literal prefix occurrence(s) in code, not in baseline" in (
             result.stdout
         )
+
+
+def test_default_types_root_derives_from_root(tmp_path, capsys):
+    """Without --types-root the lint reads <root>/types, not this checkout's types/."""
+    import shutil
+
+    root = tmp_path / "other-checkout"
+    (root / "scripts").mkdir(parents=True)
+    shutil.copytree(TYPES_ROOT, root / "types")
+    # The other checkout ships a third type whose prefix exists nowhere in ours.
+    widget = root / "types" / "widget"
+    widget.mkdir()
+    text = (root / "types" / "rfe" / "type.yaml").read_text()
+    text = text.replace("type: rfe", "type: widget", 1).replace('"RHAIRFE-"', '"WIDGET-"')
+    (widget / "type.yaml").write_text(text)
+    _write(root, "scripts/uses_widget.py", 'KEY = "WIDGET-1"\n')
+    baseline = _baseline(root, {})
+
+    rc = lint.main(["--root", str(root), "--baseline", str(baseline)])
+
+    out = capsys.readouterr().out
+    assert rc == 1, out
+    assert "WIDGET-" in out and "scripts/uses_widget.py" in out

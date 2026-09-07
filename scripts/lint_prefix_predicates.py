@@ -385,7 +385,15 @@ def main(argv=None) -> int:
     if not (root / SCAN_DIR).is_dir():
         parser.error(f"{root} has no {SCAN_DIR}/ directory")
     baseline_path = Path(args.baseline) if args.baseline else root / DEFAULT_BASELINE
-    types_root = Path(args.types_root).resolve() if args.types_root else None
+    # Prefer <root>/types so linting another checkout uses THAT checkout's
+    # descriptors; a tree without one (scratch fixtures) falls back to the
+    # descriptors next to this tool (CodeRabbit, PR #175).
+    if args.types_root:
+        types_root = Path(args.types_root).resolve()
+    elif (root / "types").is_dir():
+        types_root = (root / "types").resolve()
+    else:
+        types_root = None
 
     registry = _load_registry(types_root)
     prefixes = lint_prefixes(registry)
