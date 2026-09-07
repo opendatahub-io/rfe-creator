@@ -1,7 +1,10 @@
 """Save and restore cumulative review state across re-assessment cycles.
 
-Saves before_scores and revision history to a JSON state file before
-re-review, then restores them after the new review file is written.
+Saves before_scores, the auto_revised flag and revision history to a JSON
+state file before re-review, then restores them after the new review file is
+written. The re-review recreates the review file from scratch, so the flag
+would otherwise fall back to the schema default (false) for every re-reviewed
+item; submit.py derives the auto-revised Jira label from it.
 
 Usage:
     python3 scripts/preserve_review_state.py save <ID> [<ID> ...]
@@ -74,6 +77,8 @@ def save(rfe_id):
     state = {
         "before_score": data.get("before_score"),
         "before_scores": data.get("before_scores"),
+        # Verified by check_revised.py --batch (FIXUP) before this save runs.
+        "auto_revised": bool(data.get("auto_revised", False)),
         "revision_history": extract_revision_history(rpath),
     }
 
@@ -99,12 +104,17 @@ def restore(rfe_id):
         print(f"SKIP={rfe_id} (no review file to restore into)")
         return
 
-    # Restore before_scores via frontmatter
+    # Restore before_scores and the auto_revised flag via frontmatter
     fm_updates = {}
     if state.get("before_score") is not None:
         fm_updates["before_score"] = state["before_score"]
     if state.get("before_scores"):
         fm_updates["before_scores"] = state["before_scores"]
+    # Only ever raise the flag: the fresh review defaults it to false, and a
+    # revision that happened in an earlier cycle stays a revision. A state file
+    # written before this key existed simply leaves the flag alone.
+    if state.get("auto_revised"):
+        fm_updates["auto_revised"] = True
     if fm_updates:
         update_frontmatter(rpath, fm_updates, _schema(rfe_id))
 

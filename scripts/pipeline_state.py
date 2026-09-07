@@ -305,12 +305,20 @@ def _build_phase_config(pipeline_type):
         "REASSESS_FIXUP": {
             "type": "script",
             "command": fixup_cmd,
-            # Deliberately the revise file, not the reassess file: REASSESS_RESTORE
-            # narrows the reassess set through filter_for_revision into
-            # tmp/pipeline-revise-ids.txt, REASSESS_REVISE revises exactly that
-            # subset, and the fixup must check the same subset. Pinned by
+            # The reassess file, not the revise file. REASSESS_REVIEW recreates
+            # every re-reviewed item's review file, which resets auto_revised to
+            # the schema default (false); REASSESS_RESTORE then narrows the
+            # reassess set through filter_for_revision into
+            # tmp/pipeline-revise-ids.txt for REASSESS_REVISE, so an item that
+            # PASSED after its revision is absent from that file. Scanning only
+            # that subset left exactly those items with auto_revised=false (5 of
+            # 5 revised items in the 2026-09-04 initiative eval; most production
+            # RFEs with a moved score since April), and submit.py derives the
+            # auto-revised Jira label from the flag. preserve_review_state.py
+            # restore carries the flag across the re-review as well; this is the
+            # diff-based safety net. Pinned by
             # tests/test_pipeline_state.py::TestReassessFixupIds.
-            "ids_file": "tmp/pipeline-revise-ids.txt",
+            "ids_file": "tmp/pipeline-reassess-ids.txt",
         },
         # --- Collect + Split ---
         "COLLECT": {"type": "noop"},
