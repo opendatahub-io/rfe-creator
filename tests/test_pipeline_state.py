@@ -1542,9 +1542,10 @@ class TestDispatchLoopE2E:
     def test_last_reassess_cycle_empty_revise(self, tmp_dir, monkeypatch):
         """Last reassess cycle writes empty revise IDs; run-phase handles it.
 
-        Cycle 2 hits the guard in REASSESS_RESTORE that writes empty
-        revise IDs. REASSESS_REVISE/REASSESS_FIXUP still run via the
-        dispatch loop but operate on zero IDs.
+        Cycle 2 hits the guard in REASSESS_RESTORE that writes empty revise
+        IDs, so REASSESS_REVISE has nothing to do. REASSESS_FIXUP still rescans
+        the reassess set: the re-review just recreated those review files, and
+        the fixup is what puts auto_revised back (see TestReassessFixupIds).
         """
         ids = ["RHAIRFE-1001"]
 
@@ -1585,15 +1586,10 @@ class TestDispatchLoopE2E:
         # Should see 3 REASSESS_CHECK (enter cycle 1, enter cycle 2, exit)
         assert phases.count("REASSESS_CHECK") == 3
 
-        # After cycle 2's REASSESS_RESTORE, revise IDs should be empty.
-        # run-phase skips the command entirely when IDs file is empty,
-        # so fixup_commands should only contain calls from earlier cycles
-        # where IDs were present. The last cycle's FIXUP is skipped.
-        # Verify we got fixup calls from cycle 1 (with IDs) but the
-        # total count reflects that the empty-ID cycle was skipped.
-        assert len(fixup_commands) >= 1  # at least cycle 1's FIXUP ran
-        # Cycle 1's fixup should have the ID
-        assert "RHAIRFE-1001" in fixup_commands[0]
+        # First-pass FIXUP (revise IDs) plus one REASSESS_FIXUP per reassess
+        # cycle (reassess IDs) - including cycle 2, whose revise IDs are empty.
+        assert len(fixup_commands) == 3
+        assert all("RHAIRFE-1001" in cmd for cmd in fixup_commands)
 
     def test_dispatch_context_hides_ids_file_for_scripts(self, tmp_dir):
         """dispatch-context must not leak ids_file for script phases."""
@@ -2307,21 +2303,31 @@ class TestValidateIds:
 
 
 class TestReassessFixupIds:
-    """REASSESS_FIXUP must check exactly the subset REASSESS_REVISE revised.
+    """REASSESS_FIXUP rescans every re-reviewed item, not only the re-revised subset.
 
-    REASSESS_RESTORE narrows the reassess set through filter_for_revision into
-    tmp/pipeline-revise-ids.txt; REASSESS_REVISE and REASSESS_FIXUP share that
-    file on purpose. Pointing the fixup at tmp/pipeline-reassess-ids.txt would run
-    check_revised over items nobody revised that cycle (PR #146 proposed exactly
-    that as a "copy-paste fix").
+    REASSESS_REVIEW recreates each re-reviewed item's review file, which resets
+    auto_revised to the schema default (false). REASSESS_RESTORE then narrows the
+    reassess set through filter_for_revision into tmp/pipeline-revise-ids.txt for
+    REASSESS_REVISE, so an item that passes after its revision is absent from that
+    file. Pointing the fixup at the revise file left exactly those items with
+    auto_revised=false (5 of 5 revised items in the 2026-09-04 initiative eval;
+    most production RFEs with a moved score since April 2026), and submit.py
+    derives the auto-revised Jira label from the flag. An earlier version of this
+    class pinned the revise file and called PR #146's reassess-file change wrong;
+    the evidence went the other way.
     """
 
     @pytest.mark.parametrize("ptype", ["rfe", "initiative"])
-    def test_fixup_and_revise_share_the_revise_file(self, ptype):
+    def test_fixup_rescans_the_whole_reassess_set(self, ptype):
         cfg = ps._build_phase_config(ptype)
-        assert cfg["REASSESS_REVISE"]["ids_file"] == "tmp/pipeline-revise-ids.txt"
-        assert cfg["REASSESS_FIXUP"]["ids_file"] == cfg["REASSESS_REVISE"]["ids_file"]
+        assert cfg["REASSESS_FIXUP"]["ids_file"] == "tmp/pipeline-reassess-ids.txt"
         assert cfg["REASSESS_RESTORE"]["ids_file"] == "tmp/pipeline-reassess-ids.txt"
+        assert cfg["REASSESS_REVISE"]["ids_file"] == "tmp/pipeline-revise-ids.txt"
+        # The first-pass FIXUP still checks exactly what REVISE revised: nothing
+        # has recreated those review files yet.
+        assert (
+            cfg["FIXUP"]["ids_file"] == cfg["REVISE"]["ids_file"] == "tmp/pipeline-revise-ids.txt"
+        )
 
     def test_reassess_restore_narrows_into_the_revise_file(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-reassess-ids.txt", ["RHAIRFE-1", "RHAIRFE-2", "RHAIRFE-3"])
@@ -2330,6 +2336,23 @@ class TestReassessFixupIds:
         nxt, _ = ps.advance(make_state(phase="REASSESS_RESTORE", reassess_cycle=1))
         assert nxt == "REASSESS_REVISE"
         assert read_ids("tmp/pipeline-revise-ids.txt") == ["RHAIRFE-2"]
+
+    def test_item_that_passed_after_revision_reaches_the_fixup(self, tmp_dir, monkeypatch):
+        """RHAIRFE-1 passed on re-review (not re-revised); check_revised must still see it."""
+        write_ids("tmp/pipeline-reassess-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-2"])
+        ps._save_state(make_state(phase="REASSESS_FIXUP", reassess_cycle=1))
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        ps.cmd_run_phase([])
+        assert len(calls) == 1
+        assert calls[0][:3] == ["python3", "scripts/check_revised.py", "--batch"]
+        assert calls[0][-2:] == ["RHAIRFE-1", "RHAIRFE-2"]
 
 
 # ---------- State values formatted into shell commands ----------
