@@ -126,7 +126,10 @@ def fetch_all_issues(server, user, token, jql):
     Order matches Jira's default (created desc).
     """
     issues = OrderedDict()
-    for issue in _fetch_paginated(server, user, token, jql, "key,description,labels"):
+    # issuetype is requested (work-item-types PR-1) but deliberately not
+    # persisted: an entry stays {content_hash, labels}, so the change
+    # fingerprint (compute_content_hash over description) is unaffected.
+    for issue in _fetch_paginated(server, user, token, jql, "key,description,labels,issuetype"):
         key = issue["key"]
         fields = issue.get("fields", {})
         description = fields.get("description")

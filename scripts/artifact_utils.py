@@ -73,6 +73,16 @@ SCHEMAS = {
             "pattern": r"^RFE-\d+$",
             "default": None,
         },
+        # Self-describing artifact fields (design-proposals/work-item-types-unified.md
+        # §5). `type` names the work item type ("rfe", "initiative"); `tracker_ref`
+        # is the canonical remote reference (e.g. "RHAIRFE-1595") whose grammar the
+        # type's tracker binding owns. tracker_ref is read from frontmatter, never
+        # re-derived from an id prefix. Both are declared WITHOUT a `default` key on
+        # purpose (PR-1 decision Q4): apply_defaults writes only fields that carry
+        # `default`, so existing artifacts stay byte-identical until a writer sets
+        # them (PR-3 writes `type:`). No writer sets them in PR-1.
+        "type": {"type": "string", "required": False},
+        "tracker_ref": {"type": "string", "required": False},
         "title": {
             "type": "string",
             "required": True,
@@ -120,6 +130,9 @@ SCHEMAS = {
             "pattern": r"^RFE-\d+$",
             "default": None,
         },
+        # Self-describing artifact fields; see the rfe-task comment. No default on purpose.
+        "type": {"type": "string", "required": False},
+        "tracker_ref": {"type": "string", "required": False},
         "score": {
             "type": "int",
             "required": True,
@@ -199,6 +212,9 @@ SCHEMAS = {
             "pattern": r"^INIT-\d+$",
             "default": None,
         },
+        # Self-describing artifact fields; see the rfe-task comment. No default on purpose.
+        "type": {"type": "string", "required": False},
+        "tracker_ref": {"type": "string", "required": False},
         "title": {
             "type": "string",
             "required": True,
@@ -237,6 +253,9 @@ SCHEMAS = {
             "pattern": r"^INIT-\d+$",
             "default": None,
         },
+        # Self-describing artifact fields; see the rfe-task comment. No default on purpose.
+        "type": {"type": "string", "required": False},
+        "tracker_ref": {"type": "string", "required": False},
         "score": {
             "type": "int",
             "required": True,
