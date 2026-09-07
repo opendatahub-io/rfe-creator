@@ -41,6 +41,12 @@ jobs:
     - name: Run ruff format check
       run: ruff format --check --diff .
 
+    - name: Validate work item type descriptors
+      run: python3 scripts/validate_types.py
+
+    - name: Lint literal key-prefix predicates
+      run: python3 scripts/lint_prefix_predicates.py
+
     - name: Run shellcheck
       run: find . -name '*.sh' -type f -exec shellcheck {} +
 

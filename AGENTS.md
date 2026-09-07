@@ -132,6 +132,20 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 - **Parent field**: Set to a RHAISTRAT Outcome key to link the Initiative to a strategic outcome
 - **Submission script**: `scripts/submit.py --type initiative`
 
+## Work Item Types
+
+Each work item type (RFE, Initiative) is described by a data-only descriptor at `types/<type>/type.yaml`, validated against `types/_schema/type.schema.json`. `types/README.md` is the field reference and `docs/type-provider-guide.md` the provider guide (adding a type, the gates, the drop-in seam). The registry is inert for now: production scripts still carry their own per-type tables, and tests pin those tables to the descriptors so the two cannot drift. When a per-type value changes, update the descriptor and the table in the same PR.
+
+```bash
+python3 scripts/type_registry.py list              # Registered type names
+python3 scripts/type_registry.py show rfe          # Full descriptor
+python3 scripts/type_registry.py get rfe conventions.labels.rubric_pass
+python3 scripts/validate_types.py                  # Descriptor lint (part of make lint)
+python3 scripts/lint_prefix_predicates.py          # Literal key-prefix predicates in scripts/
+```
+
+Do not add new literal key-prefix predicates (`startswith("RHAIRFE-")`, `RFE-\d+` regexes, snapshot file prefixes) to `scripts/`: `lint_prefix_predicates.py` fails on any file whose count exceeds its baseline in `tests/data/prefix_predicate_baseline.json`, and the baseline only shrinks.
+
 ## Snapshot System
 
 Before modifying `scripts/snapshot_fetch.py`, `scripts/bootstrap_snapshot.py`, or `scripts/submit.py` (snapshot-related code), read `docs/snapshot-incremental-fetch.md` — especially the **Design Invariants** section. Changes must preserve all invariants.

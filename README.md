@@ -153,9 +153,13 @@ The Atlassian MCP server is used for read operations (fetching issues, comments)
 make lint
 ```
 
-This runs [skillsaw](https://github.com/stbenjam/skillsaw), ruff (check + format), shellcheck, and pytest.
+This runs [skillsaw](https://github.com/stbenjam/skillsaw), ruff (check + format), shellcheck, the work item type lints, and pytest. The type lint needs the dev dependencies (`pip install -r requirements-dev.txt`).
 
 You can auto-fix some skillsaw issues with `make skillsaw-fix`.
+
+### Work Item Types
+
+RFE and Initiative are the two registered work item types. Each is described by a data-only descriptor, `types/<type>/type.yaml` (field reference in [types/README.md](types/README.md), provider guide in [docs/type-provider-guide.md](docs/type-provider-guide.md)), which `python3 scripts/validate_types.py` lints and `python3 scripts/type_registry.py` reads. Tests pin the descriptors to the per-type tables the scripts still carry; the scripts move to reading the registry in follow-up PRs.
 
 See [AGENTS.md](AGENTS.md) for architecture details and conventions.
 

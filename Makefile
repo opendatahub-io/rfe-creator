@@ -22,7 +22,7 @@ skillsaw-fix: ## Auto-fix fixable skillsaw issues
 	fi
 
 .PHONY: lint
-lint: ## Run skillsaw, ruff, shellcheck, and pytest
+lint: ## Run skillsaw, ruff, shellcheck, work item type lints, and pytest
 	@$(MAKE) skillsaw
 	@echo "Running ruff syntax checker on Python scripts..."
 	@if command -v ruff >/dev/null 2>&1; then \
@@ -40,6 +40,10 @@ lint: ## Run skillsaw, ruff, shellcheck, and pytest
 		echo "shellcheck not found, skipping shell script linting. Install with: dnf install ShellCheck"; \
 		exit 1; \
 	fi
+	@echo "Validating work item type descriptors..."
+	@python3 scripts/validate_types.py
+	@echo "Checking for new literal key-prefix predicates in scripts/..."
+	@python3 scripts/lint_prefix_predicates.py
 	@$(MAKE) test
 
 .PHONY: test
