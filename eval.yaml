@@ -859,8 +859,10 @@ thresholds:
   # a tagged draft the create step repairs on its own, a tagged draft the
   # first review rejects or splits instead of revising (correct pipeline
   # behaviour, but it never enters the revise path and leaves no evidence),
-  # and any case without a review file each consume one failure. Calibrated
-  # offline only; re-tune after the first 25-case run. A multi-item run with
+  # and any case without a review file each consume one failure. Calibrated on
+  # two live 5-case runs (2026-09-07): drafts weak only by wording were
+  # repaired at create time in 4 of 5; drafts with an in-character "no
+  # customer evidence, do not pad" anchor were revised in 5 of 5. A multi-item run with
   # zero revisions fails every case (0.0) on any dataset. Single-item runs
   # (Harbor tasks, execution.mode: case) skip the run-level check and are
   # decided by the tag alone. Untagged cases otherwise always pass.

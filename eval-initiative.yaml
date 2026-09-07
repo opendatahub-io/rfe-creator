@@ -880,17 +880,18 @@ thresholds:
     min_pass_rate: 1.0
   revision_flag_consistency:
     min_pass_rate: 1.0
-  # revision_coverage: with 25 cases of which 5 are tagged revision-expected,
-  # 3 of 5 revised leaves 2 failures -> 23/25 = 0.92 (pass); 2 of 5 revised
-  # leaves 3 failures -> 22/25 = 0.88 (fail). The 2-failure slack is shared:
-  # a tagged draft the create step repairs on its own, a tagged draft the
-  # first review rejects or splits instead of revising (correct pipeline
-  # behaviour, but it never enters the revise path and leaves no evidence),
-  # and any case without a review file each consume one failure. Calibrated
-  # offline only; re-tune after the first 25-case run. A multi-item run with
-  # zero revisions fails every case (0.0) on any dataset. Single-item runs
-  # (Harbor tasks, execution.mode: case) skip the run-level check and are
-  # decided by the tag alone. Untagged cases otherwise always pass.
+  # revision_coverage: the initiative dataset has 16 cases and no case tagged
+  # revision-expected yet, so a tagged draft can never fail here; the gate
+  # bites only through the run-level rule (a multi-item run with zero
+  # revisions fails every case, 0.0) and through cases without a review
+  # file. At 16 cases 0.92 allows one failing case (15/16 = 0.9375 passes,
+  # 14/16 = 0.875 fails). It passes today on incidental revisions (5 of 16
+  # items revised on 2026-09-04); a model that produces all-clean initiative
+  # drafts fails it by design, and the durable fix is tagged weak-draft
+  # initiative cases (see eval.yaml for the 25-case / 5-tagged arithmetic
+  # this value was calibrated on). Single-item runs (Harbor tasks,
+  # execution.mode: case) skip the run-level check and are decided by the
+  # tag alone. Untagged cases otherwise always pass.
   revision_coverage:
     min_pass_rate: 0.92
   pipeline_flow:

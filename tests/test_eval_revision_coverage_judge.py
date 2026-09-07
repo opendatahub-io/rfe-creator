@@ -98,13 +98,16 @@ def test_both_configs_identical():
 
 
 def test_threshold_arithmetic():
-    # 25 cases, 5 tagged revision-expected: 3 of 5 revised must pass, 2 of 5 must
-    # fail. Guard the float boundary as well as the configured value.
+    # Same value in both configs, different denominators. RFE: 25 cases, 5 tagged
+    # revision-expected, 3 of 5 revised must pass and 2 of 5 must fail.
+    # Initiative: 16 cases, none tagged, one failing case allowed. Guard the float
+    # boundary as well as the configured value.
     for path in (EVAL_YAML, EVAL_INITIATIVE_YAML):
-        threshold = _config(path)["thresholds"][JUDGE]["min_pass_rate"]
-        assert threshold == 0.92
-        assert (25 - 2) / 25 >= threshold  # 3 revised -> 2 failures -> pass
-        assert (25 - 3) / 25 < threshold  # 2 revised -> 3 failures -> fail
+        assert _config(path)["thresholds"][JUDGE]["min_pass_rate"] == 0.92
+    assert (25 - 2) / 25 >= 0.92  # 3 revised -> 2 failures -> pass
+    assert (25 - 3) / 25 < 0.92  # 2 revised -> 3 failures -> fail
+    assert (16 - 1) / 16 >= 0.92  # one failing initiative case -> pass
+    assert (16 - 2) / 16 < 0.92  # two failing initiative cases -> fail
 
 
 # --- Run-level gate: zero revisions anywhere fails every case ----------------
