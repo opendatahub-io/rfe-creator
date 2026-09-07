@@ -1,0 +1,172 @@
+# tests/fixtures/types/epic/type.yaml — R1 PAPER descriptor for epic-creator's real (RHAI, Epic) binding.
+# NOT SHIPPED: it lives outside types/ so the registry never enumerates it (Q18); a test validates it
+# against types/_schema/type.schema.json only — its paths are epic-creator-relative, so validate_types
+# gate 1 (referenced files exist) does not apply to it.
+# Purpose (design R1, §3.7, §10 item 1): the third data point for the reserved vocabulary, written with
+# the reserved keys ONLY. Every value is measured on opendatahub-io/epic-creator (origin/main 5c46fd9;
+# scripts/submit.py, artifact_utils.py and fetch_strategy.py are byte-identical on branch
+# add-epic-decompose-eval @ 22dee66, whose eval/ supplies the eval block; file:line cite that tree).
+# Where the reserved vocabulary cannot express a measured fact the entry says
+# "NOT EXPRESSIBLE AT V1: ..." and carries the least-invented placeholder that still validates.
+# Those comments ARE the R1 finding; nothing here is built (second-requester rule, design §3.4).
+schema_version: 1
+type: epic
+display: { entity: Epic, entity_plural: Epics }
+kind: decomposition                                     # its own 13-phase engine (pipeline_state.py:54-60: BATCH_START, FETCH, DECOMPOSE, REVIEW_DECOMP, REVISE_DECOMP, RE_REVIEW_CHECK, RE_REVIEW, REVISE_CHECK, RE_REVISE, BATCH_DONE, ERROR_COLLECT, REPORT, DONE) — 1:N decompose, set-level review, create-only submit. Recorded; the v1 engine runs work-item only
+
+inputs:                                                 # design §3.7 — the strategy -> epic edge; the gate is the agentic-ci production JQL (gl-epic-decomposer .gitlab-ci.yml:64)
+  - from_type: strategy                                 # strat-creator's (RHAISTRAT, Feature): a PEER pipeline's type, not registered here, so gate labels are literals — the ${types.strategy.labels.rubric_pass} reference form cannot resolve
+    relation: { kind: parent, dependency_link_type: Blocks }   # submit.py:326-337 create_issue(..., parent_key=strat_id) — cross-project parent; :68 DEPENDENCY_LINK_TYPE "Blocks", :395-400 one link per DAG edge among the produced siblings
+    source_ref_field: parent_strat                      # artifact_utils.py:73-77 epic-task.parent_strat ^RHAISTRAT-\d+$ — NOT EXPRESSIBLE AT V1: the base schema fixes the field NAME parent_key; source_ref_field only records the divergence
+    gate:
+      labels_all: [strat-creator-rubric-pass, strat-creator-human-sign-off]   # production JQL; NOT EXPRESSIBLE AT V1: the dry job (.gitlab-ci.yml:103) omits the sign-off label — per-job gate variants have no home
+      any_of:
+        - fields:
+            "Target Version":                           # NOT EXPRESSIBLE AT V1: the custom-field NAME -> ID mapping (strat-creator queries cf[10855]) is adapter work; the descriptor can only carry the display name
+              name_in: [rhoai-3.6, rhoai-3.6.EA1, rhoai-3.6.EA2, "3.6 EA1 RHAII RELEASE", "3.6 EA1 RHOAI RELEASE", "3.6 EA2 RHOAI RELEASE", "3.6 GA RHAII RELEASE", "3.6 GA RHOAI RELEASE"]
+    body_source: { attachment: "{key}-strategy.md", fallback: description }   # R7 attachment convention (strat-creator push_strategy.py:51 / pull_strategy.py:41); strat-task.attachment_source (artifact_utils.py:49-53)
+    # skip_if: NOT EXPRESSIBLE AT V1 — the skip is a REMOTE-CHILDREN check (fetch_strategy.py:150-162 _has_existing_epics: a legacy
+    #   'Incorporates' outward link OR JQL 'parent = KEY AND issuetype = Epic'; CI flag --skip-if-has-epics). The reserved skip_if knows
+    #   labels_any / statuses / single_open_unlabeled_override only, so the block is omitted rather than faked.
+# produces: [] — the epic is a leaf. The matching entry belongs on the STRATEGY descriptor (strat-creator), recorded here for the chain:
+#   produces: [{ type: epic, relation: { kind: parent, dependency_link_type: Blocks }, label_on_input: epic-creator-auto-decomposed }]
+#   (submit.py:65 STRAT_LABEL, applied to the strategy at :410-417 only once every epic exists)
+
+identity:
+  tracker: jira
+  jira:
+    project: RHAI                                       # submit.py:56 TARGET_PROJECT
+    issue_type: Epic                                    # submit.py:57 TARGET_ISSUE_TYPE
+    key_prefixes: ["RHAI-"]
+    state_map: {}                                       # no transition or resolution call anywhere in submit.py — the kind neither approves nor closes
+    # split_link_type: absent — the kind never splits. NOT EXPRESSIBLE AT V1: the sibling-dependency link type "Blocks" (submit.py:68)
+    #   has no reserved home under identity.jira (split_link_type is parent/child); it is recorded on inputs[].relation.dependency_link_type.
+    # NOT EXPRESSIBLE AT V1 (beyond the v1 seam, design §3.6 "reserved" adapter ops): components on create, validated against
+    #   .context/rhai-components.txt (submit.py:74-75); assignee_id (:337); per-epic attachments f"{jira_key}-frontmatter.yaml" (:544)
+    #   and f"{jira_key}-branch-{branch.lower()}-plan.md" (:494) via add_attachment (:521).
+  local_prefix: "RHAISTRAT-"                            # NOT EXPRESSIBLE AT V1: local ids are COMPOSITE ('{ID}-E001', decompose-agent.md:20), so the write prefix is per-parent, not a constant. The placeholder is the constant every local id starts with; detect() must rely on local_id_pattern (full-match, most specific wins — design §3.2), never on this prefix. A REGISTERED epic type would also trip §3.2.1(b) wherever RHAISTRAT is an effective project key
+  local_id_pattern: '^RHAISTRAT-\d+(-BRANCH-[A-Z])?-E\d{3}$'   # decompose-agent.md:20 '{ID}-E001'; review-agent.md:19,:59 conditional branches '{ID}-BRANCH-<letter>-E*'. epic-task.epic_id itself carries NO pattern (artifact_utils.py:65-68). Matches RHAISTRAT-1234-E001 and must match no shipped type's pattern (PR1-16 corpus)
+  id_field: epic_id                                     # artifact_utils.py:65
+  # jira_key (artifact_utils.py:156-161, ^[A-Z][A-Z0-9_]*-\d+$) is persisted at create time as the durable local marker (submit.py:345-351):
+  #   create-only resume, the design §3.6 invariant-1 carve-out. The base schema's tracker_ref is its analog.
+
+dirs:
+  tasks: artifacts/epic-tasks                           # CLAUDE.md:14; pipeline_state.py:239
+  originals: artifacts/strat-tasks                      # NOT EXPRESSIBLE AT V1: the kind is create-only and has no fetched baseline of ITS OWN items; artifacts/strat-tasks (CLAUDE.md:11) holds the INPUT type's fetched items and there is no dirs.inputs home — placeholder
+  reviews: artifacts/epic-reviews                       # CLAUDE.md:19; pipeline_state.py:274
+index: { enabled: false }
+companions:
+  comments: false
+  removed_context: false
+  extra_suffixes: ["-decomposition", "-decomp-review"]  # CLAUDE.md:17,:20 — NOT EXPRESSIBLE AT V1: both files are keyed by the INPUT id (RHAISTRAT-1234-decomposition.md), not by an epic_id; extra_suffixes assumes this type's id
+
+conventions:
+  type_label: Epic
+  label_prefix: epic-creator                            # submit.py:218 "all prefixed with epic-creator-"
+  labels:                                               # only the labels the kind emits (submit.py:218-230); no auto-fix loop, snapshot or split, so rubric_pass / ignore / split_* / needs_attention are absent
+    auto_created: epic-creator-auto-created             # submit.py:219 (always)
+    investigation: epic-creator-investigation           # submit.py:220-221 when type == Investigation — a type-specific key (the labels map is OPEN)
+    needs_component: epic-creator-needs-component       # submit.py:229-230
+    templates:                                          # value-templated labels, reserved shape {from_field, pattern}
+      - { from_field: implementation_type, pattern: "epic-creator-impl-{value}" }        # submit.py:222-224; values docs-authoring|konflux-onboarding|license-validation|repo-onboarding (artifact_utils.py:91-97)
+      - { from_field: ai_implementability, pattern: "epic-creator-ai-impl-{value}" }     # submit.py:225-228 — NOT EXPRESSIBLE AT V1: the code LOWER-CASES the value (High -> epic-creator-ai-impl-high); {from_field, pattern} has no transform, so this template renders the wrong label as written
+  comment_prefix: ""                                    # NOT EXPRESSIBLE AT V1: the kind writes no tracker comments (no add_comment call in submit.py); the field is required, "" is the placeholder
+  removed_context_preamble: ""                          # NOT EXPRESSIBLE AT V1: no removed-context flow in this kind; required field, "" is the placeholder
+  parent_key_patterns: ['RHAISTRAT-\d+']                # artifact_utils.py:73-77 parent_strat (cross-project parent: the RHAISTRAT Feature)
+
+schema:
+  task:
+    priority:                                           # the reserved task-side vocabulary with a REAL map — the reason schema.task.priority exists
+      enum: [P0, P1, P2]                                # artifact_utils.py:98-102 (required)
+      map_to_tracker: { P0: Critical, P1: Major, P2: Minor }   # submit.py:59-63 PRIORITY_MAP — NOT EXPRESSIBLE AT V1: the fallback "Major" for an unmapped value (:205)
+    extra_fields:                                       # artifact_utils.py:65-190 beyond the shared base; exercises nested dict specs and int enums (design §3.2 task.extra_fields)
+      component: { type: string, required: true }       # NOT EXPRESSIBLE AT V1: validated against .context/rhai-components.txt at submit (submit.py:74-75) — a vocabulary source, not a spec
+      team: { type: string, required: true }
+      type: { type: string, required: true, enum: [Implementation, Investigation] }   # artifact_utils.py:86-90 — NOT EXPRESSIBLE AT V1: the name collides with the base-schema `type` (work-item type) field PR-1 adds (Q4)
+      implementation_type: { type: string, required: false, enum: [docs-authoring, konflux-onboarding, license-validation, repo-onboarding], default: null }   # :91-97
+      dependencies: { type: list, required: false, default: [] }   # :103-107 the DAG edges (sibling epic_ids)
+      ai_signals:                                       # :108-122 Implementation signals (compute_ai_scores.py sums them)
+        type: dict
+        required: false
+        default: null
+        fields:
+          change_specificity: { type: int, required: false, default: 0 }
+          pattern_precedent: { type: int, required: false, default: 0 }
+          adapter_pattern: { type: int, required: false, default: 0 }
+          existing_foundation: { type: int, required: false, default: 0 }
+          open_questions: { type: int, required: false, default: 0 }
+          external_dependency: { type: int, required: false, default: 0 }
+          human_process_gates: { type: int, required: false, default: 0 }
+          repo_access: { type: int, required: false, default: 0 }
+          architecture_claims: { type: int, required: false, default: 0 }
+      investigation_signals:                            # :129-144 Investigation signals (int enums)
+        type: dict
+        required: false
+        default: null
+        fields:
+          question_specificity: { type: int, required: false, default: 0, enum: [-1, 0, 1] }
+          source_accessibility: { type: int, required: false, default: 0, enum: [0, 1] }
+          local_runnability: { type: int, required: false, default: 0, enum: [0, 1] }
+          cluster_hardware_dependence: { type: int, required: false, default: 0, enum: [-2, -1, 0] }
+          human_judgment_required: { type: int, required: false, default: 0, enum: [-2, -1, 0] }
+      ai_implementability: { type: string, required: false, enum: [High, Medium, Low], default: null }   # :145-150
+      ai_implementability_score: { type: int, required: false, default: null }   # :151-155
+      jira_key: { type: string, required: false, pattern: '^[A-Z][A-Z0-9_]*-\d+$', default: null }   # :156-161 the durable create marker (see identity)
+      branch: { type: string, required: false, default: null }   # :162-166 conditional-branch letter
+      gated_by: { type: string, required: false, default: null }   # :167-171 the Investigation epic_id that selects the branch
+      gate_failure_impact:                              # :172-189
+        type: dict
+        required: false
+        default: null
+        fields:
+          action: { type: string, required: false, enum: [rewrite, remove, add_remediation], default: null }
+          fallback_approach: { type: string, required: false, default: null }
+  review:
+    score_fields: [score]                               # NOT EXPRESSIBLE AT V1: decomp-review (artifact_utils.py:246-274) is a SET-level review with ONE integer total `score` plus pass / recommendation accept|revise / issues[] / error — no per-criterion fields. score_fields requires >= 1 criterion, so the total stands in; the generated error stub (scores.score: 0) would not match this review schema, and recommendation accept|revise is outside the base enum
+    extra_fields:
+      issues: { type: list, required: false, default: [] }   # :262-266
+    extra_rules: []
+
+pipeline:
+  stages: [decompose, review, submit]                   # NOT EXPRESSIBLE AT V1 (recorded, design §3.7): `decompose` is not a registered generic skill; the real surface is ONE skill, skills/epic-decompose, driving fetch -> decompose -> review -> revise -> re-review -> submit
+  context_sources:                                      # skills/epic-decompose/SKILL.md:50-51; retried once, then "bootstrap failed." (:54) — i.e. required
+    - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: true }
+    - { name: rhai-components, bootstrap: scripts/fetch_components.py, required: true }   # produces .context/rhai-components.txt (submit.py:74-75)
+  poll_prefix: ""                                       # poll phases are unprefixed: fetch, decompose, review_decomp, revise_decomp (pipeline_state.py:71,:78,:85,:92). A REGISTERED epic type would have to rename them "epic-*": the §3.3 lint grandfathers "" for rfe only
+  state_prefix: ""                                      # tmp/pipeline-active-ids.txt, tmp/pipeline-revise-ids.txt (pipeline_state.py:70,:98) — same remark
+  scorer_agent: general-purpose                         # NOT EXPRESSIBLE AT V1: the kind has no ASSESS phase and names no subagent (PHASE_CONFIG sets no subagent_type; :575/:587 only forward one when present); the value is the Agent tool's implicit default, required field
+  prompts:                                              # the kind's agent prompts mapped onto the closest reserved names; paths are epic-creator-relative
+    create_guidance: skills/epic-decompose/prompts/decompose-agent.md   # pipeline_state.py:75 DECOMPOSE
+    review_rules: skills/epic-decompose/prompts/review-agent.md         # :82 REVIEW_DECOMP, :97 RE_REVIEW
+    revise_rules: skills/epic-decompose/prompts/revise-agent.md         # :89 REVISE_DECOMP, :105 RE_REVISE
+    # fetch-agent.md (:68) has no reserved name; split_rules: the kind never splits
+  dimensions: []                                        # NOT EXPRESSIBLE AT V1: the one extra signal is SCRIPT-side and deterministic (scripts/compute_ai_scores.py -> ai_implementability), not a prompt; a dimensions[] item requires a prompt file
+  rubric:                                               # D3 alternative: the rubric is embedded in the review prompt — there is no assess-* repo for epics
+    repo: self
+    path: skills/epic-decompose/prompts/review-agent.md
+    rubric_version: "1c2be0522738"                      # sha256(path)[:12] at 22dee66 (== origin/main): the content hash design §3.2 asks for when repo is self
+  # resplit: absent — the kind has no right_sized score and never splits
+
+# batch: absent — the input is a list of strategy keys, not batch prompts
+snapshot: { mode: none, processed_gate: remote_children }   # no snapshot; "already processed" = remote children exist (fetch_strategy.py:150-162). NOT EXPRESSIBLE AT V1: run reports go to artifacts/decompose-runs/<ts>.yaml (generate_run_report.py:72-74) — a DIRECTORY, which report_prefix cannot express
+reporting:
+  item_key: results                                     # NOT EXPRESSIBLE AT V1: the run report holds a LIST `results: [{strat_id, status, epic_count, score}]` keyed by the INPUT id (generate_run_report.py:35-58), not a per-item map under one key
+  criterion_labels: { score: Score }                    # placeholder tied to the score_fields placeholder above
+  before_score_name_map: {}                             # no before_scores in decomp-review
+eval:                                                   # eval/epic-decompose.yaml @ 22dee66 (execution.mode case, skill epic-decompose). The checklist's "no eval dataset (provider-floor waiver)" predates this branch, which adds a 30-case, two-tier anonymized dataset
+  config: eval/epic-decompose.yaml
+  dataset: eval/cases                                   # dataset.path "cases" is config-dir-relative (:65-70)
+  mlflow_experiment: epic-decompose-eval                # :63
+  timeout: 14400                                        # :17
+  thresholds:                                           # :2127-2153 verbatim
+    budget_check: { min_pass_rate: 1.0 }
+    artifact_contract: { min_pass_rate: 1.0 }
+    dag_valid: { min_pass_rate: 1.0 }
+    implementation_type_rules: { min_pass_rate: 1.0 }
+    dispatcher_turn_discipline: { min_pass_rate: 1.0 }
+    review_discipline: { min_pass_rate: 1.0 }
+    component_vocabulary: { min_pass_rate: 1.0 }
+    triage_expectation: { min_pass_rate: 1.0 }
+    decomposition_quality: { min_mean: 3.5 }
+    pipeline_protocol: { min_pass_rate: 1.0 }
+  annotations_extra: [tier, expected_triage, valid_components]   # annotations.yaml keys the judges read (:79, :1238, :2143)

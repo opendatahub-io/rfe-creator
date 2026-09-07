@@ -1,0 +1,105 @@
+# tests/fixtures/types/strategy-inputs.yaml — the reserved `inputs:` block (design §3.7) expressing
+# strat-creator's REAL rfe -> strategy intake gate. PR1-15 / R1: "the reserved inputs: block is
+# validated against strat-creator's config/pipeline-settings.yaml during PR-1".
+#
+# This is DATA under tests/fixtures/, not a registered type: it is the entry a `types/strategy/`
+# descriptor WOULD carry if strat-creator were a type of this pipeline (it is not — design §3.7, D9:
+# a peer pipeline of a different kind). tests/test_validate_types.py::TestStratInputs validates
+# `inputs` against types/_schema/type.schema.json ($defs/input) and runs gate 1 over a drop-in that
+# carries it. rfe-creator ships NO gate evaluator; every value below is descriptive.
+#
+# Source: strat-creator@e6b5bf0 config/pipeline-settings.yaml (line numbers in the comments), plus
+# CLAUDE.md:86 (Cloners semantics) and scripts/find_strat_for_rfe.py:44 (both link directions are
+# searched). The `strat_creator:` block repeats the source values verbatim so the test can compare
+# the projection against them; `not_expressible_at_v1` is the recorded-gaps list (R1: recorded, not
+# built).
+
+inputs:
+  - from_type: rfe                                       # the upstream type: this repo's rfe (RHAIRFE)
+    relation:
+      kind: clones                                      # a STRAT is a Jira clone of the RFE (strat-creator README.md:66, :136)
+      link_type: Cloners                                # CLAUDE.md:86 "Clone link type: Cloners (outward: clones, inward: is cloned by)"
+      direction: derived_is_inward                      # design §3.7 value; the consumer searches both directions (find_strat_for_rfe.py:44)
+    source_ref_field: source_rfe                        # strat-task frontmatter field (strat-creator tests/test_artifact_utils.py:30-142)
+    gate:
+      labels_any:                                       # quality_labels :35-37 "at least one required"
+        - "${types.rfe.labels.rubric_pass}"             # rfe-creator-autofix-rubric-pass BY REFERENCE (R7 published contract), not the literal
+        - tech-reviewed
+      labels_all: []
+      statuses_not: [Closed, Resolved, Draft]           # excluded_statuses :40-43
+      any_of:                                           # required_labels OR target_versions "via cf[10855]" :7
+        - labels_any: [strat-creator-3.5, strat-creator-3.6]   # required_labels :4-6
+        - fields:
+            customfield_10855:                          # Target Version picker; the consumer's JQL is `cf[10855] in (...)` (tests/test_jql_builder.py:213)
+              name_in:                                  # target_versions :7-34 (24 values)
+                - rhoai-3.5
+                - rhoai-3.5.EA1
+                - rhoai-3.5.EA2
+                - rhoai-3.6
+                - rhoai-3.6.EA1
+                - rhoai-3.6.EA2
+                - "3.5 EA1 RHAII RELEASE"
+                - "3.5 EA1 RHOAI RELEASE"
+                - "3.5 EA1 RHELAI RELEASE"
+                - "3.5 EA2 RHAII RELEASE"
+                - "3.5 EA2 RHOAI RELEASE"
+                - "3.5 EA2 RHELAI RELEASE"
+                - "3.5 GA RHAII RELEASE"
+                - "3.5 GA RHOAI RELEASE"
+                - "3.5 GA RHELAI RELEASE"
+                - "3.6 EA1 RHAII RELEASE"
+                - "3.6 EA1 RHOAI RELEASE"
+                - "3.6 EA1 RHELAI RELEASE"
+                - "3.6 EA2 RHAII RELEASE"
+                - "3.6 EA2 RHOAI RELEASE"
+                - "3.6 EA2 RHELAI RELEASE"
+                - "3.6 GA RHAII RELEASE"
+                - "3.6 GA RHOAI RELEASE"
+                - "3.6 GA RHELAI RELEASE"
+    body_source: { attachment: "{key}-strategy.md", fallback: description }   # R7 attachment convention (design §3.4/§3.7; push_strategy/pull_strategy)
+    copy_fields: [summary, description, priority, labels, components, affects_versions, target_versions, parent]   # design §3.7; clone_issue.py:106-135 carries versions
+    skip_if:                                            # "already processed" — checked on the DERIVED (RHAISTRAT) side
+      labels_any: [strat-creator-rubric-pass, strat-creator-needs-attention, strat-creator-processing]   # skip_labels :49-52
+      statuses: [In Progress, Review, Release Pending, Closed, Resolved]   # excluded_strat_statuses :56-61
+      single_open_unlabeled_override: true              # design §3.7 (strategy-create/SKILL.md:62-93 re-processing rule)
+
+# Verbatim source values (config/pipeline-settings.yaml@e6b5bf0) for the projection test only.
+strat_creator:
+  quality_labels: [rfe-creator-autofix-rubric-pass, tech-reviewed]          # :35-37
+  excluded_labels: [strat-creator-processing]                              # :38-39 (NO HOME, see below)
+  excluded_statuses: [Closed, Resolved, Draft]                             # :40-43
+  required_labels: [strat-creator-3.5, strat-creator-3.6]                  # :4-6
+  target_versions:                                                         # :7-34
+    - rhoai-3.5
+    - rhoai-3.5.EA1
+    - rhoai-3.5.EA2
+    - rhoai-3.6
+    - rhoai-3.6.EA1
+    - rhoai-3.6.EA2
+    - "3.5 EA1 RHAII RELEASE"
+    - "3.5 EA1 RHOAI RELEASE"
+    - "3.5 EA1 RHELAI RELEASE"
+    - "3.5 EA2 RHAII RELEASE"
+    - "3.5 EA2 RHOAI RELEASE"
+    - "3.5 EA2 RHELAI RELEASE"
+    - "3.5 GA RHAII RELEASE"
+    - "3.5 GA RHOAI RELEASE"
+    - "3.5 GA RHELAI RELEASE"
+    - "3.6 EA1 RHAII RELEASE"
+    - "3.6 EA1 RHOAI RELEASE"
+    - "3.6 EA1 RHELAI RELEASE"
+    - "3.6 EA2 RHAII RELEASE"
+    - "3.6 EA2 RHOAI RELEASE"
+    - "3.6 EA2 RHELAI RELEASE"
+    - "3.6 GA RHAII RELEASE"
+    - "3.6 GA RHOAI RELEASE"
+    - "3.6 GA RHELAI RELEASE"
+  skip_labels: [strat-creator-rubric-pass, strat-creator-needs-attention, strat-creator-processing]   # :49-52
+  excluded_strat_statuses: [In Progress, Review, Release Pending, Closed, Resolved]                  # :56-61
+
+# R1 recorded gaps — facts the reserved vocabulary has NO home for (recorded, not built; the second
+# requester promotes them):
+not_expressible_at_v1:
+  - "excluded_labels [strat-creator-processing] (:38-39) is an RFE-level LOCK on the INPUT side: gate has labels_any/labels_all/statuses_not but no labels_not; skip_if.labels_any is evaluated on the DERIVED side only, so the lock label is dropped from the block above."
+  - "customfield_10855 is the Jira field ID of the 'Target Version' picker; the display-name -> field-id mapping (and the `cf[10855] in (...)` JQL rendering) is tracker-adapter work — the block can carry either spelling but cannot state their equivalence."
+  - "order_by 'key ASC' (:44) and batch_size 10 (:46) are consumer scheduling settings, not intake-gate vocabulary."
