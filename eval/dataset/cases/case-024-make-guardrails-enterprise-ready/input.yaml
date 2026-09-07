@@ -1,0 +1,24 @@
+priority: Major
+prompt: Our guardrails story does not feel enterprise-ready. After sitting through the TrustyAI
+  guardrails demo last week my impression is that it reads as a demo rather than something an operations
+  team would put in front of live traffic. We need a production-readiness push that makes guardrails
+  production-grade, more observable, and seamless for operations teams. We do not yet know what the
+  concrete deliverables are.
+clarifying_context: 'This is my own impression coming out of an internal demo, not customer feedback.
+  No customer, prospect or partner has said this to us; there are no pilots stalling on it that I can
+  point to, no account names, no field escalation, and I have not asked the field. I would rather the
+  RFE says that plainly than pad the customer and business sections with generic regulated-industry
+  segments or a competitive angle we have not researched. Treat the customer side as unknown.
+
+  What I mean by not enterprise-ready is hard to pin down, which is part of why I am filing it: the
+  demo felt fragile in ways I could not name precisely. Words that came to mind were "more
+  observable", "less noisy", "simpler to run", but I could not turn any of them into a specific
+  missing capability or behaviour, and several detectors, metrics and dashboard panels already exist.
+
+  Scope: guardrails only, meaning the Guardrails Orchestrator and its detectors as an operations team
+  experiences them. Treat it as a hardening and readiness exercise across the orchestrator and its
+  detectors, not a new capability; one RFE, not several. Not general model serving observability, not
+  evaluation.
+
+  Success criteria: the demo no longer feels pilot-grade. I have no measurable outcome to attach and
+  no acceptance test in mind; I cannot describe done any more precisely than that today.'
