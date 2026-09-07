@@ -21,6 +21,11 @@ lookups. This guard is the first line — it makes the drift a test failure inst
 Equality asserts between the two constant dicts would not catch this — the path pair is a separate
 pair, and for type rfe both prefixes are "" so an rfe-only check is structurally blind to prefix
 drift. These tests round-trip a real report through the real CLI instead.
+
+The fixtures are projections of types/<type>/type.yaml (PR1-10): dirs (bare form), the tracker
+write prefix, the id field and the score fields come from the descriptor, so a third type gets a
+round trip the day its descriptor lands — and the writer/reader pair is checked against the
+descriptor's snapshot.report_prefix / reporting.item_key, not just against each other.
 """
 
 import os
@@ -32,44 +37,41 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import bootstrap_snapshot
+import type_registry
 from generate_run_report import TYPE_CONFIG
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_run_report.py")
 RUN = "20260818-120000"
 
-FIXTURES = {
-    "rfe": {
-        "tasks_dir": "rfe-tasks",
-        "reviews_dir": "rfe-reviews",
-        "ids": ["RHAIRFE-1234", "RHAIRFE-5678"],
+# Hermetic: the developer's RFE_CREATOR_EXTRA_TYPES / RFE_CREATOR_BINDING_* never leak in.
+REGISTRY = type_registry.load(extra_roots=[], env={})
+
+
+def _fixture(desc):
+    """Round-trip inputs derived from one descriptor (the shape the pipeline writes)."""
+    dirs = desc.dirs("bare")
+    fields = desc.score_fields
+    scores = "".join(
+        f"  {name}: {2 if i < len(fields) - 1 else 1}\n" for i, name in enumerate(fields)
+    )  # 2,2,...,1 sums to the declared total of 9 for a five-criterion rubric
+    return {
+        "tasks_dir": dirs["tasks"],
+        "reviews_dir": dirs["reviews"],
+        "ids": [f"{desc.write_prefix}1234", f"{desc.write_prefix}5678"],
         "task": (
-            "---\nrfe_id: {id}\ntitle: Test\npriority: Major\nstatus: Ready\n---\n\n"
-            "## Problem\nx.\n"
+            f"---\n{desc.id_field}: {{id}}\ntitle: Test\npriority: Major\nstatus: Ready\n---\n\n"
+            "## Summary\nx.\n"
         ),
         "review": (
-            "---\nrfe_id: {id}\nscore: 9\npass: true\nrecommendation: submit\n"
+            f"---\n{desc.id_field}: {{id}}\nscore: 9\npass: true\nrecommendation: submit\n"
             "feasibility: feasible\nauto_revised: false\nneeds_attention: false\n"
-            "scores:\n  what: 2\n  why: 2\n  open_to_how: 2\n  not_a_task: 2\n  right_sized: 1\n"
+            f"scores:\n{scores}"
             "---\n\n## Feedback\nok.\n"
         ),
-    },
-    "initiative": {
-        "tasks_dir": "initiatives",
-        "reviews_dir": "initiative-reviews",
-        "ids": ["RHOAIENG-1234", "RHOAIENG-5678"],
-        "task": (
-            "---\ninitiative_id: {id}\ntitle: Test\npriority: Major\nstatus: Ready\n---\n\n"
-            "## Objective\nx.\n"
-        ),
-        "review": (
-            "---\ninitiative_id: {id}\nscore: 9\npass: true\nrecommendation: submit\n"
-            "feasibility: feasible\nauto_revised: false\nneeds_attention: false\n"
-            "alignment: strong\n"
-            "scores:\n  what: 2\n  why: 2\n  scope: 2\n  open_to_how: 2\n  right_sized: 1\n"
-            "---\n\n## Feedback\nok.\n"
-        ),
-    },
-}
+    }
+
+
+FIXTURES = {desc.name: _fixture(desc) for desc in REGISTRY}
 
 
 def _write(path, content):
@@ -123,6 +125,20 @@ class TestWriterReaderAgree:
     def test_config_key_sets_match(self):
         """A type added to one side only would silently take the include-all fallback."""
         assert set(TYPE_CONFIG) == set(bootstrap_snapshot.BOOTSTRAP_CONFIG)
+        assert set(FIXTURES) == set(TYPE_CONFIG)  # the registry drives the round trip
+
+    @pytest.mark.parametrize("work_type", sorted(FIXTURES))
+    def test_prefix_and_key_pair_are_the_descriptor_projection(self, work_type):
+        """Both sides must agree with the descriptor, not merely with each other."""
+        desc = REGISTRY.get(work_type)
+        assert TYPE_CONFIG[work_type]["output_prefix"] == desc.get("snapshot.report_prefix")
+        assert bootstrap_snapshot.BOOTSTRAP_CONFIG[work_type]["report_prefix"] == desc.get(
+            "snapshot.report_prefix"
+        )
+        assert TYPE_CONFIG[work_type]["item_key"] == desc.get("reporting.item_key")
+        assert bootstrap_snapshot.BOOTSTRAP_CONFIG[work_type]["item_key"] == desc.get(
+            "reporting.item_key"
+        )
 
     @pytest.mark.parametrize("work_type", sorted(FIXTURES))
     def test_reader_finds_what_the_writer_wrote(self, tmp_path, work_type):
