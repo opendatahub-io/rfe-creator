@@ -1,0 +1,27 @@
+priority: Major
+prompt: We need the llm-d inference scheduler on OpenShift AI to pin every turn of a multi-turn
+  conversation to the same vLLM replica using a Redis Cluster-backed session table, exactly as
+  designed in our field team's prototype (docs.example.com/d/llm-d-sticky-sessions). Rewrite the
+  endpoint picker to look up an x-conversation-id header in Redis, fall back to a consistent-hash
+  ring over the conversation ID on a miss, and expose --session-affinity=strict|prefer|off plus a
+  sessionTtlSeconds field on LLMInferenceService. Please point engineering at that document as the
+  spec rather than describing the outcome generically.
+clarifying_context: 'Where this comes from: two of us on the field engineering team built the
+  sticky-session prototype on our own lab cluster over a couple of quiet weeks, because later turns
+  of a long conversation kept landing on a replica without the cached KV prefix and the tail latency
+  bothered us. To be upfront, no customer has asked for this and we have not shown it to one; there
+  is nothing in the field-request tracker, no support case, and no deal or renewal attached to it.
+  Please keep the customer and business sections of the RFE honest about that rather than padding
+  them with generic segments or industries we have not actually talked to.
+
+  Scope: productize the design in docs.example.com/d/llm-d-sticky-sessions as written. The Redis
+  Cluster session table and the consistent-hash fallback are fixed scope, not options for engineering
+  to evaluate; the design is signed off internally and we are not re-opening routing. The endpoint
+  picker change lives in the llm-d-inference-scheduler repo, keyed on the x-conversation-id header;
+  the KServe controller deploys Redis in the scheduler''s namespace. No prefix-cache scorer changes,
+  no KV offload tiers.
+
+  Success criteria: an operator can read the conversation-to-replica mapping out of the Redis Cluster
+  deployed alongside the scheduler; on a miss or during scale-in the scheduler logs show the request
+  going to the consistent-hash ring; strict mode is the default; the shipped implementation matches
+  the design document section by section, and that conformance is the acceptance bar.'

@@ -1,0 +1,27 @@
+priority: Normal
+prompt: Filing this on behalf of the Data Science Pipelines QE team; this is an internal test-infrastructure
+  ask, not a customer request. Every time a run fails in the nightly interop or upgrade suite, whoever is
+  on triage spends most of the time hunting for driver and executor pod logs, the Argo workflow status and
+  the compiled pipeline spec across two namespaces, and half the time the pods are already gone. We want
+  the pipelines API server to produce one downloadable diagnostics bundle per run, behind an internal
+  feature flag that is off by default and undocumented in this first iteration, so QE can attach it to a
+  bug instead of screenshots.
+clarifying_context: 'The pain is triage time in our nightly interop and upgrade suites: for each failed
+  run someone has to collect the Argo Workflow status, driver and executor pod logs, API server and
+  persistence agent logs, and the compiled pipeline spec by hand from the pipeline namespace and the
+  operator namespace. Pods are often garbage-collected before anyone looks, so a good share of nightly
+  failures get closed as cannot-reproduce.
+
+  What we think we want: a per-run diagnostics tarball. We imagine the persistence agent capturing pod
+  logs at run completion and stashing them next to the run''s artifacts in the object store, with a
+  hidden API server endpoint to fetch the archive. Behind a feature flag, off by default and
+  undocumented in this first iteration.
+
+  On the RFE paperwork: there are no affected customers and no business justification beyond our own
+  triage time. No customer, partner or support case has asked for anything like this; we checked the
+  field-request tracker and it is empty. Please do not list QE, SRE or support as affected customers
+  or dress this up as a customer need; we are the only people who want it right now and the RFE
+  should say so honestly, even if that leaves those sections nearly empty.
+
+  Success for us is a QE engineer attaching a complete bundle to a Jira within a couple of minutes of
+  a failure, without needing cluster access.'

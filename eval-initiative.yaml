@@ -52,7 +52,9 @@ dataset:
       - expected_feasibility (nullable string)
       - expected_alignment (nullable string: strong/partial/weak/not_assessed)
       - known_issues (list)
-      - tags (list)
+      - tags (list): free-form labels; `revision-expected` marks a
+        deliberately weak draft that the revision_coverage judge requires
+        the pipeline to auto-revise (see eval/README.md)
       - difficulty (nullable string)
 
 inputs:
@@ -414,6 +416,197 @@ judges:
           len(errors) == 0,
           "; ".join(errors[:5]) if errors else f"{checked} reviews: auto_revised matches evidence",
       )
+  - name: revision_coverage
+    description: |
+      Verify the run exercised the revise/reassess path. When every draft passes
+      first review, revision_quality scores "the decision not to revise" 4-5 and
+      revision_flag_consistency passes vacuously, so nothing fails when revision
+      coverage is zero. A case tagged `revision-expected` (a deliberately weak
+      draft) passes only with evidence its item was revised; untagged cases
+      pass, but in a multi-item run every case fails when neither it nor the
+      shared run report shows a single revised item, so untagged-but-revised
+      items still count towards run coverage. A single-item run (Harbor task,
+      execution.mode: case) is decided by the tag alone. Reads only shared
+      artifacts, so the identical check runs on both pipelines.
+    check: |
+      import os
+      import re
+
+      import yaml
+
+      TAG = "revision-expected"
+      # What a template leaves under "## Revision History" when nothing happened.
+      EMPTY_HISTORY = {"", "none", "n/a", "no revisions", "no revision"}
+
+      files = outputs.get("files", {})
+      # _modified/ mirrors in-place edits of the same paths; skip them so the
+      # basename indexes below cannot be overwritten by a duplicate.
+      files = {k: v for k, v in files.items() if not k.startswith("_modified/")}
+      reviews = {k: v for k, v in files.items() if k.endswith("-review.md")}
+      if not reviews:
+          return (False, "No review files to check")
+
+      def split_front(content):
+          """(frontmatter dict or None, body) of a ---...--- fronted document."""
+          if not isinstance(content, str):
+              return None, ""
+          if not content.startswith("---"):
+              return None, content
+          # Split on the closing fence only, so a literal --- inside a field
+          # value cannot truncate the frontmatter.
+          end = content.find("\n---", 3)
+          if end == -1:
+              return None, content
+          try:
+              fm = yaml.safe_load(content[3:end]) or {}
+          except yaml.YAMLError:
+              fm = None
+          return (fm if isinstance(fm, dict) else None), content[end + 4:]
+
+      def norm(text):
+          return re.sub(r"\s+", " ", text).strip()
+
+      # Index by basename: the two pipelines use different directory names
+      # (rfe-tasks/rfe-originals vs initiatives/initiative-originals).
+      names = {os.path.basename(k) for k in files}
+      originals = {os.path.basename(k): v for k, v in files.items() if "-originals/" in k}
+      tasks = {
+          os.path.basename(k): v
+          for k, v in files.items()
+          if k.endswith(".md") and "-originals/" not in k and "-reviews/" not in k
+      }
+      # Run-level coverage from the shared run report(s): the report lists every
+      # item of the batch, so any one case can see whether the run revised
+      # anything at all. Merge with OR across reports so a stale report cannot
+      # mask a newer one's evidence.
+      report_revised = {}
+      # Ids listed under an intermediary's `children`; an entry that is nobody's
+      # child is one of the run's input items.
+      report_children = set()
+      for k in sorted(files):
+          v = files[k]
+          if not (k.startswith("artifacts/auto-fix-runs/") and k.endswith(".yaml")):
+              continue
+          # Snapshot files (issue-snapshot-*, initiative-snapshot-*) are fetch
+          # artifacts, not run reports.
+          if "-snapshot-" in os.path.basename(k):
+              continue
+          # Undecodable files arrive as a {"_binary": True} marker, not text.
+          if not isinstance(v, str):
+              continue
+          try:
+              report = yaml.safe_load(v) or {}
+          except yaml.YAMLError:
+              continue
+          # A malformed report must skip this signal, not raise - an uncaught
+          # error drops the whole case from the pass-rate denominator silently.
+          if not isinstance(report, dict):
+              continue
+          entries = []
+          for key in ("per_rfe", "per_initiative"):
+              section = report.get(key)
+              if isinstance(section, list):
+                  entries += section
+          for entry in entries:
+              if not isinstance(entry, dict):
+                  continue
+              item = entry.get("id")
+              if not isinstance(item, str) or not item:
+                  continue
+              rc = entry.get("revision_cycles")
+              if isinstance(rc, bool) or not isinstance(rc, int):
+                  rc = 0
+              before, after = entry.get("before_score"), entry.get("after_score")
+              moved = before is not None and after is not None and before != after
+              revised = rc > 0 or entry.get("auto_revised") is True or moved
+              report_revised[item] = report_revised.get(item, False) or revised
+              kids = entry.get("children")
+              if isinstance(kids, list):
+                  report_children.update(c for c in kids if isinstance(c, str))
+      run_revised = sorted(i for i, r in report_revised.items() if r)
+      # A report describing exactly one input item (its split children, if any,
+      # do not add inputs) is a single-case run: Harbor task or
+      # execution.mode: case. There "the run revised nothing" says nothing
+      # about coverage, so the run-level check below does not apply.
+      single_item_run = len([i for i in report_revised if i not in report_children]) == 1
+      coverage = f"run coverage {len(run_revised)}/{len(report_revised)} report items"
+      if single_item_run:
+          coverage += " (single-item run: tag decides)"
+
+      # Per-case evidence, keyed by item id so a review and its companions merge.
+      evidence = {}
+      for fname, content in sorted(reviews.items()):
+          fm, body = split_front(content)
+          if fm is None:
+              continue
+          item_id = fm.get("rfe_id") or fm.get("initiative_id")
+          # Require a real string id so the dict lookups below cannot raise.
+          if not isinstance(item_id, str) or not item_id:
+              continue
+          found = evidence.setdefault(item_id, [])
+          # Legacy artifacts stored the flag as `revised`.
+          flag = fm["auto_revised"] if "auto_revised" in fm else fm.get("revised")
+          if flag is True:
+              found.append("auto_revised=true")
+          before, score = fm.get("before_score"), fm.get("score")
+          if before is not None and score is not None and before != score:
+              found.append(f"before_score {before} != score {score}")
+          before_scores, cur_scores = fm.get("before_scores"), fm.get("scores")
+          if before_scores is not None and cur_scores is not None and before_scores != cur_scores:
+              found.append("before_scores != scores")
+          # -originals/ is written before an auto-revision edits the task, so an
+          # original whose body differs from the current task is a revision.
+          # Compare bodies only (frontmatter moves for other reasons) with
+          # whitespace normalised so a reflow does not count.
+          orig, task = originals.get(f"{item_id}.md"), tasks.get(f"{item_id}.md")
+          if isinstance(orig, str) and isinstance(task, str):
+              if norm(split_front(orig)[1]) != norm(split_front(task)[1]):
+                  found.append("originals body differs from task")
+          # Written only when a revision removes content.
+          if f"{item_id}-removed-context.yaml" in names or f"{item_id}-removed-context.md" in names:
+              found.append("removed-context companion")
+          # restore() deletes the review-state file once a re-review cycle
+          # completes, so one left on disk is a revision cycle that ran.
+          if f"{item_id}-review-state.json" in names:
+              found.append("leftover review-state file")
+          if report_revised.get(item_id):
+              found.append("run report records a revision")
+          # A Revision History section holding anything but the template's
+          # "none" placeholder was written by a revision (restore() prepends the
+          # saved history, so the placeholder may appear alongside real entries).
+          # The section runs to the next level-1/2 heading: entries may use ###.
+          m = re.search(r"^#{2,3}\s+Revision History\s*$(.*?)(?=^#{1,2}\s|\Z)", body, re.M | re.S)
+          if m:
+              lines = [
+                  re.sub(r"^[\s\-*_>]+|[\s\-*_.]+$", "", ln).lower()
+                  for ln in m.group(1).splitlines()
+              ]
+              if any(ln not in EMPTY_HISTORY for ln in lines):
+                  found.append("non-empty Revision History")
+      if not evidence:
+          return (False, "No review files to check")
+      revised = {i: e for i, e in evidence.items() if e}
+
+      # annotations is the case's dataset annotations.yaml, loaded by the harness
+      # next to files/inputs; a case without one is simply untagged.
+      ann = outputs.get("annotations")
+      tags = ann.get("tags") if isinstance(ann, dict) else None
+      tags = [str(t) for t in tags] if isinstance(tags, list) else []
+      tagged = TAG in tags
+
+      # Loud run-level failure: nothing in the whole run was revised, so the
+      # revise/reassess path went untested and every downstream revision judge
+      # is vacuous. Every case fails on this branch, by design. A missing
+      # report or a multi-item batch with zero revisions fails every case; only
+      # a single-item run is exempt (the tag alone decides it).
+      if not revised and not run_revised and not single_item_run:
+          return (False, f"revise path never exercised: no revision evidence in this case and {coverage}")
+      if tagged and not revised:
+          return (False, f"tagged {TAG} but no revision evidence for {', '.join(sorted(evidence))}; {coverage}")
+      if revised:
+          detail = "; ".join(f"{i}: {', '.join(e)}" for i, e in sorted(revised.items()))
+          return (True, f"revised ({detail}); {coverage}")
+      return (True, f"not revised (untagged); {coverage}")
   - name: pipeline_flow
     description: |
       Verify expected execution flow from stdout: all phases ran,
@@ -687,6 +880,19 @@ thresholds:
     min_pass_rate: 1.0
   revision_flag_consistency:
     min_pass_rate: 1.0
+  # revision_coverage: with 25 cases of which 5 are tagged revision-expected,
+  # 3 of 5 revised leaves 2 failures -> 23/25 = 0.92 (pass); 2 of 5 revised
+  # leaves 3 failures -> 22/25 = 0.88 (fail). The 2-failure slack is shared:
+  # a tagged draft the create step repairs on its own, a tagged draft the
+  # first review rejects or splits instead of revising (correct pipeline
+  # behaviour, but it never enters the revise path and leaves no evidence),
+  # and any case without a review file each consume one failure. Calibrated
+  # offline only; re-tune after the first 25-case run. A multi-item run with
+  # zero revisions fails every case (0.0) on any dataset. Single-item runs
+  # (Harbor tasks, execution.mode: case) skip the run-level check and are
+  # decided by the tag alone. Untagged cases otherwise always pass.
+  revision_coverage:
+    min_pass_rate: 0.92
   pipeline_flow:
     min_pass_rate: 1.0
   architecture_context_used:
