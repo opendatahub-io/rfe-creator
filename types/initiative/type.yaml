@@ -1,6 +1,6 @@
 # types/initiative/type.yaml — the initiative work-item type descriptor.
 # Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 and the worked
-# example §8.2. Status (PR-2b): 21 scripts read this descriptor at import (types/README.md "Adoption
+# example §8.2. Status (PR-2c): 24 scripts read this descriptor at import (types/README.md "Adoption
 # status"); the values a pending script still carries are pinned equal to it by test, so the descriptor
 # is source of truth BY IMPORT for adopted scripts and BY TEST for the rest (design §10). Every value is
 # the live literal on main (c1df503) with the consuming file:line AT THAT COMMIT in a trailing comment
@@ -32,7 +32,7 @@ dirs:                                                   # artifacts/ form (Q13);
   reviews: artifacts/initiative-reviews                 # pipeline_state.py:117; verify_phase.py:56; submit.py:101 (bare); reassess_save.py:21
 index: { enabled: false }                               # submit.py:126 has_index; split_submit.py:145 do_rebuild_index; no initiative index file exists
 companions:
-  comments: false                                       # initiative-review/prompts/fetch-agent.md:10 fetches without comments and writes only task + original (:35-37); fetch_issue.py --fetch-all is rfe-only. Means "the fetch step produces one" — rename_initiative_to_jira_key (artifact_utils.py:1079-1080) still maps -comments.md and a test pins it
+  comments: false                                       # initiative-review/prompts/fetch-agent.md:10 fetches without comments and writes only task + original (:35-37); fetch_issue.py --fetch-all gates the comments companion (and the comment request) on this flag (PR-2c). Means "the fetch step produces one" — rename_initiative_to_jira_key (artifact_utils.py:1079-1080) still maps -comments.md and a test pins it
   removed_context: true                                 # artifact_utils.py:727-731 (type-agnostic); :831-833 find_removed_context_yaml initiative branch; error_collect.py:216
 
 conventions:

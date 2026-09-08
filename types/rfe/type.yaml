@@ -1,6 +1,6 @@
 # types/rfe/type.yaml — the rfe work-item type descriptor.
 # Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 (§8.2 is the
-# initiative twin). Status (PR-2b): 21 scripts read this descriptor at import (types/README.md "Adoption
+# initiative twin). Status (PR-2c): 24 scripts read this descriptor at import (types/README.md "Adoption
 # status"); the values a pending script still carries are pinned equal to it by test, so the descriptor
 # is source of truth BY IMPORT for adopted scripts and BY TEST for the rest (design §10). Every value is
 # the live literal on main (c1df503) with the consuming file:line AT THAT COMMIT in a trailing comment
@@ -32,7 +32,7 @@ dirs:                                                   # artifacts/ form (Q13);
   reviews: artifacts/rfe-reviews                        # pipeline_state.py:105; verify_phase.py:43; submit.py:70 (bare); reassess_save.py:20
 index: { enabled: true }                                # submit.py:91 has_index; split_submit.py:125 do_rebuild_index; artifact_utils.py:1113-1170 rebuild_index -> artifacts/rfes.md
 companions:
-  comments: true                                        # fetch_issue.py:122 writes {KEY}-comments.md under --fetch-all; rfe.review/prompts/fetch-agent.md:16,:26
+  comments: true                                        # fetch_issue.py --fetch-all gates the comments companion (and the comment request) on this flag (PR-2c; fetch_issue.py:122 at c1df503); rfe.review/prompts/fetch-agent.md:16,:26
   removed_context: true                                 # artifact_utils.py:727-731 companion suffixes; submit.py:1115; error_collect.py:216; check_content_preservation.py:246
 
 conventions:

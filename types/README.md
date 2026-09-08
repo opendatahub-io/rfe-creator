@@ -10,7 +10,7 @@ reference). Design: `design-proposals/work-item-types-unified.md` §3.2 (contrac
 and are invoked by their cwd-relative path (`python3 scripts/type_registry.py …`, design §3.5.1).
 The provider guide is `docs/type-provider-guide.md`.
 
-**Status (PR-2b): 21 scripts read the registry** (table below). An adopted script does
+**Status (PR-2c): 24 scripts read the registry** (table below). An adopted script does
 `import type_registry` and `_TYPES = type_registry.load()` once at import and builds its per-type
 table over the registry (`_TYPES.names()` or iteration — both in `names()` order), so a drop-in
 type appears in it without a code change. Adopted scripts use DESCRIPTOR values only (`Descriptor.get`, `dirs()`, `labels`,
@@ -26,7 +26,17 @@ the scan / rename / parse helpers are generics over a `Descriptor` (the historic
 remain as wrappers), and `check_review_progress.PHASE_CHECKS` is `dirs` x `pipeline.poll_prefix`
 x `pipeline.dimensions[].name` (a drop-in without `dirs.{tasks,reviews}` and
 `pipeline.poll_prefix` contributes no rows). `tests/test_schemas_golden.py` pins the derived
-schemas byte for byte. Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py`
+schemas byte for byte. Since PR-2c the snapshot side is a projection too: `snapshot_fetch.SNAPSHOT_CONFIG`
+(`conventions.labels.{ignore,split_quarantine}`, `snapshot.prefix`) and
+`bootstrap_snapshot.BOOTSTRAP_CONFIG` (`snapshot.report_prefix`, `reporting.item_key`) build over
+`names()`, the snapshot reader / writer helpers' default `prefix=` is the rfe `snapshot.prefix`
+bound once at import (submit's `''` sentinel keeps relying on it), and `fetch_issue.py --fetch-all`
+writes the selected `--type`'s layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments
+companion gated on `companions.comments`). Those two tables are built at import for **every**
+registered type — and `submit.py` imports `snapshot_fetch` — so a drop-in must carry
+`conventions.labels.{ignore,split_quarantine}` and `snapshot.{prefix,report_prefix}` (gate 1
+already requires the two `snapshot` keys but not the two labels; copying `types/rfe/` keeps them
+all) or the import fails with a `KeyError` naming the type and the field. Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py`
 to its descriptor projection — source of truth *by test* until it adopts (§10); that file's
 `MIGRATED` list names the matrix rows already covered *by import*, and each adoption deletes its
 pin.
@@ -41,6 +51,7 @@ itself is fine — `resolve()` follows the link).
 |---|---|---|
 | `artifact_utils.py` | `SCHEMAS` (`<type>-task` / `<type>-review` per type), `scan_tasks` / `scan_reviews` / `rename_to_tracker_key` / `parse_child` generics over a `Descriptor` (the per-type names are wrappers), `detect()` in `find_review_file` / `find_removed_context_yaml` | PR-2b; name-keyed until PR-3: the rename error label, rfe's slug-tolerant review lookup and `parse_child`'s rfe markdown fallbacks; the `rfes.md` index contract stays literal (`index.enabled`) |
 | `batch_summary.py` | `_TYPE_CONFIG` (dirs view of `generate_run_report.TYPE_CONFIG`), `--type` choices | PR-2a |
+| `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG` (`snapshot.report_prefix`, `reporting.item_key`), `--type` choices | PR-2c; the `issue-snapshot-` run-dir probe (`_run_dir_has_snapshots`) reads the rfe descriptor's `snapshot.prefix` and stays rfe-only for every `--type` (grandfathered; the per-type probe is a deliberate follow-up, design §10 PR-10) |
 | `check_conflicts.py` | `_TYPE_CONFIG`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b; `startswith(jira_prefix)` → prefix-union pending |
 | `check_revised.py` | `_TYPE_CONFIG` | PR-2a |
 | `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices | PR-2b; `_detect_fast` config allowlist literal until the `initiative-speedrun-config` drift is fixed deliberately; the rfe-only `create` row (`_CREATE_BARRIER_TYPES`, lifted in PR-5) and the initiative row order (`_LEGACY_ROW_ORDER`, CLI choices text) are documented legacy literals |
@@ -48,6 +59,7 @@ itself is fine — `resolve()` follows the link).
 | `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
 | `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
+| `fetch_issue.py` | `--fetch-all` layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments companion and its request gated on `companions.comments`), new `--type` (registry choices, default `rfe`; the no-`--type` invocation is byte-identical) | PR-2c; `status=Ready` and the `Major` priority fallback stay literal (shared pipeline vocabulary, not type facts) |
 | `filter_for_revision.py` | prefix sniff → `detect()` | PR-2a |
 | `frontmatter.py` | `_detect_schema_type` path table (`_SCHEMA_BY_DIR`), `schema` / `--schema-type` choices through `SCHEMAS` | PR-2b |
 | `generate_review_pdf.py` | `REPORT_CONFIG`, `--type` choices | PR-2a |
@@ -57,18 +69,16 @@ itself is fine — `resolve()` follows the link).
 | `prep_assess.py` | prefix sniff → `detect()` | PR-2a |
 | `preserve_review_state.py` | prefix sniff → `detect()` | PR-2a |
 | `reassess_save.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
+| `snapshot_fetch.py` | `SNAPSHOT_CONFIG` (`conventions.labels.{ignore,split_quarantine}`, `snapshot.prefix`), default `prefix=` of `find_previous_snapshot` / `load_snapshot_from_dir` / `update_snapshot_hashes` (rfe `snapshot.prefix`, bound at import), `--type` choices | PR-2c; the hard-filter JQL wrapper and the `f"{prefix}{ts}.yaml"` file name are composition, still pinned by source form |
 | `split_collect.py` | `_TYPE_CONFIG`, `_set_revise` defaults, `--type` choices | PR-2a |
 | `validate_batch_input.py` | `ALLOWED_PRIORITIES`, known fields, `--type` choices | PR-2a; `PARENT_KEY_PATTERN` literal until PR-3 (Q14) |
 | `verify_phase.py` | phase tables, `_TYPE_CONFIG`, error-stub score tail, `--type` choices | PR-2a |
-| `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG`, `issue-snapshot-` probe | pending |
 | `check_autofix_complete.py` | `_TYPE_CONFIG` | pending |
 | `check_content_preservation.py` | inline dir branch | pending |
 | `cleanup_partial_split.py` | inline dir branch | pending |
 | `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
-| `fetch_issue.py` | rfe-only paths | pending |
 | `jira_utils.py` | `strip_metadata` prefix regex | pending |
 | `pipeline_state.py` | `PIPELINE_TYPES` (prompt/skill entries move in PR-5) | pending |
-| `snapshot_fetch.py` | `SNAPSHOT_CONFIG` | pending |
 | `split_submit.py` | `SPLIT_CONFIG` | pending (last, with `submit.py`) |
 | `submit.py` | `TYPE_CONFIGS` | pending (last; emulator suites in CI) |
 
