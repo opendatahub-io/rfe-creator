@@ -943,3 +943,244 @@ class TestSkillBarrierUsage:
         init = _skill_text("initiative-split")
         assert len(_phases_used(init)) >= len(_phases_used(rfe))
         assert init.count("NEXT_POLL") >= rfe.count("NEXT_POLL")
+
+
+# ── Registry derivation ──
+
+
+# The 14 poll phases in the order the literal table had. argparse renders the --phase /
+# --also-phase choices from this order, so it is CLI surface, not an implementation detail.
+_TODAYS_PHASES = [
+    "fetch",
+    "create",
+    "assess",
+    "feasibility",
+    "review",
+    "revise",
+    "split",
+    "initiative-split",
+    "initiative-fetch",
+    "initiative-assess",
+    "initiative-feasibility",
+    "initiative-review",
+    "initiative-revise",
+    "initiative-alignment",
+]
+
+
+def _hermetic_registry():
+    import type_registry
+
+    return type_registry.load(extra_roots=[], env={})
+
+
+class TestDerivedFromRegistry:
+    """PHASE_CHECKS is a projection of types/<t>/type.yaml (design §10 item 2).
+
+    Nothing in check_review_progress names a directory, an id field or a poll prefix: the
+    rows are dirs x poll_prefix x dimension names, plus the rfe-only create barrier (#148).
+    """
+
+    def test_keys_are_todays_choices_in_todays_order(self):
+        assert list(PHASE_CHECKS) == _TODAYS_PHASES
+
+    def test_rows_are_the_descriptor_projection(self):
+        for desc in _hermetic_registry():
+            pp = desc.get("pipeline.poll_prefix")
+            dirs = desc.dirs()
+            assert PHASE_CHECKS[f"{pp}fetch"]("X-1") == f"{dirs['tasks']}/X-1.md"
+            assert PHASE_CHECKS[f"{pp}assess"]("X-1") == "tmp/rfe-assess/single/X-1.result.md"
+            for base in ("review", "revise"):
+                assert PHASE_CHECKS[f"{pp}{base}"]("X-1") == f"{dirs['reviews']}/X-1-review.md"
+            assert PHASE_CHECKS[f"{pp}split"]("X-1") == f"{dirs['reviews']}/X-1-split-status.yaml"
+            for dim in desc.get("pipeline.dimensions"):
+                name = dim["name"]
+                assert PHASE_CHECKS[f"{pp}{name}"]("X-1") == f"{dirs['reviews']}/X-1-{name}.md"
+
+    def test_create_row_is_rfe_only(self):
+        """#148's Phase-1 barrier is grandfathered to rfe until PR-5's generic body."""
+        for desc in _hermetic_registry():
+            pp = desc.get("pipeline.poll_prefix")
+            assert (f"{pp}create" in PHASE_CHECKS) is (desc.name == "rfe")
+        assert PHASE_CHECKS["create"]("X-1") == PHASE_CHECKS["fetch"]("X-1")
+
+    def test_create_mode_uses_the_owning_types_id_field(self, tmp_path, monkeypatch):
+        """The create check compares identity.id_field, not a literal — rfe_id for rfe."""
+        monkeypatch.chdir(tmp_path)
+        rfe = _hermetic_registry().get("rfe")
+        assert rfe.id_field == "rfe_id"
+        task = tmp_path / PHASE_CHECKS["create"]("RFE-001")
+        task.parent.mkdir(parents=True)
+        task.write_text("---\ninitiative_id: RFE-001\n---\nBody\n")
+        assert check_id("create", "RFE-001") == "pending"
+        task.write_text(f"---\n{rfe.id_field}: RFE-001\n---\nBody\n")
+        assert check_id("create", "RFE-001") == "completed"
+
+    def test_modes_follow_the_phase_base_for_every_type(self, tmp_path, monkeypatch):
+        """review -> score_present and revise -> revised_or_split for each type's poll prefix."""
+        monkeypatch.chdir(tmp_path)
+        for desc in _hermetic_registry():
+            pp = desc.get("pipeline.poll_prefix")
+            review = tmp_path / PHASE_CHECKS[f"{pp}review"]("X-1")
+            review.parent.mkdir(parents=True, exist_ok=True)
+            review.write_text("---\ntitle: t\n---\nBody\n")
+            assert check_id(f"{pp}review", "X-1") == "pending"
+            assert check_id(f"{pp}revise", "X-1") == "pending"
+            review.write_text("---\nscore: 7\nrecommendation: split\n---\nBody\n")
+            assert check_id(f"{pp}review", "X-1") == "completed"
+            assert check_id(f"{pp}revise", "X-1") == "completed"
+            review.write_text("---\nscore: 0\nerror: assess_failed\n---\nBody\n")
+            assert check_id(f"{pp}review", "X-1") == "error"
+
+    def test_other_phases_use_the_exists_mode_for_every_type(self, tmp_path, monkeypatch):
+        """fetch, assess, split and every dimension complete on any file at the path — the
+        content is not inspected (a review-shaped error stub still counts) — and pend on a
+        missing one; for every type's poll prefix. Each file is removed again: the assess
+        staging dir is shared by every type (design §10), so rfe's result file would otherwise
+        complete initiative-assess."""
+        monkeypatch.chdir(tmp_path)
+        for desc in _hermetic_registry():
+            pp = desc.get("pipeline.poll_prefix")
+            dimensions = [dim["name"] for dim in desc.get("pipeline.dimensions")]
+            for base in ["fetch", "assess", "split", *dimensions]:
+                phase = f"{pp}{base}"
+                assert check_id(phase, "X-1") == "pending", phase
+                path = tmp_path / PHASE_CHECKS[phase]("X-1")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("---\nscore: null\nerror: assess_failed\n---\nBody\n")
+                assert check_id(phase, "X-1") == "completed", phase
+                path.unlink()
+                assert check_id(phase, "X-1") == "pending", phase
+
+    def test_a_partial_drop_in_type_contributes_no_rows(self, tmp_path):
+        """A drop-in descriptor with no pipeline block (identity + dirs only — the shape
+        tests/test_check_conflicts.py registers) is skipped, as artifact_utils skips it for
+        SCHEMAS: the poll script still imports, keeps today's rows and answers the same."""
+        import subprocess
+
+        root = tmp_path / "extra"
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "type.yaml").write_text(
+            "schema_version: 1\n"
+            "type: docs\n"
+            "identity:\n"
+            "  tracker: jira\n"
+            '  jira: {project: DOCS, issue_type: Task, key_prefixes: ["DOCS-"]}\n'
+            '  local_prefix: "DOC-"\n'
+            "  id_field: doc_id\n"
+            "dirs: {tasks: artifacts/doc-tasks, originals: artifacts/doc-originals}\n"
+        )
+        scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("RFE_CREATOR_") and k not in ("CI", "GITHUB_ACTIONS")
+        }
+        env["RFE_CREATOR_EXTRA_TYPES"] = str(root)
+        work = tmp_path / "work"
+        work.mkdir()
+        script = os.path.join(scripts_dir, "check_review_progress.py")
+        result = subprocess.run(
+            [sys.executable, script, "--phase", "review", "RFE-001"],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=work,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "COMPLETED=0/1, PENDING=1, NEXT_POLL=60\n"
+        env["PYTHONPATH"] = scripts_dir
+        probe = "import check_review_progress as c; print(list(c.PHASE_CHECKS))"
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=work,
+            check=True,
+        )
+        assert result.stdout.strip() == str(_TODAYS_PHASES)
+
+    def test_a_drop_in_type_gets_rows_and_modes(self, tmp_path):
+        """A type under RFE_CREATOR_EXTRA_TYPES appears after the shipped rows with its own
+        prefix, dirs, dimensions and id field, and its review/revise phases get the real check
+        modes instead of falling through to exists (the literal tuples did that)."""
+        import json
+        import subprocess
+
+        import yaml
+
+        scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        with open(os.path.join(scripts_dir, "..", "types", "rfe", "type.yaml")) as f:
+            data = yaml.safe_load(f)
+        data["type"] = "widget"
+        data["identity"]["id_field"] = "widget_id"
+        data["dirs"] = {
+            "tasks": "artifacts/widgets",
+            "originals": "artifacts/widget-originals",
+            "reviews": "artifacts/widget-reviews",
+        }
+        data["pipeline"]["poll_prefix"] = "widget-"
+        data["pipeline"]["state_prefix"] = "widget-"
+        data["pipeline"]["dimensions"] = [
+            {"name": "feasibility", "prompt": "x.md", "blocking": True},
+            {"name": "security", "prompt": "y.md", "blocking": False},
+        ]
+        root = tmp_path / "extra"
+        (root / "widget").mkdir(parents=True)
+        with open(root / "widget" / "type.yaml", "w") as f:
+            yaml.safe_dump(data, f, sort_keys=False)
+
+        work = tmp_path / "work"
+        reviews = work / "artifacts" / "widget-reviews"
+        reviews.mkdir(parents=True)
+        (reviews / "W-1-review.md").write_text("---\ntitle: t\n---\nBody\n")
+        (reviews / "W-2-review.md").write_text("---\nscore: 7\nrecommendation: split\n---\n")
+        probe = (
+            "import json, check_review_progress as c; "
+            "print(json.dumps({'keys': list(c.PHASE_CHECKS), "
+            "'paths': {k: f('W-1') for k, f in c.PHASE_CHECKS.items() if k.startswith('widget-')}, "
+            "'review_1': c.check_id('widget-review', 'W-1'), "
+            "'revise_1': c.check_id('widget-revise', 'W-1'), "
+            "'review_2': c.check_id('widget-review', 'W-2'), "
+            "'revise_2': c.check_id('widget-revise', 'W-2')}))"
+        )
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("RFE_CREATOR_") and k not in ("CI", "GITHUB_ACTIONS")
+        }
+        env["RFE_CREATOR_EXTRA_TYPES"] = str(root)
+        env["PYTHONPATH"] = scripts_dir
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=work,
+            check=True,
+        )
+        got = json.loads(result.stdout)
+        widget_keys = [
+            "widget-fetch",
+            "widget-assess",
+            "widget-feasibility",
+            "widget-security",
+            "widget-review",
+            "widget-revise",
+            "widget-split",
+        ]
+        assert got["keys"] == _TODAYS_PHASES + widget_keys  # shipped rows first, no widget-create
+        assert got["paths"] == {
+            "widget-fetch": "artifacts/widgets/W-1.md",
+            "widget-assess": "tmp/rfe-assess/single/W-1.result.md",
+            "widget-feasibility": "artifacts/widget-reviews/W-1-feasibility.md",
+            "widget-security": "artifacts/widget-reviews/W-1-security.md",
+            "widget-review": "artifacts/widget-reviews/W-1-review.md",
+            "widget-revise": "artifacts/widget-reviews/W-1-review.md",
+            "widget-split": "artifacts/widget-reviews/W-1-split-status.yaml",
+        }
+        assert got["review_1"] == "pending"  # score_present, not exists
+        assert got["revise_1"] == "pending"  # revised_or_split, not exists
+        assert got["review_2"] == "completed"
+        assert got["revise_2"] == "completed"

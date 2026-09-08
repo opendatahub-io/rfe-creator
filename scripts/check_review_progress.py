@@ -3,6 +3,12 @@
 Reports completion status for a list of RFE IDs based on the current phase.
 Supports ``--wait`` mode which sleeps internally so the caller does not need
 to parse ``NEXT_POLL`` values.
+
+``PHASE_CHECKS`` (poll phase -> expected output path) is a projection of
+``types/<t>/type.yaml``: ``pipeline.poll_prefix`` + phase base -> ``dirs`` x the
+phase's file convention, with one row per ``pipeline.dimensions[]`` entry
+(design work-item-types-unified.md §10 item 2). verify_phase.py derives its
+phase tables from the same descriptors.
 """
 
 import argparse
@@ -12,28 +18,83 @@ import time
 
 import yaml
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import read_frontmatter
 
-PHASE_CHECKS = {
-    "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
-    # Same path as "fetch", but a stricter check — see check_id(). Create agents
-    # write the task file first and set frontmatter in a later tool call, so
-    # existence alone would release the barrier mid-write.
-    "create": lambda id: f"artifacts/rfe-tasks/{id}.md",
-    "assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
-    "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
-    "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
-    "revise": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
-    "split": lambda id: f"artifacts/rfe-reviews/{id}-split-status.yaml",
-    "initiative-split": lambda id: f"artifacts/initiative-reviews/{id}-split-status.yaml",
-    "initiative-fetch": lambda id: f"artifacts/initiatives/{id}.md",
-    "initiative-assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
-    "initiative-feasibility": lambda id: f"artifacts/initiative-reviews/{id}-feasibility.md",
-    "initiative-review": lambda id: f"artifacts/initiative-reviews/{id}-review.md",
-    "initiative-revise": lambda id: f"artifacts/initiative-reviews/{id}-review.md",
-    "initiative-alignment": lambda id: f"artifacts/initiative-reviews/{id}-alignment.md",
+_TYPES = type_registry.load()
+
+# Type-neutral assess staging dir (design §10: kept byte-stable for every type).
+ASSESS_STAGING = "tmp/rfe-assess/single"
+
+# PR #148 gave rfe.speedrun a Phase-1 "create" barrier; no other pipeline polls one, so the row
+# stays rfe-only (an `initiative-create` row would change the --phase choices text). PR-5's
+# generic speedrun body gives every type a create barrier keyed on dirs.tasks + id_field, and
+# this grandfather goes with it.
+_CREATE_BARRIER_TYPES = ("rfe",)
+
+# Key order is CLI surface: argparse renders the --phase/--also-phase choices from it, so each
+# type's rows are emitted in the order the literal table had. The rfe block is the generic
+# order of _phase_rows(); the initiative block was appended split-first and gained alignment
+# last when that dimension landed. Neither order is a descriptor fact, hence this table; a
+# type without an entry (a drop-in) gets the generic order.
+_LEGACY_ROW_ORDER = {
+    "initiative": ("split", "fetch", "assess", "feasibility", "review", "revise", "alignment"),
 }
+
+# The descriptor fields a type must declare to be polled. Both shipped types declare them
+# (validate_types.py gate 1 requires dirs and pipeline.poll_prefix); a drop-in root
+# (RFE_CREATOR_EXTRA_TYPES, dev/test only) may register a partial descriptor, and the registry
+# loader does not run the JSON-Schema gate — such a type contributes no rows, exactly as it
+# contributes no artifact_utils.SCHEMAS entry, instead of breaking the import of the poll
+# script every pipeline barrier runs.
+_PHASE_FACTS = ("dirs.tasks", "dirs.reviews", "pipeline.poll_prefix")
+
+
+def _polls(desc):
+    """True when ``desc`` carries every field its phase rows are derived from."""
+    return all(desc.get(dotted, None) is not None for dotted in _PHASE_FACTS)
+
+
+def _phase_rows(desc):
+    """phase base -> (id -> expected output path) for one type: ``dirs`` x the pipeline phases,
+    plus one ``<reviews>/<id>-<name>.md`` row per ``pipeline.dimensions`` entry."""
+    dirs = desc.dirs()
+    rows = {"fetch": lambda id: f"{dirs['tasks']}/{id}.md"}
+    if desc.name in _CREATE_BARRIER_TYPES:
+        # Same path as "fetch", but a stricter check — see check_id(). Create agents
+        # write the task file first and set frontmatter in a later tool call, so
+        # existence alone would release the barrier mid-write.
+        rows["create"] = lambda id: f"{dirs['tasks']}/{id}.md"
+    rows["assess"] = lambda id: f"{ASSESS_STAGING}/{id}.result.md"
+    for dimension in desc.get("pipeline.dimensions", []):
+        name = dimension["name"]
+        rows[name] = lambda id, name=name: f"{dirs['reviews']}/{id}-{name}.md"
+    rows["review"] = lambda id: f"{dirs['reviews']}/{id}-review.md"
+    rows["revise"] = lambda id: f"{dirs['reviews']}/{id}-review.md"
+    rows["split"] = lambda id: f"{dirs['reviews']}/{id}-split-status.yaml"
+    legacy = _LEGACY_ROW_ORDER.get(desc.name, ())
+    order = [base for base in legacy if base in rows] + [b for b in rows if b not in legacy]
+    return {base: rows[base] for base in order}
+
+
+def _build_phase_table():
+    """``PHASE_CHECKS`` plus its inverse, poll phase -> (type name, phase base), which
+    check_id() uses to pick the check mode and the owning type's id field."""
+    checks = {}
+    owners = {}
+    for name in _TYPES.names():
+        desc = _TYPES.get(name)
+        if not _polls(desc):
+            continue
+        poll_prefix = desc.get("pipeline.poll_prefix")
+        for base, path_fn in _phase_rows(desc).items():
+            checks[f"{poll_prefix}{base}"] = path_fn
+            owners[f"{poll_prefix}{base}"] = (name, base)
+    return checks, owners
+
+
+PHASE_CHECKS, _PHASE_OWNER = _build_phase_table()
 
 
 def check_id(phase, rfe_id):
@@ -41,7 +102,11 @@ def check_id(phase, rfe_id):
     path = PHASE_CHECKS[phase](rfe_id)
     if not os.path.exists(path):
         return "pending"
-    if phase == "create":
+    # The check mode follows the phase base for every type: create -> frontmatter_valid,
+    # review -> score_present, revise -> revised_or_split, anything else -> exists. A phase
+    # patched into PHASE_CHECKS without an owner (tests) keeps the exists mode.
+    type_name, base = _PHASE_OWNER.get(phase, (None, None))
+    if base == "create":
         # Every not-yet-good state is "pending", never "error". The --wait loop
         # exits on pending == 0 and never consults the error count, so an
         # "error" here would release the barrier on the very file it rejected.
@@ -52,13 +117,14 @@ def check_id(phase, rfe_id):
             return "pending"
         # read_frontmatter returns {} for a file with no frontmatter block yet,
         # which is a half-written file, not a finished one. The id has to be
-        # the one asked about: a task file carrying a different rfe_id is not
-        # this ID's create output, and accepting it would break the
-        # one-RFE-per-preallocated-ID contract the barrier exists to enforce.
-        if not data or data.get("rfe_id") != rfe_id:
+        # the one asked about: a task file carrying a different id (the owning
+        # type's identity.id_field) is not this ID's create output, and
+        # accepting it would break the one-item-per-preallocated-ID contract
+        # the barrier exists to enforce.
+        if not data or data.get(_TYPES.get(type_name).id_field) != rfe_id:
             return "pending"
         return "completed"
-    if phase in ("review", "initiative-review"):
+    if base == "review":
         try:
             data, _ = read_frontmatter(path)
         except Exception:
@@ -69,7 +135,7 @@ def check_id(phase, rfe_id):
             return "pending"
         if data.get("error"):
             return "error"
-    if phase in ("revise", "initiative-revise"):
+    if base == "revise":
         try:
             data, _ = read_frontmatter(path)
         except Exception:
@@ -131,6 +197,12 @@ def _detect_fast(explicit_flag):
     """Return True if fast-poll should be used."""
     if explicit_flag:
         return True
+    # The interactive skills write tmp/<pipeline.state_prefix><stage>-config.yaml. This list
+    # is deliberately still the literal: the descriptor projection (state_prefix x stages)
+    # would ADD tmp/initiative-speedrun-config.yaml, which initiative-speedrun writes but this
+    # allowlist never polled, so interactive initiative speedruns would start auto-enabling
+    # fast polling. That drift is fixed on purpose by a separate change, not by this
+    # behavior-neutral migration.
     for cfg in (
         "tmp/review-config.yaml",
         "tmp/split-config.yaml",
