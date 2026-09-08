@@ -2,6 +2,7 @@
 """Tests for scripts/submit.py — content-diff guard and skip logic."""
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -969,6 +970,9 @@ class TestSplitFailureIsRecorded:
                     with open(src) as f:
                         (scripts_copy / name).write_text(f.read())
         (scripts_copy / "split_submit.py").write_text(stub.read_text())
+        # type_registry.DEFAULT_ROOT is <scripts dir>/../types: the relocated copy needs the
+        # type root beside it or every registry-adopted import (generate_run_report) dies.
+        shutil.copytree(os.path.join(os.path.dirname(SCRIPT), "..", "types"), tmp_path / "types")
 
         env = {
             **os.environ,

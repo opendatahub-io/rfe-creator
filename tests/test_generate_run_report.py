@@ -10,7 +10,13 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from generate_run_report import _parse_run_id, build_report
+import generate_run_report
+import type_registry
+from generate_run_report import TYPE_CONFIG, _parse_run_id, build_report
+
+# A descriptor that ships outside types/ (never enumerated by default): the third type the
+# registry-derived config must project without a code change.
+FIXTURE_TYPES = os.path.join(os.path.dirname(__file__), "fixtures", "types")
 
 TASK_TEMPLATE = """\
 ---
@@ -919,3 +925,53 @@ class TestReportRootMetadata:
         assert written["report_stage"] == "final"
         assert written["report_schema_version"] == 1
         assert written["type"] == "rfe"
+
+
+class TestTypeConfigIsRegistryDerived:
+    """TYPE_CONFIG is a projection of types/<name>/type.yaml, not a hand-kept dict."""
+
+    def test_keys_are_the_registry_types_in_choices_order(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        assert list(TYPE_CONFIG) == registry.choices()
+
+    def test_shipped_entries_are_the_descriptor_projection(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        for name, cfg in TYPE_CONFIG.items():
+            desc = registry.get(name)
+            assert cfg["score_fields"] == desc.score_fields
+            assert cfg["reviews_dir"] == desc.dirs("bare")["reviews"]
+            assert cfg["tasks_dir"] == desc.dirs("bare")["tasks"]
+            assert cfg["item_key"] == desc.get("reporting.item_key")
+            assert cfg["output_prefix"] == desc.get("snapshot.report_prefix")
+            assert cfg["extra_entry_fields"] == desc.get("reporting.run_report.extra_entry_fields")
+            assert cfg["id_field"] == desc.id_field
+            assert cfg["child_parent_prefixes"] == (desc.local_prefix, *desc.key_prefixes)
+            assert cfg["tracker_prefix"] == desc.write_prefix
+            assert cfg["local_prefix"] == desc.local_prefix
+            assert callable(cfg["scan_tasks"])
+
+    def test_a_drop_in_descriptor_projects_without_a_code_change(self):
+        registry = type_registry.load(extra_roots=[FIXTURE_TYPES], env={})
+        cfg = generate_run_report._type_config(registry.get("epic"))
+        assert set(cfg) == set(TYPE_CONFIG["rfe"])  # same shape, so downstream code is untouched
+        assert cfg["reviews_dir"] == "epic-reviews"
+        assert cfg["tasks_dir"] == "epic-tasks"
+        assert cfg["item_key"] == "results"
+        assert cfg["output_prefix"] == ""  # no snapshot.report_prefix declared -> no prefix
+        assert cfg["extra_entry_fields"] == []  # no reporting.run_report block
+        assert cfg["id_field"] == "epic_id"
+        # local prefix + tracker key prefixes; never conventions.parent_key_patterns
+        assert cfg["child_parent_prefixes"] == ("RHAISTRAT-", "RHAI-")
+        assert cfg["tracker_prefix"] == "RHAI-"
+        assert cfg["local_prefix"] == "RHAISTRAT-"
+        # The forked artifact_utils scanner pair has no third member until it is unified.
+        assert cfg["scan_tasks"] is None
+
+    def test_projection_does_not_alias_descriptor_data(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        desc = registry.get("rfe")
+        cfg = generate_run_report._type_config(desc)
+        cfg["extra_entry_fields"].append("mutated")
+        cfg["score_fields"].append("mutated")
+        assert "mutated" not in desc.get("reporting.run_report.extra_entry_fields")
+        assert "mutated" not in desc.score_fields

@@ -12,100 +12,53 @@ from collections import Counter
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import find_task_file_including_archived, read_frontmatter
 
-REPORT_CONFIG = {
-    "rfe": {
-        "reviews_dir": "rfe-reviews",
-        "tasks_dir": "rfe-tasks",
-        "originals_dir": "rfe-originals",
-        "id_field": "rfe_id",
-        "jira_prefix": "RHAIRFE-",
-        "local_prefix": "RFE-",
-        "entity_name": "RFE",
-        "entity_name_plural": "RFEs",
-        "report_title": "RFE Review &amp; Remediation Report",
-        "default_output": "review-report.html",
-        "pass_threshold": 7,
-        "criterion_keys": ["what", "why", "open_to_how", "not_a_task", "right_sized"],
-        "criterion_labels": {
-            "what": "WHAT",
-            "why": "WHY",
-            "open_to_how": "HOW",
-            "not_a_task": "Not-a-task",
-            "right_sized": "Right-sized",
-        },
+# The work-item type registry (types/<name>/type.yaml), read once at import; every
+# per-type value below is a projection of a descriptor (design work-item-types-unified.md
+# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
+# overrides land with resolve() in a later PR.
+_TYPES = type_registry.load()
+
+# The "passing" total: a property of the 0-2 x 5 scoring machinery, not of a type.
+PASS_THRESHOLD = 7
+
+
+def _report_config(desc):
+    """Project one descriptor onto the REPORT_CONFIG entry main() reads."""
+    dirs = desc.dirs("bare")
+    entity = desc.get("display.entity")
+    criterion_labels = dict(desc.get("reporting.criterion_labels"))
+    return {
+        "reviews_dir": dirs["reviews"],
+        "tasks_dir": dirs["tasks"],
+        "originals_dir": dirs["originals"],
+        "id_field": desc.id_field,
+        "jira_prefix": desc.write_prefix,
+        "local_prefix": desc.local_prefix,
+        "entity_name": entity,
+        "entity_name_plural": desc.get("display.entity_plural"),
+        # Interpolated raw into the <h1>, hence the entity for the ampersand.
+        "report_title": f"{entity} Review &amp; Remediation Report",
+        "default_output": f"{desc.get('pipeline.poll_prefix')}review-report.html",
+        "pass_threshold": PASS_THRESHOLD,
+        # The keys are read straight out of review frontmatter, so they must be the review
+        # schema's score fields — a mismatch silently renders every criterion as 0.
+        "criterion_keys": desc.score_fields,
+        # Key order is the display order of the detail tables.
+        "criterion_labels": criterion_labels,
+        # A key the descriptor leaves out of the short map keeps its long label.
         "criterion_short_labels": {
-            "what": "WHAT",
-            "why": "WHY",
-            "open_to_how": "HOW",
-            "not_a_task": "Task",
-            "right_sized": "Scope",
+            **criterion_labels,
+            **desc.get("reporting.criterion_short_labels", {}),
         },
-        "before_score_name_map": {
-            "WHY": "why",
-            "WHAT": "what",
-            "HOW": "open_to_how",
-            "Open to HOW": "open_to_how",
-            "Not-a-task": "not_a_task",
-            "Not a task": "not_a_task",
-            "Right-sized": "right_sized",
-            "Right-sizing": "right_sized",
-            "NAT": "not_a_task",
-            "RS": "right_sized",
-        },
-        "extra_fields": [],
-    },
-    "initiative": {
-        "reviews_dir": "initiative-reviews",
-        "tasks_dir": "initiatives",
-        "originals_dir": "initiative-originals",
-        "id_field": "initiative_id",
-        "jira_prefix": "RHOAIENG-",
-        "local_prefix": "INIT-",
-        "entity_name": "Initiative",
-        "entity_name_plural": "Initiatives",
-        "report_title": "Initiative Review &amp; Remediation Report",
-        "default_output": "initiative-review-report.html",
-        "pass_threshold": 7,
-        # Must match the initiative-review `scores` schema in artifact_utils.py
-        # and score_fields in generate_run_report.py — the keys are read
-        # straight out of review frontmatter, so a mismatch silently renders
-        # every criterion as 0.
-        "criterion_keys": [
-            "what",
-            "why",
-            "scope",
-            "open_to_how",
-            "right_sized",
-        ],
-        "criterion_labels": {
-            "what": "WHAT",
-            "why": "WHY",
-            "scope": "Scope",
-            "open_to_how": "HOW",
-            "right_sized": "Right-sized",
-        },
-        "criterion_short_labels": {
-            "what": "WHAT",
-            "why": "WHY",
-            "scope": "Scope",
-            "open_to_how": "HOW",
-            "right_sized": "Scope-fit",
-        },
-        "before_score_name_map": {
-            "WHAT": "what",
-            "WHY": "why",
-            "Scope": "scope",
-            "HOW": "open_to_how",
-            "Open to HOW": "open_to_how",
-            "Right-sized": "right_sized",
-            "Right-sizing": "right_sized",
-            "RS": "right_sized",
-        },
-        "extra_fields": ["alignment"],
-    },
-}
+        "before_score_name_map": dict(desc.get("reporting.before_score_name_map")),
+        "extra_fields": list(desc.get("reporting.pdf.extra_fields", [])),
+    }
+
+
+REPORT_CONFIG = {name: _report_config(_TYPES.get(name)) for name in _TYPES.names()}
 
 DEFAULT_ARTIFACTS = os.path.join(os.getcwd(), "artifacts")
 
@@ -371,7 +324,7 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Issue type (default: rfe)",
     )

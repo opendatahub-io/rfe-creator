@@ -7,19 +7,24 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import type_registry
 from artifact_utils import read_frontmatter, resolve_ids
 from generate_run_report import TYPE_CONFIG, split_children_map
 
+_TYPES = type_registry.load()
+
+# The dirs view of the registry-derived TYPE_CONFIG this script already imports — one
+# source for the per-type directories, no second copy.
 _TYPE_CONFIG = {
-    "rfe": {"reviews_dir": "rfe-reviews", "tasks_dir": "rfe-tasks"},
-    "initiative": {"reviews_dir": "initiative-reviews", "tasks_dir": "initiatives"},
+    name: {"reviews_dir": cfg["reviews_dir"], "tasks_dir": cfg["tasks_dir"]}
+    for name, cfg in TYPE_CONFIG.items()
 }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Aggregate review results for batch summaries.")
     parser.add_argument("ids", nargs="*", help="IDs (e.g. RHAIRFE-100)")
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     parser.add_argument(
         "--ids-file", help="Read IDs from a file (one per line) instead of positional args"
     )
