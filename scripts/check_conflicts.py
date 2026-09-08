@@ -30,22 +30,27 @@ import argparse
 import os
 import sys
 
+import type_registry
 from artifact_utils import scan_initiative_task_files, scan_task_files
 from jira_utils import check_description_conflict, require_env
 
+_TYPES = type_registry.load()
+
+# The task scanners are still a forked pair in artifact_utils (they collapse into one generic
+# later in the PR-2 series), so they are the one entry selected by type name rather than read
+# from the descriptor. A registered type without a scanner gets None and is refused in main().
+_SCAN_FNS = {"rfe": scan_task_files, "initiative": scan_initiative_task_files}
+
+# Derived from the type registry (design work-item-types-unified.md §10 item 2): the bare dir
+# form (Q13), identity.id_field and the descriptor write prefix identity.<tracker>.key_prefixes[0].
 _TYPE_CONFIG = {
-    "rfe": {
-        "originals_dir": "rfe-originals",
-        "scan_fn": scan_task_files,
-        "id_field": "rfe_id",
-        "jira_prefix": "RHAIRFE-",
-    },
-    "initiative": {
-        "originals_dir": "initiative-originals",
-        "scan_fn": scan_initiative_task_files,
-        "id_field": "initiative_id",
-        "jira_prefix": "RHOAIENG-",
-    },
+    name: {
+        "originals_dir": _TYPES.get(name).dirs(form="bare")["originals"],
+        "scan_fn": _SCAN_FNS.get(name),
+        "id_field": _TYPES.get(name).id_field,
+        "jira_prefix": _TYPES.get(name).key_prefixes[0],
+    }
+    for name in _TYPES.names()
 }
 
 
@@ -57,10 +62,13 @@ def main():
     parser.add_argument(
         "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
     )
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     args = parser.parse_args()
 
     tc = _TYPE_CONFIG[args.type]
+    if tc["scan_fn"] is None:
+        print(f"Error: no task scanner is registered for type {args.type!r}.", file=sys.stderr)
+        sys.exit(2)
 
     server, user, token = require_env()
     if not all([server, user, token]):
