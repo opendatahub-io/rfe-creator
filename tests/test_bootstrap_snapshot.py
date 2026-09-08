@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -17,11 +18,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "bootstrap_snapshot.py")
 
+import type_registry  # noqa: E402
 from bootstrap_snapshot import (  # noqa: E402
+    _RFE_SNAPSHOT_PREFIX,
     BOOTSTRAP_CONFIG,
     _description_at_time,
     _load_run_report,
     _parse_adf,
+    _run_dir_has_snapshots,
     find_latest_run_timestamp,
 )
 from snapshot_fetch import normalize_for_hash  # noqa: E402
@@ -1696,3 +1700,120 @@ class TestBootstrapInitiativeType:
         rfe_snaps = [f for f in snap_files if f.startswith("issue-snapshot-")]
         assert len(init_snaps) == 1
         assert len(rfe_snaps) == 0
+
+
+# ── Registry-derived BOOTSTRAP_CONFIG and the grandfathered probe (work-item-types PR-2c) ──
+
+# Hermetic: the developer's RFE_CREATOR_EXTRA_TYPES / RFE_CREATOR_BINDING_* never leak in.
+REG = type_registry.load(extra_roots=[], env={})
+
+
+def _dropin_root(tmp_path):
+    """A minimal third type under a drop-in root (registry env seam, dev/test only)."""
+    root = tmp_path / "types"
+    (root / "docs").mkdir(parents=True)
+    (root / "docs" / "type.yaml").write_text(
+        textwrap.dedent(
+            """\
+            schema_version: 1
+            type: docs
+            identity:
+              tracker: jira
+              jira: {project: DOCS, issue_type: Task, key_prefixes: ["DOCS-"]}
+              local_prefix: "DOC-"
+              id_field: doc_id
+            dirs: {tasks: artifacts/doc-tasks, originals: artifacts/doc-originals}
+            conventions:
+              labels: {ignore: docs-ignore, split_quarantine: docs-split-quarantine}
+            snapshot: {prefix: docs-snapshot-, report_prefix: docs-run-}
+            reporting: {item_key: per_doc}
+            """
+        )
+    )
+    return str(root)
+
+
+def _clean_env(**extra):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RFE_CREATOR_")}
+    env.update(extra)
+    return env
+
+
+class TestBootstrapConfigDerivesFromTheRegistry:
+    def test_values_are_the_pre_registry_literals(self):
+        # Behaviour-neutral migration: same keys, same order, same values as the literal table
+        # this replaced (rfe's empty report prefix is grandfathered: its reports are <run>.yaml).
+        assert BOOTSTRAP_CONFIG == {
+            "rfe": {"report_prefix": "", "item_key": "per_rfe"},
+            "initiative": {"report_prefix": "initiative-run-", "item_key": "per_initiative"},
+        }
+        assert list(BOOTSTRAP_CONFIG) == ["rfe", "initiative"]
+        for config in BOOTSTRAP_CONFIG.values():
+            assert list(config) == ["report_prefix", "item_key"]
+
+    @pytest.mark.parametrize("type_name", REG.names())
+    def test_projection_from_the_descriptor(self, type_name):
+        desc = REG.get(type_name)
+        bc = BOOTSTRAP_CONFIG[type_name]
+        assert bc["report_prefix"] == desc.get("snapshot.report_prefix")
+        assert bc["item_key"] == desc.get("reporting.item_key")
+
+    def test_type_choices_are_the_registry_choices(self):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--help"], capture_output=True, text=True, env=_clean_env()
+        )
+        assert result.returncode == 0
+        assert "--type {rfe,initiative}" in result.stdout
+
+    def test_a_drop_in_type_is_offered_and_configured(self, tmp_path):
+        root = _dropin_root(tmp_path)
+        env = _clean_env(
+            RFE_CREATOR_EXTRA_TYPES=root,
+            RFE_CREATOR_EXTRA_TYPES_ALLOWLIST=root,
+            JIRA_SERVER="http://127.0.0.1:9",
+            JIRA_USER="u",
+            JIRA_TOKEN="t",
+        )
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--help"], capture_output=True, text=True, env=env
+        )
+        assert "--type {rfe,docs,initiative}" in result.stdout
+        # Both per-type tables are indexed before the first Jira call; an empty results dir
+        # stops the run at the offline gate right after, so this proves the drop-in type is
+        # configured end to end without a server.
+        results = tmp_path / "results"
+        results.mkdir()
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--type", "docs", "--results-dir", str(results), "x"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 1
+        assert result.stderr == "Error: no valid run directories found\n"
+
+
+class TestRunDirSnapshotProbeIsGrandfatheredToTheRfePrefix:
+    """_run_dir_has_snapshots probes for the rfe snapshot prefix whatever --type is running —
+    the pre-registry literal 'issue-snapshot-', now read from the rfe descriptor. Making the
+    probe per-type is a deliberate follow-up; this pins today's behaviour so that change is a
+    visible test change and not a silent one."""
+
+    def _plant(self, tmp_path, run, filename):
+        path = tmp_path / run / "auto-fix-runs" / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("issues: {}\n")
+
+    def test_probe_prefix_is_the_rfe_descriptor_snapshot_prefix(self):
+        assert _RFE_SNAPSHOT_PREFIX == REG.get("rfe").get("snapshot.prefix") == "issue-snapshot-"
+
+    @pytest.mark.parametrize("type_name", REG.names())
+    def test_only_rfe_prefixed_snapshots_are_seen(self, tmp_path, type_name):
+        prefix = REG.get(type_name).get("snapshot.prefix")
+        self._plant(tmp_path, "run", f"{prefix}20260401-120000.yaml")
+        assert _run_dir_has_snapshots(str(tmp_path), "run") is (type_name == "rfe")
+
+    def test_non_yaml_and_missing_dir_are_not_snapshots(self, tmp_path):
+        self._plant(tmp_path, "run", "issue-snapshot-20260401-120000.yaml.bak")
+        assert _run_dir_has_snapshots(str(tmp_path), "run") is False
+        assert _run_dir_has_snapshots(str(tmp_path), "missing") is False

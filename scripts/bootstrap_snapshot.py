@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from jira_utils import api_call_with_retry, make_request, require_env
 from snapshot_fetch import (
     SNAPSHOT_CONFIG,
@@ -40,16 +41,27 @@ from snapshot_fetch import (
     fetch_all_issues,
 )
 
+_TYPES = type_registry.load()
+
+# Per-type run-report facts, projected from the type descriptors: the report file prefix
+# is snapshot.report_prefix (rfe's is the grandfathered empty string — its reports are
+# bare <run>.yaml) and the entry-list key is reporting.item_key. Same keys, same order and
+# same values as the literal table this replaces; generate_run_report.py writes from the
+# same two fields and tests/test_report_roundtrip.py round-trips the pair through the CLI.
 BOOTSTRAP_CONFIG = {
-    "rfe": {
-        "report_prefix": "",
-        "item_key": "per_rfe",
-    },
-    "initiative": {
-        "report_prefix": "initiative-run-",
-        "item_key": "per_initiative",
-    },
+    name: {
+        "report_prefix": _TYPES.get(name).get("snapshot.report_prefix"),
+        "item_key": _TYPES.get(name).get("reporting.item_key"),
+    }
+    for name in _TYPES.names()
 }
+
+# Grandfathered probe prefix: _run_dir_has_snapshots looks for the rfe snapshot prefix
+# ("issue-snapshot-") whatever --type is running, exactly as the pre-registry literal did,
+# so an initiative results directory is never recognised as partial. Reading the value
+# from the rfe descriptor changes nothing; making the probe per-type (the selected type's
+# snapshot.prefix) is a deliberate follow-up (design §10 PR-10, latent initiative-CI bugs).
+_RFE_SNAPSHOT_PREFIX = _TYPES.get("rfe").get("snapshot.prefix")
 
 
 def _load_run_report(results_dir, run_name, config=None):
@@ -173,7 +185,7 @@ def _run_dir_has_snapshots(results_dir, run_name):
     if not os.path.isdir(run_dir):
         return False
     return any(
-        name.startswith("issue-snapshot-") and name.endswith(".yaml")
+        name.startswith(_RFE_SNAPSHOT_PREFIX) and name.endswith(".yaml")
         for name in os.listdir(run_dir)
     )
 
@@ -416,7 +428,7 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Issue type (default: rfe)",
     )
