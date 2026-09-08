@@ -10,6 +10,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import artifact_utils
 import generate_run_report
 import type_registry
 from generate_run_report import TYPE_CONFIG, _parse_run_id, build_report
@@ -948,7 +949,25 @@ class TestTypeConfigIsRegistryDerived:
             assert cfg["child_parent_prefixes"] == (desc.local_prefix, *desc.key_prefixes)
             assert cfg["tracker_prefix"] == desc.write_prefix
             assert cfg["local_prefix"] == desc.local_prefix
-            assert callable(cfg["scan_tasks"])
+            # The generic scan bound to the descriptor, not a per-type function.
+            assert cfg["scan_tasks"].func is artifact_utils.scan_tasks
+            assert cfg["scan_tasks"].keywords["desc"].name == name
+
+    def test_scan_tasks_is_the_generic_over_the_type_tree(self, tmp_path):
+        """config["scan_tasks"](artifacts_dir) returns exactly what the per-type wrappers
+        return — the contract split_children_map, build_report and batch_summary rely on."""
+        art = str(tmp_path / "artifacts")
+        _write(f"{art}/rfe-tasks/RHAIRFE-1.md", TASK_TEMPLATE.format(rfe_id="RHAIRFE-1", extra=""))
+        _write(
+            f"{art}/initiatives/INIT-1.md",
+            "---\ninitiative_id: INIT-1\ntitle: T\npriority: Major\nstatus: Draft\n---\n\nbody\n",
+        )
+        rfe_rows = TYPE_CONFIG["rfe"]["scan_tasks"](art)
+        init_rows = TYPE_CONFIG["initiative"]["scan_tasks"](art)
+        assert rfe_rows == artifact_utils.scan_task_files(art)
+        assert init_rows == artifact_utils.scan_initiative_task_files(art)
+        assert [d["rfe_id"] for _, d in rfe_rows] == ["RHAIRFE-1"]
+        assert [d["initiative_id"] for _, d in init_rows] == ["INIT-1"]
 
     def test_a_drop_in_descriptor_projects_without_a_code_change(self):
         registry = type_registry.load(extra_roots=[FIXTURE_TYPES], env={})
@@ -964,8 +983,10 @@ class TestTypeConfigIsRegistryDerived:
         assert cfg["child_parent_prefixes"] == ("RHAISTRAT-", "RHAI-")
         assert cfg["tracker_prefix"] == "RHAI-"
         assert cfg["local_prefix"] == "RHAISTRAT-"
-        # The forked artifact_utils scanner pair has no third member until it is unified.
-        assert cfg["scan_tasks"] is None
+        # The scan is the generic bound to this descriptor: a third type gets a scanner over
+        # its own dirs.tasks without a code change.
+        assert cfg["scan_tasks"].func is artifact_utils.scan_tasks
+        assert cfg["scan_tasks"].keywords == {"desc": registry.get("epic")}
 
     def test_projection_does_not_alias_descriptor_data(self):
         registry = type_registry.load(extra_roots=[], env={})

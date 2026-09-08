@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import type_registry
-from artifact_utils import resolve_ids, scan_initiative_task_files, scan_task_files
+from artifact_utils import resolve_ids, scan_tasks
 
 _TYPES = type_registry.load()
 
@@ -34,14 +34,11 @@ def main():
 
     artifacts_dir = os.path.join(os.getcwd(), "artifacts")
 
-    # The scan pair is still forked in artifact_utils (it collapses into one generic keyed on
-    # dirs.tasks/schema.task in a later PR); select it by type name, read the id field from
-    # the registry.
-    if args.type == "initiative":
-        tasks = scan_initiative_task_files(artifacts_dir)
-    else:
-        tasks = scan_task_files(artifacts_dir)
-    id_field = _TYPES.get(args.type).id_field
+    # The type's descriptor names the task tree (dirs.tasks, validated as <type>-task) and the
+    # id field (identity.id_field); scan_tasks reads the former, the loop below the latter.
+    desc = _TYPES.get(args.type)
+    tasks = scan_tasks(artifacts_dir, desc)
+    id_field = desc.id_field
 
     # Build parent -> children mapping
     children_by_parent = {pid: [] for pid in parent_ids}

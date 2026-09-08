@@ -74,12 +74,9 @@ def _dropin_root(tmp_path):
 
 class TestTypeConfigDerivesFromTheRegistry:
     def test_values_are_the_pre_registry_literals(self):
-        # Behaviour-neutral migration: same keys, same order, same values.
-        plain = {
-            t: {k: v for k, v in c.items() if k != "scan_fn"}
-            for t, c in check_conflicts._TYPE_CONFIG.items()
-        }
-        assert plain == {
+        # Behaviour-neutral migration: same keys, same order, same values. The scanner is no
+        # longer a per-type entry: main() calls artifact_utils.scan_tasks with the descriptor.
+        assert check_conflicts._TYPE_CONFIG == {
             "rfe": {
                 "originals_dir": "rfe-originals",
                 "id_field": "rfe_id",
@@ -93,14 +90,34 @@ class TestTypeConfigDerivesFromTheRegistry:
         }
         assert list(check_conflicts._TYPE_CONFIG) == ["rfe", "initiative"]
         for config in check_conflicts._TYPE_CONFIG.values():
-            assert list(config) == ["originals_dir", "scan_fn", "id_field", "jira_prefix"]
+            assert list(config) == ["originals_dir", "id_field", "jira_prefix"]
+        assert not hasattr(check_conflicts, "_SCAN_FNS")
 
-    def test_scan_fns_are_the_forked_pair(self):
-        assert check_conflicts._TYPE_CONFIG["rfe"]["scan_fn"] is artifact_utils.scan_task_files
-        assert (
-            check_conflicts._TYPE_CONFIG["initiative"]["scan_fn"]
-            is artifact_utils.scan_initiative_task_files
+    @pytest.mark.parametrize("type_name", ["rfe", "initiative"])
+    def test_main_scans_the_selected_type_through_the_generic(
+        self, monkeypatch, tmp_path, type_name
+    ):
+        # The scan is artifact_utils.scan_tasks over the --type descriptor — the same call the
+        # per-type wrappers make, so the rows are what scan_task_files /
+        # scan_initiative_task_files returned before the pair collapsed.
+        for var, value in JIRA_ENV.items():
+            monkeypatch.setenv(var, value)
+        calls = []
+
+        def recording_scan(artifacts_dir, desc):
+            calls.append((artifacts_dir, desc.name))
+            return artifact_utils.scan_tasks(artifacts_dir, desc)
+
+        monkeypatch.setattr(check_conflicts, "scan_tasks", recording_scan)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["check_conflicts.py", "--type", type_name, "--artifacts-dir", str(tmp_path)],
         )
+        with pytest.raises(SystemExit) as excinfo:
+            check_conflicts.main()
+        assert excinfo.value.code == 0
+        assert calls == [(str(tmp_path), type_name)]
 
     @pytest.mark.parametrize("type_name", REG.names())
     def test_projection_from_the_descriptor(self, type_name):
@@ -115,7 +132,9 @@ class TestTypeConfigDerivesFromTheRegistry:
         assert result.returncode == 0
         assert "--type {rfe,initiative}" in result.stdout
 
-    def test_a_drop_in_type_is_offered_but_refused_without_a_scanner(self, tmp_path):
+    def test_a_drop_in_type_is_offered_and_scanned(self, tmp_path):
+        # A third registered type used to be refused (exit 2, "no task scanner is registered")
+        # because the scanners were a forked pair; the generic scans its dirs.tasks like any other.
         root = _dropin_root(tmp_path)
         env = {
             **os.environ,
@@ -133,8 +152,9 @@ class TestTypeConfigDerivesFromTheRegistry:
             text=True,
             env=env,
         )
-        assert result.returncode == 2
-        assert "no task scanner is registered for type 'docs'" in result.stderr
+        assert result.returncode == 0
+        assert result.stdout == "CONFLICT_COUNT=0\nOK: no Jira-sourced items to check\n"
+        assert result.stderr == ""
 
 
 class TestMain:

@@ -12,14 +12,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from artifact_utils import write_frontmatter  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "collect_children.py")
+# A complete descriptor that ships outside types/ (never enumerated by default): the third
+# type the generic scan must serve without a code change.
+FIXTURE_TYPES = os.path.join(os.path.dirname(__file__), "fixtures", "types")
 
 
-def _run(args, cwd):
+def _run(args, cwd, env=None):
     result = subprocess.run(
         [sys.executable, SCRIPT] + args,
         capture_output=True,
         text=True,
         cwd=cwd,
+        env=env,
     )
     return result.stdout.strip(), result.stderr, result.returncode
 
@@ -198,3 +202,29 @@ class TestIdsFile:
         )
         assert rc == 0
         assert "RHOAIENG-50:RHOAIENG-51" in out
+
+
+class TestThirdType:
+    """The scan is artifact_utils.scan_tasks over the --type descriptor: a registered third
+    type is read from its own dirs.tasks with its own id field, where the forked pair sent
+    every non-initiative type to rfe-tasks/rfe_id."""
+
+    def test_drop_in_type_children_come_from_its_own_tree(self, tmp_path):
+        os.makedirs(tmp_path / "artifacts" / "epic-tasks")
+        os.makedirs(tmp_path / "artifacts" / "rfe-tasks")
+        (tmp_path / "artifacts" / "epic-tasks" / "RHAISTRAT-7-E001.md").write_text(
+            "---\nepic_id: RHAISTRAT-7-E001\ntitle: Child epic\npriority: P1\nstatus: Ready\n"
+            "component: platform\nteam: core\ntype: Implementation\nparent_key: RHAISTRAT-7\n"
+            "---\n\nbody\n"
+        )
+        env = {
+            **os.environ,
+            "RFE_CREATOR_EXTRA_TYPES": FIXTURE_TYPES,
+            "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": FIXTURE_TYPES,
+        }
+        out, err, rc = _run(
+            ["--type", "epic", "RHAISTRAT-7", "RHAISTRAT-8"], cwd=str(tmp_path), env=env
+        )
+        assert rc == 0, err
+        assert err == ""
+        assert out.splitlines() == ["RHAISTRAT-7:RHAISTRAT-7-E001", "RHAISTRAT-8:"]
