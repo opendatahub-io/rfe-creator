@@ -9,6 +9,89 @@ import time
 import urllib.request
 
 import pytest
+import yaml
+
+TYPES_DIR = os.path.join(os.path.dirname(__file__), "..", "types")
+
+
+# ─── Drop-in type descriptors ─────────────────────────────────────────────────
+
+
+def _set_dotted(data, dotted, value):
+    node = data
+    keys = dotted.split(".")
+    for key in keys[:-1]:
+        node = node.setdefault(key, {})
+    node[keys[-1]] = value
+
+
+def _del_dotted(data, dotted):
+    node = data
+    keys = dotted.split(".")
+    for key in keys[:-1]:
+        node = node[key]
+    del node[keys[-1]]
+
+
+# A drop-in derived from types/rfe with its own binding, id grammar and layout, so it registers
+# next to the shipped types (split_submit refuses two types on one (project, issue_type) pair)
+# and scans its own directories. Everything else (labels, schema facts, snapshot, reporting)
+# stays the rfe value, so every adopted table builds for it at import.
+MEMO_OVERRIDES = {
+    "display": {"entity": "Memo", "entity_plural": "Memos"},
+    "identity.jira.project": "MEMO",
+    "identity.jira.issue_type": "Memo",
+    "identity.jira.key_prefixes": ["MEMO-"],
+    "identity.local_prefix": "MEMO-",
+    "identity.local_id_pattern": r"^MEMO-\d+$",
+    "identity.id_field": "memo_id",
+    "dirs.tasks": "artifacts/memo-tasks",
+    "dirs.originals": "artifacts/memo-originals",
+    "dirs.reviews": "artifacts/memo-reviews",
+    "conventions.type_label": "Memo",
+    "conventions.parent_key_patterns": [r"MEMO-\d+"],
+    "snapshot.prefix": "memo-snapshot-",
+}
+
+
+def write_drop_in(root, name, base="rfe", overrides=None, drop=()):
+    """Write ``<root>/<name>/type.yaml``: the shipped ``base`` descriptor renamed to ``name``,
+    with the dotted ``drop`` paths removed and the dotted ``overrides`` applied. Returns the
+    descriptor path. ``root`` is what RFE_CREATOR_EXTRA_TYPES takes."""
+    with open(os.path.join(TYPES_DIR, base, "type.yaml"), encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    data["type"] = name
+    for dotted in drop:
+        _del_dotted(data, dotted)
+    for dotted, value in (overrides or {}).items():
+        _set_dotted(data, dotted, value)
+    path = os.path.join(root, name, "type.yaml")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=False)
+    return path
+
+
+class DropInRoot:
+    """One extra registry root under tmp_path; ``path`` is the RFE_CREATOR_EXTRA_TYPES value."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def add(self, name, base="rfe", overrides=None, drop=()):
+        write_drop_in(self.path, name, base=base, overrides=overrides, drop=drop)
+        return self.path
+
+    def memo(self, name="memo", drop=()):
+        """An rfe copy on its own (MEMO, Memo) binding, minus the ``drop`` paths."""
+        return self.add(name, overrides=MEMO_OVERRIDES, drop=drop)
+
+
+@pytest.fixture
+def drop_in_root(tmp_path):
+    root = tmp_path / "extra-types"
+    root.mkdir()
+    return DropInRoot(str(root))
 
 
 def _find_free_port():

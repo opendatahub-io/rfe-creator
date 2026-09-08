@@ -5,10 +5,12 @@ import os
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+import type_registry  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
 
@@ -19,14 +21,30 @@ def _write(path, content):
         f.write(content)
 
 
+def _clean_env(**extra):
+    """The developer's registry seams and the headless/CI markers stay out of subprocess runs
+    (an RFE_CREATOR_EXTRA_TYPES root would change the --type choices; a runner's ``CI`` would
+    gate it)."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("RFE_CREATOR_") and k not in type_registry.HEADLESS_MARKER_VARS
+    }
+    env.update(extra)
+    return env
+
+
+FAKE_CREDS = {
+    "JIRA_SERVER": "https://fake.atlassian.net",
+    "JIRA_USER": "fake@example.com",
+    "JIRA_TOKEN": "fake-token",
+}
+NO_CREDS = {"JIRA_SERVER": "", "JIRA_USER": "", "JIRA_TOKEN": ""}
+
+
 def _run_submit(artifacts_dir, extra_flags=None):
     """Run submit.py --dry-run and return stdout."""
-    env = {
-        **os.environ,
-        "JIRA_SERVER": "https://fake.atlassian.net",
-        "JIRA_USER": "fake@example.com",
-        "JIRA_TOKEN": "fake-token",
-    }
+    env = _clean_env(**FAKE_CREDS)
     cmd = ["python3", SCRIPT, "--dry-run", "--artifacts-dir", artifacts_dir]
     if extra_flags:
         cmd.extend(extra_flags)
@@ -702,12 +720,7 @@ class TestGenerateReportFlag:
 
     def test_generate_report_without_timestamp_fails(self):
         """--generate-report without --report-timestamp → error exit."""
-        env = {
-            **os.environ,
-            "JIRA_SERVER": "",
-            "JIRA_USER": "",
-            "JIRA_TOKEN": "",
-        }
+        env = _clean_env(**NO_CREDS)
         result = subprocess.run(
             [sys.executable, SCRIPT, "--dry-run", "--generate-report"],
             capture_output=True,
@@ -725,12 +738,7 @@ class TestGenerateReportFlag:
             REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
         )
 
-        env = {
-            **os.environ,
-            "JIRA_SERVER": "https://fake.atlassian.net",
-            "JIRA_USER": "fake@example.com",
-            "JIRA_TOKEN": "fake-token",
-        }
+        env = _clean_env(**FAKE_CREDS)
         result = subprocess.run(
             [
                 sys.executable,
@@ -974,12 +982,7 @@ class TestSplitFailureIsRecorded:
         # type root beside it or every registry-adopted import (generate_run_report) dies.
         shutil.copytree(os.path.join(os.path.dirname(SCRIPT), "..", "types"), tmp_path / "types")
 
-        env = {
-            **os.environ,
-            "JIRA_SERVER": "https://fake.atlassian.net",
-            "JIRA_USER": "fake@example.com",
-            "JIRA_TOKEN": "fake-token",
-        }
+        env = _clean_env(**FAKE_CREDS)
         result = subprocess.run(
             [
                 "python3",
@@ -1049,3 +1052,213 @@ class TestRecordSplitFailureResilience:
 
         assert "rfe-creator-split-quarantine" in added
         assert "rfe-creator-needs-attention" in added
+
+
+class TestTypeConfigsProjection:
+    """TYPE_CONFIGS projects the type descriptors (types/<type>/type.yaml) at import.
+
+    The rfe entry must equal, key for key and in key order, the literal table submit.py carried
+    before it read the registry: every label, comment and Jira payload this script composes
+    derives from these values, so the table is an artifact contract and this golden keeps a
+    descriptor edit that reaches Jira a visible test change. (The initiative twin lives in
+    tests/test_initiative_submit.py.)
+    """
+
+    RFE = {
+        "project": "RHAIRFE",
+        "issue_type": "Feature Request",
+        "type_label": "RFE",
+        "id_field": "rfe_id",
+        "local_prefix": "RFE-",
+        "jira_prefix": "RHAIRFE-",
+        "tasks_dir": "rfe-tasks",
+        "reviews_dir": "rfe-reviews",
+        "originals_dir": "rfe-originals",
+        "task_schema": "rfe-task",
+        "review_schema": "rfe-review",
+        "snapshot_prefix": "",
+        "split_type_arg": None,
+        "label_prefix": "rfe-creator",
+        "rubric_pass_label": "rfe-creator-autofix-rubric-pass",
+        "feasibility_labels": {
+            "feasible": "rfe-creator-feasibility-pass",
+            "infeasible": "rfe-creator-feasibility-fail",
+            "indeterminate": "rfe-creator-feasibility-unknown",
+        },
+        "alignment_labels": None,
+        "removed_context_preamble": (
+            "*[RFE Creator]* The following technical implementation "
+            "details were removed from the RFE description during review. "
+            "This content is better suited for a RHAISTRAT and is "
+            "preserved here for reference:"
+        ),
+        "comment_prefix": "[RFE Creator]",
+        "has_index": True,
+    }
+
+    def test_rfe_projection_is_the_literal_table(self):
+        import submit as submit_mod
+
+        cfg = submit_mod.TYPE_CONFIGS["rfe"]
+        assert cfg == self.RFE
+        assert list(cfg) == list(self.RFE)
+        assert list(cfg["feasibility_labels"]) == list(self.RFE["feasibility_labels"])
+        assert {k: type(v) for k, v in cfg.items()} == {k: type(v) for k, v in self.RFE.items()}
+
+    def test_every_registered_type_has_a_config_in_registry_order(self):
+        import submit as submit_mod
+
+        assert list(submit_mod.TYPE_CONFIGS) == submit_mod._TYPES.names()
+        assert list(submit_mod.TYPE_CONFIGS) == ["rfe", "initiative"]
+        for cfg in submit_mod.TYPE_CONFIGS.values():
+            assert list(cfg) == list(self.RFE)
+
+    def test_module_alias_is_the_rfe_feasibility_map(self):
+        import submit as submit_mod
+
+        assert submit_mod.FEASIBILITY_LABELS is submit_mod.TYPE_CONFIGS["rfe"]["feasibility_labels"]
+
+    def test_projected_maps_do_not_alias_descriptor_data(self):
+        """A caller editing a projected label map must not corrupt the registry."""
+        import submit as submit_mod
+
+        desc = submit_mod._TYPES.get("rfe")
+        feas = submit_mod.TYPE_CONFIGS["rfe"]["feasibility_labels"]
+        assert feas == desc.get("conventions.labels.feasibility")
+        assert feas is not desc.get("conventions.labels.feasibility")
+
+    def test_rfe_grandfathered_sentinels(self):
+        """'' means "snapshot_fetch's default prefix" and None means "spawn split_submit.py
+        without --type" — the rfe conventions the pre-registry table encoded, never the
+        descriptor's own snapshot.prefix."""
+        import submit as submit_mod
+
+        desc = submit_mod._TYPES.get("rfe")
+        assert desc.get("snapshot.prefix") == "issue-snapshot-"
+        assert submit_mod.TYPE_CONFIGS["rfe"]["snapshot_prefix"] == ""
+        assert submit_mod.TYPE_CONFIGS["rfe"]["split_type_arg"] is None
+
+    def test_type_choices_are_the_registry_choices(self):
+        """--help still offers exactly {rfe,initiative}; an unregistered type is refused."""
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--help"], capture_output=True, text=True, env=_clean_env()
+        )
+        assert result.returncode == 0, result.stderr
+        assert "--type {rfe,initiative}" in result.stdout
+
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--type", "epic", "--dry-run"],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+        )
+        assert result.returncode == 2
+        assert "invalid choice: 'epic'" in result.stderr
+
+
+class TestApproveStateFromTheBinding:
+    """identity.jira.state_map.approved is optional in the schema: a registered type without it
+    still submits, and only --auto-approve is refused — as a usage error, before any scan or
+    Jira call. Both shipped types declare it (tests/test_type_registry_pins.py pins the value the
+    emulator workflow seeds)."""
+
+    def _run_memo(self, root, tmp_path, *flags):
+        return subprocess.run(
+            [sys.executable, SCRIPT, "--type", "memo", "--dry-run", *flags]
+            + ["--artifacts-dir", str(tmp_path / "artifacts")],
+            capture_output=True,
+            text=True,
+            env=_clean_env(RFE_CREATOR_EXTRA_TYPES=root, **FAKE_CREDS),
+        )
+
+    def test_a_type_without_the_approved_state_submits(self, drop_in_root, tmp_path):
+        root = drop_in_root.memo(drop=("identity.jira.state_map.approved",))
+        result = self._run_memo(root, tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "No Memo task files found." in result.stderr  # startup passed, the scan ran
+
+    def test_auto_approve_is_refused_for_a_type_without_the_approved_state(
+        self, drop_in_root, tmp_path
+    ):
+        root = drop_in_root.memo(drop=("identity.jira.state_map.approved",))
+        result = self._run_memo(root, tmp_path, "--auto-approve")
+        assert result.returncode == 2, result.stderr
+        assert (
+            "error: --auto-approve: type 'memo' declares no identity.jira.state_map.approved"
+        ) in result.stderr
+        assert "No Memo task files found" not in result.stderr
+        assert result.stdout == ""
+
+    def test_auto_approve_uses_the_type_s_own_state(self, drop_in_root, tmp_path):
+        root = drop_in_root.memo()
+        result = self._run_memo(root, tmp_path, "--auto-approve")
+        assert result.returncode == 1, result.stderr
+        assert "No Memo task files found." in result.stderr
+
+
+class TestReportCommandArgv:
+    """_generate_reports spawns generate_run_report.py and generate_review_pdf.py.
+
+    Both scripts default to rfe, so the rfe invocation carries no --type (grandfathered
+    argv, byte-identical to the pre-registry command) and every other type is named.
+    """
+
+    def _capture(self, monkeypatch, type_name, tmp_path):
+        import submit as submit_mod
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        monkeypatch.setattr(submit_mod.subprocess, "run", fake_run)
+        args = SimpleNamespace(
+            type=type_name, artifacts_dir=str(tmp_path), report_timestamp="20260404-170041"
+        )
+        submit_mod._generate_reports(args)
+        return calls
+
+    def test_rfe_report_commands_carry_no_type_flag(self, monkeypatch, tmp_path):
+        yaml_cmd, html_cmd = self._capture(monkeypatch, "rfe", tmp_path)
+        assert yaml_cmd[1].endswith("generate_run_report.py")
+        assert yaml_cmd[2:] == [
+            "--start-time",
+            "20260404-170041",
+            "--artifacts-dir",
+            str(tmp_path),
+            "--report-stage",
+            "final",
+        ]
+        assert html_cmd[1].endswith("generate_review_pdf.py")
+        assert html_cmd[2:] == [
+            "--revised-only",
+            "--artifacts-dir",
+            str(tmp_path),
+            "--output",
+            os.path.join(str(tmp_path), "auto-fix-runs", "20260404-170041-report.html"),
+        ]
+
+    def test_other_types_are_named_explicitly(self, monkeypatch, tmp_path):
+        yaml_cmd, html_cmd = self._capture(monkeypatch, "initiative", tmp_path)
+        assert yaml_cmd[2:] == [
+            "--start-time",
+            "20260404-170041",
+            "--artifacts-dir",
+            str(tmp_path),
+            "--report-stage",
+            "final",
+            "--type",
+            "initiative",
+        ]
+        assert html_cmd[2:] == [
+            "--revised-only",
+            "--artifacts-dir",
+            str(tmp_path),
+            "--output",
+            os.path.join(
+                str(tmp_path), "auto-fix-runs", "initiative-run-20260404-170041-report.html"
+            ),
+            "--type",
+            "initiative",
+        ]

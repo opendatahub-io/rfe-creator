@@ -8,6 +8,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+import type_registry  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "submit.py")
 
@@ -18,14 +19,30 @@ def _write(path, content):
         f.write(content)
 
 
+def _clean_env(**extra):
+    """The developer's registry seams and the headless/CI markers stay out of subprocess runs
+    (an RFE_CREATOR_EXTRA_TYPES root would change the --type choices; a runner's ``CI`` would
+    gate it)."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("RFE_CREATOR_") and k not in type_registry.HEADLESS_MARKER_VARS
+    }
+    env.update(extra)
+    return env
+
+
+FAKE_CREDS = {
+    "JIRA_SERVER": "https://fake.atlassian.net",
+    "JIRA_USER": "fake@example.com",
+    "JIRA_TOKEN": "fake-token",
+}
+NO_CREDS = {"JIRA_SERVER": "", "JIRA_USER": "", "JIRA_TOKEN": ""}
+
+
 def _run_submit(artifacts_dir, extra_flags=None):
     """Run submit.py --type initiative --dry-run and return stdout."""
-    env = {
-        **os.environ,
-        "JIRA_SERVER": "https://fake.atlassian.net",
-        "JIRA_USER": "fake@example.com",
-        "JIRA_TOKEN": "fake-token",
-    }
+    env = _clean_env(**FAKE_CREDS)
     cmd = [
         "python3",
         SCRIPT,
@@ -370,12 +387,7 @@ class TestAutoApprove:
 class TestGenerateReportFlag:
     def test_generate_report_without_timestamp_fails(self):
         """--generate-report without --report-timestamp → error exit."""
-        env = {
-            **os.environ,
-            "JIRA_SERVER": "",
-            "JIRA_USER": "",
-            "JIRA_TOKEN": "",
-        }
+        env = _clean_env(**NO_CREDS)
         result = subprocess.run(
             [sys.executable, SCRIPT, "--type", "initiative", "--dry-run", "--generate-report"],
             capture_output=True,
@@ -393,12 +405,7 @@ class TestGenerateReportFlag:
             _default_review("INIT-001"),
         )
 
-        env = {
-            **os.environ,
-            "JIRA_SERVER": "https://fake.atlassian.net",
-            "JIRA_USER": "fake@example.com",
-            "JIRA_TOKEN": "fake-token",
-        }
+        env = _clean_env(**FAKE_CREDS)
         result = subprocess.run(
             [
                 sys.executable,
@@ -491,3 +498,66 @@ class TestNeedsAttention:
         stdout, _, rc = _run_submit(art_dir)
         assert rc == 0
         assert "Would post needs-attention comment" in stdout
+
+
+class TestTypeConfigProjection:
+    """The initiative entry of submit.TYPE_CONFIGS, projected from types/initiative/type.yaml,
+    must equal the literal table submit.py carried before it read the registry — key for key,
+    in key order (the rfe twin and the shared invariants live in tests/test_submit.py)."""
+
+    INITIATIVE = {
+        "project": "RHOAIENG",
+        "issue_type": "Initiative",
+        "type_label": "Initiative",
+        "id_field": "initiative_id",
+        "local_prefix": "INIT-",
+        "jira_prefix": "RHOAIENG-",
+        "tasks_dir": "initiatives",
+        "reviews_dir": "initiative-reviews",
+        "originals_dir": "initiative-originals",
+        "task_schema": "initiative-task",
+        "review_schema": "initiative-review",
+        "snapshot_prefix": "initiative-snapshot-",
+        "split_type_arg": "initiative",
+        "label_prefix": "initiative",
+        "rubric_pass_label": "initiative-autofix-rubric-pass",
+        "feasibility_labels": {
+            "feasible": "initiative-feasibility-pass",
+            "infeasible": "initiative-feasibility-fail",
+            "indeterminate": "initiative-feasibility-unknown",
+        },
+        "alignment_labels": {
+            "strong": "initiative-alignment-strong",
+            "partial": "initiative-alignment-partial",
+            "weak": "initiative-alignment-weak",
+        },
+        "removed_context_preamble": (
+            "*[Initiative Creator]* The following technical implementation "
+            "details were removed from the Initiative description during review. "
+            "This content may be useful as strategy context and is "
+            "preserved here for reference:"
+        ),
+        "comment_prefix": "[Initiative Creator]",
+        "has_index": False,
+    }
+
+    def test_initiative_projection_is_the_literal_table(self):
+        import submit as submit_mod
+
+        cfg = submit_mod.TYPE_CONFIGS["initiative"]
+        assert cfg == self.INITIATIVE
+        assert list(cfg) == list(self.INITIATIVE)
+        assert list(cfg["feasibility_labels"]) == list(self.INITIATIVE["feasibility_labels"])
+        assert list(cfg["alignment_labels"]) == list(self.INITIATIVE["alignment_labels"])
+        assert {k: type(v) for k, v in cfg.items()} == {
+            k: type(v) for k, v in self.INITIATIVE.items()
+        }
+
+    def test_projected_maps_do_not_alias_descriptor_data(self):
+        import submit as submit_mod
+
+        desc = submit_mod._TYPES.get("initiative")
+        cfg = submit_mod.TYPE_CONFIGS["initiative"]
+        assert cfg["alignment_labels"] == desc.get("conventions.labels.alignment")
+        assert cfg["alignment_labels"] is not desc.get("conventions.labels.alignment")
+        assert cfg["feasibility_labels"] is not desc.get("conventions.labels.feasibility")
