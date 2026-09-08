@@ -16,9 +16,12 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
+
+_TYPES = type_registry.load()
 _TYPE_CONFIG = {
-    "rfe": {"reviews_dir": "artifacts/rfe-reviews"},
-    "initiative": {"reviews_dir": "artifacts/initiative-reviews"},
+    name: {"reviews_dir": _TYPES.get(name).dirs()["reviews"]} for name in _TYPES.names()
 }
 
 
@@ -26,7 +29,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     args = parser.parse_args()
 
     reviews_dir = _TYPE_CONFIG[args.type]["reviews_dir"]

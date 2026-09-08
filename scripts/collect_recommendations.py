@@ -8,15 +8,17 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import ValidationError, read_frontmatter, resolve_ids
 
+_TYPES = type_registry.load()
 ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
 
 def _review_dir(entry_type):
-    """Return the review directory for the given type."""
-    subdir = "initiative-reviews" if entry_type == "initiative" else "rfe-reviews"
-    return os.path.join(ARTIFACTS_DIR, subdir)
+    """Return the review directory for the given type (anything unregistered: rfe, as before)."""
+    desc = _TYPES.get(entry_type if entry_type in _TYPES else "rfe")
+    return os.path.join(ARTIFACTS_DIR, desc.dirs(form="bare")["reviews"])
 
 
 def _read_review_data(path):
@@ -96,7 +98,7 @@ def main():
     parser.add_argument("--errors", action="store_true", help="Collect IDs with error field set")
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Entry type (default: rfe)",
     )

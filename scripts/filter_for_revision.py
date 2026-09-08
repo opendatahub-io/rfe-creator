@@ -21,13 +21,17 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import read_frontmatter_validated, update_frontmatter
+
+_TYPES = type_registry.load()
 
 
 def _review_path_and_schema(item_id):
-    if item_id.startswith("INIT-") or item_id.startswith("RHOAIENG-"):
-        return f"artifacts/initiative-reviews/{item_id}-review.md", "initiative-review"
-    return f"artifacts/rfe-reviews/{item_id}-review.md", "rfe-review"
+    """Review path and schema of the type that owns ``item_id``; anything unrecognised is an
+    rfe (the default branch of the prefix sniff this replaces)."""
+    desc = _TYPES.detect(item_id) or _TYPES.get("rfe")
+    return f"{desc.dirs()['reviews']}/{item_id}-review.md", f"{desc.name}-review"
 
 
 def main():

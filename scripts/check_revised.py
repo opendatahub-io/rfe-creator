@@ -18,7 +18,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import find_review_file, read_frontmatter, read_ids_file, update_frontmatter
+
+_TYPES = type_registry.load()
 
 
 def strip_frontmatter(text):
@@ -44,22 +47,21 @@ def check_pair(original_path, task_path):
     return original.strip() != task.strip()
 
 
+# Bare dir form: this script joins onto artifacts_dir itself (Q13).
 _TYPE_CONFIG = {
-    "rfe": {
-        "originals_dir": "rfe-originals",
-        "tasks_dir": "rfe-tasks",
-        "review_schema": "rfe-review",
-    },
-    "initiative": {
-        "originals_dir": "initiative-originals",
-        "tasks_dir": "initiatives",
-        "review_schema": "initiative-review",
-    },
+    name: {
+        "originals_dir": _TYPES.get(name).dirs(form="bare")["originals"],
+        "tasks_dir": _TYPES.get(name).dirs(form="bare")["tasks"],
+        "review_schema": f"{name}-review",
+    }
+    for name in _TYPES.names()
 }
 
 
 def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe"):
     """Compare originals to tasks and set auto_revised in review frontmatter."""
+    # --type is hand-parsed in main() without choices; an unregistered type fails here with
+    # the same KeyError it always did (the dict's keys ARE the registry names).
     tc = _TYPE_CONFIG[pipeline_type]
     originals_dir = os.path.join(artifacts_dir, tc["originals_dir"])
     tasks_dir = os.path.join(artifacts_dir, tc["tasks_dir"])

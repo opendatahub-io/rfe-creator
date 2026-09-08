@@ -21,9 +21,12 @@ be lifted verbatim into the ``creator-core`` follow-up (design §10 item 10), so
 them free of repo-specific helpers: JSON-Schema validation lives in
 ``scripts/validate_types.py`` (the only place ``jsonschema`` is imported), not here.
 
-PR-1 status: inert. No production script imports this module yet; the descriptors are
-pinned equal to today's hardcoded registries by test, and scripts adopt the registry
-one PR at a time (design §10 items 2-5).
+Adoption status (PR-2a): 18 scripts load the registry at import (module-level
+``_TYPES = type_registry.load()``; the table in ``types/README.md`` lists them) and use
+DESCRIPTOR values only; ``detect()``/``owns()`` are the design §5 rung-3 seed. The values a
+pending script still carries are pinned equal to the descriptors by test, and the remaining
+scripts adopt the registry one PR at a time (design §10 items 2-5); ``binding()`` overrides
+and ``resolve`` land in PR-3.
 
 Deployment binding override (design §3.2.1)
 --------------------------------------------
@@ -87,7 +90,8 @@ EXTRA_ROOTS_ENV = "RFE_CREATOR_EXTRA_TYPES"
 EXTRA_ROOTS_ALLOWLIST_ENV = "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST"
 # Headless/CI markers, checked in the registry's env only (never the cwd). CI / GITHUB_ACTIONS
 # are the conventional CI variables; RFE_CREATOR_HEADLESS is the explicit pipeline marker
-# (nothing exports it in PR-1 — no production script imports this module yet).
+# (exported by the headless launcher once a consumer needs the gate, PR-3; the PR-2a adopters
+# read descriptor values only).
 HEADLESS_MARKER_VARS = ("RFE_CREATOR_HEADLESS", "CI", "GITHUB_ACTIONS")
 _FALSE_VALUES = {"", "0", "false", "no", "off"}
 BINDING_ENV_PREFIX = "RFE_CREATOR_BINDING_"
@@ -256,6 +260,36 @@ class Descriptor:
     @property
     def id_field(self):
         return self.get("identity.id_field")
+
+    # -- identity detection (PR-2 seed of the design §5 ladder) ---------------------------
+
+    def _matches_local_id(self, item_id):
+        pattern = self.get("identity.local_id_pattern", None)
+        return bool(pattern) and re.fullmatch(pattern, item_id) is not None
+
+    def _has_key_prefix(self, item_id):
+        return any(item_id.startswith(p) for p in self.key_prefixes if p)
+
+    def _has_local_prefix(self, item_id):
+        local = self.get("identity.local_prefix", None)
+        return bool(local) and item_id.startswith(local)
+
+    def owns(self, item_id):
+        """True when ``item_id`` is one of this type's ids (design §5 rung 3, single type).
+
+        The same ladder as ``TypeRegistry.detect`` applied to one descriptor: a full match of
+        ``identity.local_id_pattern`` (most specific), else a tracker ``key_prefixes`` prefix
+        match (Jira grammar), else an ``identity.local_prefix`` prefix match. Case-sensitive;
+        ``None`` and the empty string never match. DESCRIPTOR values only — the §3.2.1 binding
+        overlay is not consulted (that lands with ``resolve`` in PR-3).
+        """
+        if not isinstance(item_id, str) or not item_id:
+            return False
+        return (
+            self._matches_local_id(item_id)
+            or self._has_key_prefix(item_id)
+            or self._has_local_prefix(item_id)
+        )
 
     def binding(self, env=None):
         """Return the EFFECTIVE tracker binding (design §3.2.1).
@@ -434,6 +468,42 @@ class TypeRegistry:
     def bindings(self, env=None):
         """Effective binding per type (design §3.2.1), keyed by type name in ``names()`` order."""
         return {name: self._types[name].binding(env) for name in self.names()}
+
+    # -- detection --------------------------------------------------------------------------
+
+    def detect(self, item_id):
+        """Return the ``Descriptor`` that owns ``item_id``, or ``None`` when no type does.
+
+        PR-2 seed of the design §5 ladder — rung 3's deterministic id signal, single candidate
+        by construction. Three prefix rungs, each tried across every type in ``names()`` order
+        before the next (so the most specific signal always wins, whatever the type order):
+
+        1. ``identity.local_id_pattern`` full-matches ``item_id`` (``RFE-001``, ``INIT-001``);
+        2. ``item_id`` starts with one of the tracker's ``identity.<tracker>.key_prefixes``
+           (``RHAIRFE-1``, ``RHOAIENG-1`` — the Jira key grammar, design §3.6);
+        3. ``item_id`` starts with ``identity.local_prefix`` — the parity rung: the sniffs this
+           replaces tested ``startswith(local_prefix) or startswith(key_prefix)``, so a
+           malformed local id (``INIT-x``) stays with the type it went to before PR-2. Ranked
+           last so a tracker key always beats a local prefix, and kept separate so PR-3 can
+           drop it for types whose ``local_prefix`` is only a placeholder (the epic fixture).
+
+        Anything else — a peer pipeline's key (``RHAISTRAT-1``), lower-case, empty, ``None`` —
+        returns ``None``; callers keep their own default (today: ``detect(x) or get("rfe")``).
+        Uses DESCRIPTOR values only; the §3.2.1 binding overlay, multi-candidate resolution
+        (shared prefixes → candidate set, tie-broken on the binding's ``issue_type``) and the
+        post-fetch ``(project, issue_type)`` check are PR-3 (``resolve``).
+        """
+        if not isinstance(item_id, str) or not item_id:
+            return None
+        for rung in (
+            Descriptor._matches_local_id,
+            Descriptor._has_key_prefix,
+            Descriptor._has_local_prefix,
+        ):
+            for desc in self:
+                if rung(desc, item_id):
+                    return desc
+        return None
 
 
 def _read_descriptor(path, expected_name):

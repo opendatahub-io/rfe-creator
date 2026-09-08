@@ -15,15 +15,20 @@ Outputs:
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
+
+_TYPES = type_registry.load()
+
+# Type-neutral staging dir (design §10: byte-stable for every type).
 SINGLE_DIR = "tmp/rfe-assess/single"
-RFE_TASK_DIR = os.path.join("artifacts", "rfe-tasks")
-INITIATIVE_TASK_DIR = os.path.join("artifacts", "initiatives")
 
 
 def _task_dir_for(issue_id):
-    if issue_id.startswith("RHOAIENG-") or issue_id.startswith("INIT-"):
-        return INITIATIVE_TASK_DIR
-    return RFE_TASK_DIR
+    """``dirs.tasks`` of the type that owns ``issue_id``; anything unrecognised is an rfe
+    (the default branch of the prefix sniff this replaces)."""
+    desc = _TYPES.detect(issue_id) or _TYPES.get("rfe")
+    return desc.dirs()["tasks"]
 
 
 def main():

@@ -20,14 +20,13 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import update_frontmatter
 
+_TYPES = type_registry.load()
 _TYPE_CONFIG = {
-    "rfe": {"reviews_dir": "artifacts/rfe-reviews", "review_schema": "rfe-review"},
-    "initiative": {
-        "reviews_dir": "artifacts/initiative-reviews",
-        "review_schema": "initiative-review",
-    },
+    name: {"reviews_dir": _TYPES.get(name).dirs()["reviews"], "review_schema": f"{name}-review"}
+    for name in _TYPES.names()
 }
 
 
@@ -35,7 +34,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     args = parser.parse_args()
 
     tc = _TYPE_CONFIG[args.type]
@@ -95,8 +94,12 @@ def main():
     print(f"CHILDREN={len(all_children)}")
 
 
-def _set_revise(rfe_id, reviews_dir="artifacts/rfe-reviews", review_schema="rfe-review"):
-    """Set recommendation=revise on the review file."""
+def _set_revise(
+    rfe_id,
+    reviews_dir=_TYPE_CONFIG["rfe"]["reviews_dir"],
+    review_schema=_TYPE_CONFIG["rfe"]["review_schema"],
+):
+    """Set recommendation=revise on the review file (defaults: the rfe type, as before)."""
     review_path = f"{reviews_dir}/{rfe_id}-review.md"
     if os.path.exists(review_path):
         update_frontmatter(review_path, {"recommendation": "revise"}, review_schema)
