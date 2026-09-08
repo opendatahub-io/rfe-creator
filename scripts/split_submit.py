@@ -24,22 +24,22 @@ import os
 import re
 import sys
 import urllib.error
+from functools import partial
 
 # Ensure progress output is visible immediately when stdout is redirected
 # to a file or pipe (Python defaults to full buffering in that case).
 sys.stdout.reconfigure(line_buffering=True)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry  # noqa: E402
 from artifact_utils import (  # noqa: E402
     ValidationError,
     find_review_file,
-    parse_child_artifact,
-    parse_child_initiative,
+    parse_child,
     read_frontmatter_validated,
     rebuild_index,
-    rename_initiative_to_jira_key,
-    rename_to_jira_key,
-    scan_initiative_task_files,
-    scan_task_files,
+    rename_to_tracker_key,
+    scan_tasks,
 )
 from jira_utils import (  # noqa: E402
     add_comment,
@@ -106,56 +106,98 @@ def _classify_exit(exc):
     return EXIT_PER_PARENT
 
 
-SPLIT_CONFIG = {
-    "rfe": {
-        "project": "RHAIRFE",
-        "issue_type": "Feature Request",
-        "comment_marker": "[RFE Creator]",
-        "label_prefix": "rfe-creator",
-        "entity_name": "RFE",
-        "entity_name_plural": "RFEs",
-        "id_field": "rfe_id",
-        "reviews_dir": "rfe-reviews",
-        "review_schema": "rfe-review",
-        "originals_dir": "rfe-originals",
-        "scan_fn": scan_task_files,
-        "rename_fn": rename_to_jira_key,
-        "parse_child_fn": parse_child_artifact,
-        "find_review_fn": lambda artifacts_dir, child_id: find_review_file(artifacts_dir, child_id),
-        "do_rebuild_index": True,
-        "alignment_labels": None,
-    },
-    "initiative": {
-        "project": "RHOAIENG",
-        "issue_type": "Initiative",
-        "comment_marker": "[Initiative Creator]",
-        "label_prefix": "initiative",
-        "entity_name": "Initiative",
-        "entity_name_plural": "Initiatives",
-        "id_field": "initiative_id",
-        "reviews_dir": "initiative-reviews",
-        "review_schema": "initiative-review",
-        "originals_dir": "initiative-originals",
-        "scan_fn": scan_initiative_task_files,
-        "rename_fn": rename_initiative_to_jira_key,
-        "parse_child_fn": parse_child_initiative,
-        "find_review_fn": lambda artifacts_dir, child_id: _direct_review_path(
-            artifacts_dir, "initiative-reviews", child_id
-        ),
-        "do_rebuild_index": False,
-        "alignment_labels": {
-            "strong": "initiative-alignment-strong",
-            "partial": "initiative-alignment-partial",
-            "weak": "initiative-alignment-weak",
-        },
-    },
-}
+# The work-item type registry (types/<name>/type.yaml), read once at import; every
+# per-type value below is a projection of a descriptor (design work-item-types-unified.md
+# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
+# overrides land with resolve() in a later PR.
+_TYPES = type_registry.load()
 
 
-def _direct_review_path(artifacts_dir, reviews_dir, child_id):
-    """Return review path if it exists, else None."""
-    path = os.path.join(artifacts_dir, reviews_dir, f"{child_id}-review.md")
-    return path if os.path.isfile(path) else None
+def _split_config(desc):
+    """Project one descriptor onto the SPLIT_CONFIG entry the phases read.
+
+    The four callables keep the ``(artifacts_dir, ...)`` signatures the per-type wrappers
+    had: scan_tasks / rename_to_tracker_key / parse_child are bound to ``desc``, and
+    find_review_file routes by the child id, which the task schema constrains to this
+    type's ``local_id_pattern`` or ``key_prefixes`` — so it lands on ``dirs.reviews`` too.
+    """
+    dirs = desc.dirs("bare")
+    alignment = desc.get("conventions.labels.alignment", None)
+    return {
+        "project": desc.get("identity.jira.project"),
+        "issue_type": desc.get("identity.jira.issue_type"),
+        "comment_marker": desc.get("conventions.comment_prefix"),
+        "label_prefix": desc.get("conventions.label_prefix"),
+        "entity_name": desc.get("display.entity"),
+        "entity_name_plural": desc.get("display.entity_plural"),
+        "id_field": desc.id_field,
+        "reviews_dir": dirs["reviews"],
+        "review_schema": f"{desc.name}-review",
+        "originals_dir": dirs["originals"],
+        "scan_fn": partial(scan_tasks, desc=desc),
+        "rename_fn": partial(rename_to_tracker_key, desc=desc),
+        "parse_child_fn": partial(parse_child, desc=desc),
+        "find_review_fn": find_review_file,
+        "do_rebuild_index": desc.get("index.enabled"),
+        "alignment_labels": dict(alignment) if alignment is not None else None,
+    }
+
+
+SPLIT_CONFIG = {name: _split_config(_TYPES.get(name)) for name in _TYPES.names()}
+
+
+# The Jira-side facts of the split transaction that SPLIT_CONFIG never carried (its key
+# set is a contract shared with the tests): the link type between a parent and its
+# children, and how the parent is closed once they exist. Keyed by the (project,
+# issue_type) binding pair every SPLIT_CONFIG entry carries, so a phase recovers them from
+# its ``config`` alone. validate_types.py keeps the pair unique per registered type, but
+# the registry does not run that gate at load, so the invariant is enforced here where it
+# is relied on: a second type with the same pair would otherwise silently replace the
+# first's facts. Read with a None default: both are optional in the schema and a
+# registered type that never splits must not break the import (main() refuses to split a
+# parent of such a type before any scan or Jira call).
+def _tracker_facts(types):
+    facts, owner = {}, {}
+    for desc in types:
+        pair = (desc.get("identity.jira.project"), desc.get("identity.jira.issue_type"))
+        if pair in owner:
+            raise type_registry.RegistryError(
+                f"split_submit: types {owner[pair]!r} and {desc.name!r} share the "
+                f"(project, issue_type) binding {pair}; the split link type and the "
+                "close-superseded state are recovered by that pair, so it must be unique"
+            )
+        owner[pair] = desc.name
+        facts[pair] = {
+            "split_link_type": desc.get("identity.jira.split_link_type", None),
+            "close_superseded": desc.get("identity.jira.state_map.close_superseded", None),
+        }
+    return facts
+
+
+_TRACKER = _tracker_facts(_TYPES)
+
+
+def _tracker(config):
+    """The ``_TRACKER`` entry of the type ``config`` projects."""
+    return _TRACKER[(config["project"], config["issue_type"])]
+
+
+def _missing_split_facts(config):
+    """Names of the binding facts a split of this type needs but its descriptor omits.
+
+    Empty for both shipped types. A type may legitimately omit them (it never splits);
+    the refusal belongs to the moment a parent of that type is submitted for a split.
+    """
+    facts = _tracker(config)
+    close = facts["close_superseded"] or {}
+    missing = []
+    if not facts["split_link_type"]:
+        missing.append("identity.jira.split_link_type")
+    # phase3_close matches the target status and sets the resolution on the transition.
+    for key in ("transition", "resolution"):
+        if not close.get(key):
+            missing.append(f"identity.jira.state_map.close_superseded.{key}")
+    return missing
 
 
 def _feasibility_labels(label_prefix):
@@ -197,6 +239,7 @@ def _inspect_child(server, user, token, child_key, artifact_path, parent_key, co
     from jira_utils import adf_to_markdown, normalize_for_compare
 
     _, _, _, cleaned = config["parse_child_fn"](artifact_path)
+    split_link_type = _tracker(config)["split_link_type"]
     issue = get_issue(server, user, token, child_key, ["description", "summary", "issuelinks"])
     fields = issue.get("fields", {})
     desc_raw = fields.get("description")
@@ -207,7 +250,7 @@ def _inspect_child(server, user, token, child_key, artifact_path, parent_key, co
     else:
         live = normalize_for_compare(str(desc_raw))
     linked = any(
-        link.get("type", {}).get("name") == "Work item split"
+        link.get("type", {}).get("name") == split_link_type
         and parent_key
         in (
             (link.get("inwardIssue") or {}).get("key"),
@@ -290,6 +333,7 @@ def discover_state(server, user, token, parent_key, expected_children, config):
     state = SubmissionState()
     state.total_children = len(expected_children)
     marker = re.escape(config["comment_marker"])
+    split_link_type = _tracker(config)["split_link_type"]
     ids_in_order = [child_id for (child_id, _, _, _) in expected_children]
     id_by_title = {title: child_id for (child_id, title, _, _) in expected_children}
     title_by_id = {child_id: title for (child_id, title, _, _) in expected_children}
@@ -407,7 +451,7 @@ def discover_state(server, user, token, parent_key, expected_children, config):
         ["issuelinks", "status", "components", "labels", "parent", "reporter"],
     )
     for link in issue.get("fields", {}).get("issuelinks", []):
-        if link.get("type", {}).get("name") != "Work item split":
+        if link.get("type", {}).get("name") != split_link_type:
             continue
         # Real Jira renders the child as outwardIssue on the parent; the
         # jira-emulator renders it as inwardIssue. Check both ends — the
@@ -494,7 +538,7 @@ def discover_state(server, user, token, parent_key, expected_children, config):
                 )
                 continue
             linked = any(
-                link.get("type", {}).get("name") == "Work item split"
+                link.get("type", {}).get("name") == split_link_type
                 and parent_key
                 in (
                     (link.get("inwardIssue") or {}).get("key"),
@@ -577,6 +621,7 @@ def phase2_create_link(
     find_review = config["find_review_fn"]
     feas_labels = _feasibility_labels(label_prefix)
     alignment_labels = config["alignment_labels"]
+    split_link_type = _tracker(config)["split_link_type"]
 
     for idx, (child_id, title, priority, artifact_path) in enumerate(children, 1):
         done = state.phase2_done.get(child_id)
@@ -607,7 +652,7 @@ def phase2_create_link(
                 done["commented"] = True
                 continue
             if not done["linked"]:
-                create_issue_link(server, user, token, "Work item split", parent_key, child_key)
+                create_issue_link(server, user, token, split_link_type, parent_key, child_key)
                 print(f"           Linked {child_key} to {parent_key}")
                 done["linked"] = True
             if not done["commented"]:
@@ -682,7 +727,7 @@ def phase2_create_link(
                 print(f"           Parent: {state.parent_parent_key}")
             if state.parent_reporter_id:
                 print(f"           Reporter: {state.parent_reporter_id}")
-            print(f"           Would link to {parent_key} via 'Work item split'")
+            print(f"           Would link to {parent_key} via '{split_link_type}'")
             if attn_reason:
                 print("           Would post needs-attention comment")
             state.phase2_done[child_id] = {
@@ -713,7 +758,7 @@ def phase2_create_link(
             print(f"           Parent: {state.parent_parent_key}")
 
         # 2. Link to parent
-        create_issue_link(server, user, token, "Work item split", parent_key, child_key)
+        create_issue_link(server, user, token, split_link_type, parent_key, child_key)
         print(f"           Linked {child_key} to {parent_key}")
 
         # 3. Post confirmation comment (carries the child's local id so
@@ -788,13 +833,17 @@ def build_split_summary_adf(server, children, state, total, config):
 
 
 def phase3_close(server, user, token, parent_key, children, state, config, dry_run):
-    """Close the parent ticket with resolution Obsolete."""
+    """Close the parent ticket with the type's close-superseded transition and resolution
+    (``identity.jira.state_map.close_superseded``: Closed / Obsolete for both shipped types)."""
     if state.parent_closed:
         print("  Phase 3: Parent already closed, skipping")
         return
 
     total = len(children)
     label_prefix = config["label_prefix"]
+    close = _tracker(config)["close_superseded"]
+    # The TARGET STATUS name (matched case-insensitively below) and the resolution set on it.
+    target_status, resolution = close["transition"], close["resolution"]
 
     if len(state.phase2_done) < total:
         missing = [cid for (cid, _, _, _) in children if cid not in state.phase2_done]
@@ -805,7 +854,10 @@ def phase3_close(server, user, token, parent_key, children, state, config, dry_r
 
     if dry_run:
         print(f"  Phase 3: Would label {parent_key} with {label_prefix}-split-original")
-        print(f"  Phase 3: Would transition {parent_key} to Closed (resolution: Obsolete)")
+        print(
+            f"  Phase 3: Would transition {parent_key} to {target_status} "
+            f"(resolution: {resolution})"
+        )
         print("           Would post summary comment")
         return
 
@@ -813,17 +865,20 @@ def phase3_close(server, user, token, parent_key, children, state, config, dry_r
     add_labels(server, user, token, parent_key, [f"{label_prefix}-split-original"])
     print(f"  Phase 3: Labeled {parent_key} with {label_prefix}-split-original")
 
-    # Find the "Closed" transition
+    # Find the transition whose target is the close-superseded status
     transitions = get_transitions(server, user, token, parent_key)
     closed_transition = None
     for t in transitions:
-        if t["to"].get("name", "").lower() == "closed":
+        if t["to"].get("name", "").lower() == target_status.lower():
             closed_transition = t
             break
 
     if not closed_transition:
         available = [t["name"] for t in transitions]
-        print(f"  WARNING: No 'Closed' transition found. Available: {available}", file=sys.stderr)
+        print(
+            f"  WARNING: No '{target_status}' transition found. Available: {available}",
+            file=sys.stderr,
+        )
         print("  Skipping parent closure.", file=sys.stderr)
         return
 
@@ -834,9 +889,9 @@ def phase3_close(server, user, token, parent_key, children, state, config, dry_r
         token,
         parent_key,
         closed_transition["id"],
-        fields={"resolution": {"name": "Obsolete"}},
+        fields={"resolution": {"name": resolution}},
     )
-    print(f"  Phase 3: Transitioned {parent_key} to Closed (Obsolete)")
+    print(f"  Phase 3: Transitioned {parent_key} to {target_status} ({resolution})")
 
     # Post summary comment with smart-linked child keys
     summary_adf = build_split_summary_adf(server, children, state, total, config)
@@ -852,7 +907,7 @@ def main():
     parser.add_argument("parent_key", help="Parent Jira issue key to split")
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Entry type (default: rfe)",
     )
@@ -864,6 +919,17 @@ def main():
     )
     args = parser.parse_args()
     config = SPLIT_CONFIG[args.type]
+
+    # A type without the split facts cannot be split: refuse before any scan or Jira call
+    # rather than create children and then fail to link or close. Run-wide (every parent
+    # of the type fails the same way), so the exit code aborts submit.py's split loop.
+    missing = _missing_split_facts(config)
+    if missing:
+        print(
+            f"Error: type '{args.type}' declares no {' / '.join(missing)}; it cannot be split.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_SYSTEMIC)
 
     server, user, token = require_env()
 
