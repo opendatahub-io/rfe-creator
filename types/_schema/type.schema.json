@@ -1,0 +1,814 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/opendatahub-io/rfe-creator/types/_schema/type.schema.json",
+  "title": "rfe-creator work-item type descriptor (types/<type>/type.yaml), schema_version 1",
+  "description": "One descriptor per work-item type. It is the single source of every type-keyed literal the pipeline consumes (design-proposals/work-item-types-unified.md section 3.2; worked example section 8.2). At PR-1 the descriptors are inert: scripts/ do not import the registry yet and tests/ pin every live registry dict against descriptor projections. The vocabulary is closed (additionalProperties false) except for data-keyed maps whose KEYS are data rather than vocabulary: conventions.labels, schema.task.extra_fields, schema.review.extra_fields, eval.thresholds (Q20), plus the value-typed maps reporting.criterion_labels / criterion_short_labels / before_score_name_map, schema.task.priority.map_to_tracker and inputs[].gate.any_of[].fields. Fields marked RESERVED have no consumer in rfe-creator at v1; they exist so sibling pipelines' descriptors need no migration and so the shape is frozen before schema_version 1 is frozen. Evolution inside a major version is additive only.",
+  "$comment": "Deployment binding override (design section 3.2.1). identity.<tracker> is the DEFAULT binding. type_registry.Descriptor.binding() computes the EFFECTIVE binding by overlaying the type-scoped environment variables RFE_CREATOR_BINDING_<TYPE>_{PROJECT,ISSUE_TYPE,LOCAL_PREFIX} (TYPE upper-cased; the workspace rfe-creator.yaml `bindings.<type>.<tracker>` form is reserved for PR-3). Overridable fields are binding-only: project, issue_type, key_prefixes (write prefix derived as '<PROJECT>-' when project is overridden; the descriptor prefixes are kept as read prefixes), query_default (re-rendered by the adapter), link types, state_map, parent_key_patterns, optionally local_prefix. NEVER judgement content, dirs, schema, rubric, eval. Rules: (a) zero-config default preserved, no required environment variable; (b) the section 3.3 uniqueness lint runs on EFFECTIVE bindings, and no type's local_prefix stem may equal any effective project key; (c) resolve prints the override (PR-3); (d) the dry-run sentinel is binding-derived (<PROJECT>-DRY); (e) run reports and snapshot metadata record the effective binding; (f) the Jira adapter contributes a generic key grammar to detect() as a rung AFTER every type's local_id_pattern and key_prefixes; (g) TRUST BOUNDARY: in headless and CI runs an override is honoured only from the environment (protected CI variables), never from a workspace file the checkout could carry; the effective (project, issue_type) pair is printed at resolve time and checked against the registered bindings before the first tracker write; an untrusted source or an unregistered pair is a hard failure, not a warning. DRAFT- is not adopted at v1.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "type",
+    "display",
+    "identity",
+    "dirs",
+    "index",
+    "companions",
+    "conventions",
+    "schema",
+    "pipeline",
+    "snapshot",
+    "reporting",
+    "eval"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Descriptor schema major version. v1 only; a bump means an incompatible change to this file's shape."
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Type name. MUST equal the directory name types/<type>/; used as the argparse --type choice and as the schema-name stem (<type>-task, <type>-review)."
+    },
+    "display": {
+      "type": "object",
+      "required": ["entity", "entity_plural"],
+      "additionalProperties": false,
+      "properties": {
+        "entity": { "type": "string", "minLength": 1, "description": "Singular display noun (split_submit entity_name; generate_review_pdf report_title derives '<entity> Review &amp; Remediation Report')." },
+        "entity_plural": { "type": "string", "minLength": 1, "description": "Plural display noun (split_submit entity_name_plural)." }
+      }
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["work-item", "strategy", "decomposition"],
+      "default": "work-item",
+      "description": "RESERVED. Pipeline kind, selects the engine's phase table. v1's engine accepts only work-item (the review/split graph rfe and initiative share); strategy and decomposition are recorded for the sibling pipelines (strat-creator, epic-creator) so their descriptors need no migration. No consumer in rfe-creator."
+    },
+    "inputs": {
+      "type": "array",
+      "default": [],
+      "items": { "$ref": "#/$defs/input" },
+      "description": "RESERVED (design section 3.7). How items of this type are DERIVED from an upstream type. Two requesters exist (strat-creator <- rfe via Cloners; epic-creator <- strategy via parent), which satisfies the second-requester rule for the SCHEMA; rfe-creator ships NO gate evaluator."
+    },
+    "produces": {
+      "type": "array",
+      "default": [],
+      "items": { "$ref": "#/$defs/produce" },
+      "description": "RESERVED (design section 3.7). Downstream types this pipeline derives, and the label it sets on the input when done."
+    },
+    "identity": { "$ref": "#/$defs/identity" },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string", "description": "One-sentence description of what belongs to this type." },
+        "driver": { "type": "string", "description": "Who typically originates the item (e.g. customer, engineering)." },
+        "signals": { "type": "array", "items": { "type": "string" }, "description": "Phrases that suggest this type." },
+        "counter_signals": { "type": "array", "items": { "type": "string" }, "description": "Phrases that suggest another type." }
+      },
+      "description": "Optional at v1; consumed by interactive create (design section 6 stage 1) and the mis-filed report signal (stage 2) from PR-7."
+    },
+    "dirs": {
+      "type": "object",
+      "required": ["tasks", "originals", "reviews"],
+      "additionalProperties": false,
+      "properties": {
+        "tasks": { "$ref": "#/$defs/artifact_dir", "description": "Task files (<id>.md with frontmatter)." },
+        "originals": { "$ref": "#/$defs/artifact_dir", "description": "Raw tracker descriptions at fetch time; baseline for conflict detection." },
+        "reviews": { "$ref": "#/$defs/artifact_dir", "description": "Review, feasibility, dimension and split-status files." },
+        "dupes": { "$ref": "#/$defs/artifact_dir", "description": "Optional (PR #133 rfe-dupes stage)." },
+        "merges": { "$ref": "#/$defs/artifact_dir", "description": "Optional (PR #133 rfe-merge stage)." }
+      },
+      "description": "Artifact directories in the 'artifacts/<dir>' form (Q13). Consumers that want the bare form ('rfe-tasks') use Descriptor.dirs(form='bare')."
+    },
+    "index": {
+      "type": "object",
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Whether rebuild_index runs after submit/split (artifacts/rfes.md analog)." }
+      }
+    },
+    "companions": {
+      "type": "object",
+      "required": ["comments", "removed_context"],
+      "additionalProperties": false,
+      "properties": {
+        "comments": { "type": "boolean", "description": "Whether the FETCH step produces a <id>-comments.md companion. This flag means 'fetch produces one', never 'rename may drop the suffix' (rename handles -comments.md for every type)." },
+        "removed_context": { "type": "boolean", "description": "Whether review may produce a <id>-removed-context.yaml companion." },
+        "extra_suffixes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^-[a-z][a-z0-9-]*$" },
+          "uniqueItems": true,
+          "description": "Additional companion suffixes on this type's id (e.g. a decompose kind lists -decomposition)."
+        }
+      }
+    },
+    "conventions": { "$ref": "#/$defs/conventions" },
+    "schema": { "$ref": "#/$defs/schema_block" },
+    "pipeline": { "$ref": "#/$defs/pipeline" },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extra_fields": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "uniqueItems": true,
+          "description": "Batch-input keys beyond the shared base {prompt, priority, labels, clarifying_context} (validate_batch_input KNOWN_FIELDS delta)."
+        }
+      }
+    },
+    "snapshot": { "$ref": "#/$defs/snapshot" },
+    "reporting": { "$ref": "#/$defs/reporting" },
+    "eval": { "$ref": "#/$defs/eval" }
+  },
+  "$defs": {
+    "repo_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\.\\.(/|$))(?!.*/\\.\\.(/|$))\\S+$",
+      "description": "Path relative to the plugin root (the working directory, design section 3.5.1). Never absolute, never escaping the root."
+    },
+    "artifact_dir": {
+      "type": "string",
+      "pattern": "^artifacts/[A-Za-z0-9_.-]+$"
+    },
+    "label": {
+      "type": "string",
+      "pattern": "^\\S+$",
+      "description": "A tracker label value (no whitespace)."
+    },
+    "label_map": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/label" }
+    },
+    "string_list": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "identity": {
+      "type": "object",
+      "required": ["tracker", "local_prefix", "local_id_pattern", "id_field"],
+      "additionalProperties": false,
+      "properties": {
+        "tracker": {
+          "type": "string",
+          "enum": ["jira", "github"],
+          "description": "Discriminator. Exactly one binding block (identity.jira | identity.github) is present and it must match this value (design section 3.6)."
+        },
+        "jira": { "$ref": "#/$defs/jira_binding" },
+        "github": { "$ref": "#/$defs/github_binding" },
+        "local_prefix": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]*-$",
+          "description": "Tracker-neutral write prefix for NEW local ids (next_rfe_id --prefix uses the dash-less stem). Overridable per deployment (section 3.2.1)."
+        },
+        "local_id_pattern": {
+          "type": "string",
+          "pattern": "^\\^.+\\$$",
+          "description": "AUTHORITATIVE local-id grammar: an anchored regex (must start with ^ and end with $). Source of the base-schema local_id patterns. detect() full-matches every type's local_id_pattern BEFORE any tracker key grammar and prefers the most specific match, so a composite sibling id such as RHAISTRAT-1234-E001 can never prefix-resolve to a RHAISTRAT- type. Write it single-quoted in YAML with ONE backslash per escape ('^RFE-\\d+$')."
+        },
+        "id_field": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Frontmatter field holding the item id (rfe_id, initiative_id)."
+        }
+      },
+      "oneOf": [
+        {
+          "properties": { "tracker": { "const": "jira" } },
+          "required": ["jira"],
+          "not": { "required": ["github"] }
+        },
+        {
+          "properties": { "tracker": { "const": "github" } },
+          "required": ["github"],
+          "not": { "required": ["jira"] }
+        }
+      ]
+    },
+    "jira_binding": {
+      "type": "object",
+      "required": ["project", "issue_type", "key_prefixes"],
+      "additionalProperties": false,
+      "description": "The Jira binding. (project, issue_type) IS the type identity under the jira tracker; the cross-type lint enforces per-tracker binding uniqueness on EFFECTIVE bindings.",
+      "properties": {
+        "project": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Jira project key. Overridable per deployment." },
+        "issue_type": { "type": "string", "minLength": 1, "description": "Jira issue type NAME (issues are created by name, jira_utils.create_issue). Overridable per deployment." },
+        "key_prefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-$" },
+          "description": "Jira key grammar. [0] is the WRITE prefix; every entry is a READ/detect prefix (subsumes the ADR's also_reads). An overridden project prepends '<PROJECT>-' and keeps these as read prefixes."
+        },
+        "split_link_type": { "type": "string", "minLength": 1, "description": "Issue-link type name used between a split parent and its children." },
+        "duplicate_link_type": {
+          "type": "object",
+          "required": ["name", "outward", "inward"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "outward": { "type": "string" },
+            "inward": { "type": "string" }
+          },
+          "description": "RESERVED (PR #133 dupes/merge stages)."
+        },
+        "state_map": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "approved": { "type": "string", "minLength": 1, "description": "Target status name for the approve policy (matched case-insensitively by jira_utils.transition_issue)." },
+            "close_superseded": { "$ref": "#/$defs/jira_transition", "description": "How a split parent is closed once its children exist. `transition` is the TARGET STATUS NAME matched case-insensitively; closure is skipped with a warning when the workflow has no such transition." },
+            "close_duplicate": { "$ref": "#/$defs/jira_transition", "description": "RESERVED (PR #133)." },
+            "ready": { "type": "string", "minLength": 1, "description": "RESERVED. Optional on-deck state a passing item is moved to (design section 3.4 workflow-states note)." }
+          },
+          "description": "The ONLY tracker transitions the tool performs, declared per binding. Everything past 'ready' (In Progress -> Done, per-column exit criteria) is refused."
+        },
+        "priority": {
+          "type": "object",
+          "required": ["enum"],
+          "additionalProperties": false,
+          "properties": {
+            "enum": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+          },
+          "description": "Tracker-side priority vocabulary, fixed per binding not per type (design section 3.4). Optional; when absent the Jira default ['Blocker','Critical','Major','Normal','Minor','Undefined'] applies. schema.task.priority.map_to_tracker maps the task-side vocabulary onto it."
+        }
+      }
+    },
+    "jira_transition": {
+      "type": "object",
+      "required": ["transition"],
+      "additionalProperties": false,
+      "properties": {
+        "transition": { "type": "string", "minLength": 1 },
+        "resolution": { "type": "string", "minLength": 1 }
+      }
+    },
+    "github_binding": {
+      "type": "object",
+      "required": ["repo", "kind", "alias_prefix", "priority"],
+      "additionalProperties": false,
+      "description": "The GitHub Issues binding, shaped per design section 8.6. Nothing ships it at v1: the adapter, emulator and CI wiring are first-requester work (section 3.6). Each degradation is declared here, never silent.",
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", "description": "Exactly one owner/repo per type (v1 rule)." },
+        "kind": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "type_label": { "type": "string", "minLength": 1, "description": "Default: the type is a label on the issue." },
+            "issue_type": { "type": "string", "minLength": 1, "description": "Opt-in: an org-level native issue type." }
+          },
+          "description": "How the type is expressed on the repo: exactly one of type_label | issue_type."
+        },
+        "alias_prefix": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*-$", "description": "Filesystem-safe key alias: artifact keys and filenames are <ALIAS>-<number>; the frontmatter tracker_ref (owner/repo#123) is the truth." },
+        "labels_defined": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "$ref": "#/$defs/label" },
+              "color": { "type": "string", "pattern": "^[0-9a-fA-F]{6}$" }
+            }
+          },
+          "description": "GitHub labels are repo objects: definitions the adapter's ensure-labels setup step creates, not just names."
+        },
+        "state_map": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "approved": { "$ref": "#/$defs/label", "description": "No workflow engine: approve -> label." },
+            "close_superseded": { "type": "string", "enum": ["not_planned", "completed"], "description": "close-as-superseded -> state_reason." },
+            "close_duplicate": { "type": "string", "enum": ["duplicate"], "description": "RESERVED." }
+          }
+        },
+        "priority": {
+          "oneOf": [
+            { "const": "omit" },
+            {
+              "type": "object",
+              "required": ["labels"],
+              "additionalProperties": false,
+              "properties": { "labels": { "$ref": "#/$defs/label_map", "description": "priority value -> label name taxonomy." } }
+            }
+          ],
+          "description": "Declared degradation: GitHub has no priority field. 'omit' or a label taxonomy."
+        },
+        "components": {
+          "oneOf": [
+            { "const": "omit" },
+            {
+              "type": "object",
+              "required": ["label_prefix"],
+              "additionalProperties": false,
+              "properties": { "label_prefix": { "type": "string", "minLength": 1 } }
+            }
+          ],
+          "description": "Declared degradation: no components; a label namespace or omit."
+        },
+        "emulator": {
+          "type": "string",
+          "enum": ["fixtures", "throwaway-repo"],
+          "description": "Declared degradation for the emulator-seed provider obligation until a GitHub emulator exists."
+        }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "required": ["type_label", "label_prefix", "labels", "comment_prefix", "removed_context_preamble"],
+      "additionalProperties": false,
+      "description": "Tracker-NEUTRAL conventions (labels are concepts on every tracker).",
+      "properties": {
+        "type_label": { "type": "string", "minLength": 1, "description": "Human label used in messages ('No {type_label} task files found.' is byte-stable for rfe)." },
+        "label_prefix": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "Namespace prefix of every label this pipeline emits." },
+        "labels": { "$ref": "#/$defs/labels" },
+        "comment_prefix": { "type": "string", "description": "Marker prefixed to every tracker comment the tool writes. PUBLISHED CONTRACT (R7): downstream pipelines string-match it." },
+        "removed_context_preamble": { "type": "string", "description": "First line of the removed-context comment. PUBLISHED CONTRACT (R7): strat-creator's refine step string-matches it. Frozen; changed only with a downstream migration note." },
+        "query_default": { "type": "string", "minLength": 1, "description": "Default selection query in the language owned by identity.tracker (JQL for jira). No consumer at PR-1 (queries arrive via --jql); re-rendered by the adapter under a binding override." },
+        "parent_key_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Unanchored alternatives accepted for the task parent_key field; the task schema pattern is '^(' + '|'.join(patterns) + ')$'. Authoritative for the batch validator too once PR-3 reconciles them (today validate_batch_input is narrower: known divergence)."
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "description": "OPEN map: reserved keys are typed when present, types may add keys (string values, or a map of string values). Reserved defaults are '<label_prefix>-<suffix>' but the shipped descriptors spell every value out.",
+      "properties": {
+        "rubric_pass": { "$ref": "#/$defs/label", "description": "PUBLISHED CONTRACT (R7). The exported readiness signal downstream types gate on; excluded by the jql_query default wrapper. Default <prefix>-autofix-rubric-pass." },
+        "ignore": { "$ref": "#/$defs/label", "description": "Opt-out label: excluded by the jql_query default wrapper AND the snapshot/bootstrap hard filter. Default <prefix>-ignore." },
+        "split_quarantine": { "$ref": "#/$defs/label", "description": "Failed-split quarantine: snapshot/bootstrap hard filter only. Default <prefix>-split-quarantine." },
+        "split_child_marker": {
+          "type": "string",
+          "pattern": "^(?=.*\\{parent\\})(?=.*\\{child_id\\})(?=.*\\{fingerprint\\})\\S+$",
+          "description": "A TEMPLATE, not a value: creation-time recovery marker on split children. Placeholders {parent} and {child_id} are LOWER-CASED before rendering; {fingerprint} = sha256(cleaned child markdown)[:12]. Default <prefix>-split-child-{parent}-{child_id}-{fingerprint}."
+        },
+        "needs_attention": { "$ref": "#/$defs/label", "description": "Default <prefix>-needs-attention." },
+        "auto_created": { "$ref": "#/$defs/label", "description": "Set on every item the tool creates. Default <prefix>-auto-created." },
+        "auto_revised": { "$ref": "#/$defs/label", "description": "Set when the tool revised the body before submit. Default <prefix>-auto-revised." },
+        "split_result": { "$ref": "#/$defs/label", "description": "Set on split children. Default <prefix>-split-result." },
+        "split_original": { "$ref": "#/$defs/label", "description": "Set on a split parent when it is closed. Default <prefix>-split-original." },
+        "feasibility": {
+          "type": "object",
+          "required": ["feasible", "infeasible", "indeterminate"],
+          "additionalProperties": false,
+          "properties": {
+            "feasible": { "$ref": "#/$defs/label" },
+            "infeasible": { "$ref": "#/$defs/label" },
+            "indeterminate": { "$ref": "#/$defs/label" }
+          },
+          "description": "Outcome labels of the feasibility dimension; key order is the review-schema feasibility enum. Defaults <prefix>-feasibility-pass|fail|unknown."
+        },
+        "alignment": {
+          "type": "object",
+          "required": ["strong", "partial", "weak"],
+          "additionalProperties": false,
+          "properties": {
+            "strong": { "$ref": "#/$defs/label" },
+            "partial": { "$ref": "#/$defs/label" },
+            "weak": { "$ref": "#/$defs/label" }
+          },
+          "description": "Outcome labels of the alignment dimension; only when an alignment dimension is declared. Defaults <prefix>-alignment-strong|partial|weak."
+        },
+        "processing": { "$ref": "#/$defs/label", "description": "RESERVED for other kinds (lock label); no rfe-creator consumer." },
+        "human_sign_off": { "$ref": "#/$defs/label", "description": "RESERVED for other kinds; no rfe-creator consumer." },
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from_field", "pattern"],
+            "additionalProperties": false,
+            "properties": {
+              "from_field": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Task frontmatter field whose value fills {value}." },
+              "pattern": { "type": "string", "pattern": "^(?=.*\\{value\\})\\S+$", "description": "Label template containing {value}; the value is inserted verbatim (no transform at v1)." }
+            }
+          },
+          "description": "RESERVED: value-templated labels (epic-creator's epic-creator-impl-<implementation_type>)."
+        }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/label" },
+          { "$ref": "#/$defs/label_map" }
+        ]
+      }
+    },
+    "field_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["string", "int", "bool", "list", "dict"], "description": "artifact_utils field type." },
+        "required": { "type": "boolean" },
+        "enum": { "type": "array", "minItems": 1, "items": { "type": ["string", "integer", "null"] } },
+        "default": { "description": "Default written by apply_defaults. OMIT the key (rather than default: null) for a field that must never be written into existing artifacts (Q4)." },
+        "pattern": { "type": "string" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "fields": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/field_spec" },
+          "description": "Nested spec for type: dict (frontmatter.py set takes dot paths)."
+        }
+      },
+      "description": "One artifact_utils.SCHEMAS field specification; nested dict specs are supported."
+    },
+    "schema_block": {
+      "type": "object",
+      "required": ["review"],
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "extra_fields": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/field_spec" },
+              "description": "OPEN map of task fields beyond the shared base (title, priority, status, parent_key, original_labels, local_id, <id_field>, type, tracker_ref)."
+            },
+            "priority": {
+              "type": "object",
+              "required": ["enum", "map_to_tracker"],
+              "additionalProperties": false,
+              "properties": {
+                "enum": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+                "map_to_tracker": { "type": "object", "additionalProperties": { "type": "string" }, "description": "task value -> tracker priority name; {} means the identity map." }
+              },
+              "description": "RESERVED, no consumer. The TASK-side priority vocabulary; today the enum lives in artifact_utils.SCHEMAS and the pin test asserts equality. An identity map ({}) means the task vocabulary is the tracker vocabulary."
+            }
+          }
+        },
+        "review": {
+          "type": "object",
+          "required": ["score_fields"],
+          "additionalProperties": false,
+          "properties": {
+            "score_fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "description": "Rubric criteria, in display order: the single source for scores/before_scores fields, the verify_phase error stub (scores.<f>=0), run-report and PDF criterion keys, and compare_review_outputs."
+            },
+            "extra_fields": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/field_spec" },
+              "description": "OPEN map of review fields beyond the shared base."
+            },
+            "extra_scores": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "uniqueItems": true,
+              "description": "Optional nullable scores that are NOT rubric criteria and are excluded from the total (e.g. jtbd_alignment, PR #100). Schema only at PR-1."
+            },
+            "extra_rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["when", "then"],
+                "additionalProperties": false,
+                "properties": {
+                  "when": {
+                    "type": "object",
+                    "required": ["field", "equals"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "field": { "type": "string" },
+                      "equals": { "type": ["string", "integer", "boolean", "null"] }
+                    }
+                  },
+                  "then": { "type": "string", "enum": ["needs_attention"] }
+                }
+              },
+              "description": "Declarative post-review rules (today a prompt rule, e.g. alignment weak -> needs_attention). Recorded, unpinned; the consumer is the PR-5 launcher."
+            }
+          }
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "required": ["stages", "poll_prefix", "state_prefix", "scorer_agent", "dimensions", "rubric"],
+      "additionalProperties": false,
+      "properties": {
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "description": "OPEN list of stage names validated (from PR-5) against registered generic skills; a type may ship fewer. Today: create, review, submit, split, auto-fix, speedrun; PR #133 adds dupes, merge."
+        },
+        "context_sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "bootstrap", "required"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "bootstrap": { "$ref": "#/$defs/repo_path", "description": "Script the SETUP phase runs from the plugin root." },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "Extra argv after the script path (e.g. ['--type', 'rfe'])." },
+              "required": { "type": "boolean", "description": "Whether a failure is fatal. No consumer at PR-1: SETUP runs its commands concurrently and only logs exit codes." }
+            }
+          },
+          "description": "DESCRIPTIVE at PR-1: SETUP is still a hardcoded command list in pipeline_state.py; the projection is SETUP.commands[i] == 'bash <bootstrap> <args...>'."
+        },
+        "poll_prefix": {
+          "type": "string",
+          "pattern": "^([a-z][a-z0-9]*-)?$",
+          "description": "Prefix of poll-phase names (check_review_progress PHASE_CHECKS keys, pipeline_state poll_phase) and of the review report filename ('<poll_prefix>review-report.html', Q15). '' is grandfathered for type rfe only."
+        },
+        "state_prefix": {
+          "type": "string",
+          "pattern": "^([a-z][a-z0-9]*-)?$",
+          "description": "Prefix of tmp/ state files ('tmp/<state_prefix>speedrun-all-ids.txt', 'tmp/<state_prefix>{review,split,autofix}-config.yaml'). '' is grandfathered for type rfe only."
+        },
+        "scorer_agent": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Subagent type for the ASSESS-family phases; the agent file agents/<scorer_agent>.md must exist in the assess checkout (gate 2). Per type until the one-scorer collapse (design section 7.2)."
+        },
+        "prompts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create_guidance": { "$ref": "#/$defs/repo_path" },
+            "review_rules": { "$ref": "#/$defs/repo_path" },
+            "review_sections": { "$ref": "#/$defs/repo_path" },
+            "revise_rules": { "$ref": "#/$defs/repo_path" },
+            "split_rules": { "$ref": "#/$defs/repo_path" }
+          },
+          "description": "Per-type judgement files consumed via launcher vars from PR-5 (design section 4.2). Optional at v1; at PR-1 they point at today's live skill paths (Q1) and gate 1 checks that each exists."
+        },
+        "dimensions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/dimension" },
+          "description": "Parallel review dimensions launched in the ASSESS wave, in order."
+        },
+        "rubric": { "$ref": "#/$defs/rubric" },
+        "resplit": {
+          "type": "object",
+          "required": ["score_field", "below"],
+          "additionalProperties": false,
+          "properties": {
+            "score_field": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "below": { "type": "integer", "minimum": 0 }
+          },
+          "description": "check_right_sized's RESPLIT-children threshold (queue a child for re-split when <score_field> < below). NOT the review-time split rule, which lives in review_rules. Default right_sized / 2."
+        }
+      }
+    },
+    "dimension": {
+      "type": "object",
+      "required": ["name", "prompt", "blocking"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "description": "Poll phase is '<poll_prefix><name>'; output file is '<dirs.reviews>/<id>-<name>.md'." },
+        "prompt": { "$ref": "#/$defs/repo_path", "description": "Prompt/skill file the dimension agent reads." },
+        "blocking": { "type": "boolean", "description": "Whether the ASSESS wave waits on the dimension (wait-for-wave --also-phase). Descriptive at PR-1: no script reads it." },
+        "condition": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["frontmatter_field", "prefix"],
+              "additionalProperties": false,
+              "properties": {
+                "frontmatter_field": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                "prefix": { "type": "string", "minLength": 1 }
+              },
+              "description": "Run only when the task frontmatter field starts with prefix (today's has_rhaistrat_parent)."
+            },
+            {
+              "type": "object",
+              "required": ["context_exists"],
+              "additionalProperties": false,
+              "properties": { "context_exists": { "$ref": "#/$defs/repo_path" } },
+              "description": "Run only when the context path exists (PR #100's JTBD dimension)."
+            }
+          ],
+          "description": "Closed condition vocabulary. An issue-type test (parent_is_outcome) is a named hook, deliberately not expressible here."
+        },
+        "setup": { "$ref": "#/$defs/repo_path", "description": "Optional bootstrap script for the dimension's context." },
+        "skip_stub": {
+          "type": "object",
+          "required": ["result"],
+          "additionalProperties": false,
+          "properties": {
+            "result": { "type": "string", "minLength": 1 },
+            "reason": { "type": "string", "minLength": 1 }
+          },
+          "description": "Frontmatter written to the dimension output when the condition is false (the engine writes both keys)."
+        }
+      }
+    },
+    "rubric": {
+      "type": "object",
+      "description": "Assess-side rubric source. Either an external assess repo pinned to an immutable commit (ref) or the D3 alternative repo: self with a content hash (rubric_version).",
+      "oneOf": [
+        {
+          "required": ["repo", "ref", "path", "export"],
+          "additionalProperties": false,
+          "properties": {
+            "repo": {
+              "type": "string",
+              "pattern": "^(https://github\\.com/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+              "not": { "const": "self" },
+              "description": "owner/repo or its https://github.com/ URL (the shipped descriptors carry the URL verbatim because bootstrap-assess-rfe.sh holds it)."
+            },
+            "ref": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{7,40}$",
+              "description": "Immutable commit SHA (tags move). QUOTE it in YAML: an all-digit or digits+e ref would otherwise parse as a number. Documentary at PR-1; the bootstrap verifies it from PR-2."
+            },
+            "path": { "$ref": "#/$defs/repo_path", "description": "Rubric file path inside the assess checkout (gate 2 checks it under --assess-dir)." },
+            "export": { "oneOf": [ { "$ref": "#/$defs/artifact_dir" }, { "type": "null" } ], "description": "Where the rubric is exported for authors (artifacts/<type>-rubric.md), or null when nothing exports it. Not required to exist." }
+          }
+        },
+        {
+          "required": ["repo", "path", "rubric_version"],
+          "additionalProperties": false,
+          "properties": {
+            "repo": { "const": "self", "description": "D3: the rubric is embedded in this repo." },
+            "path": { "$ref": "#/$defs/repo_path" },
+            "rubric_version": { "type": "string", "pattern": "^[0-9a-f]{7,64}$", "description": "Content hash of the rubric file." },
+            "export": { "oneOf": [ { "$ref": "#/$defs/artifact_dir" }, { "type": "null" } ] }
+          }
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["incremental", "none"], "default": "incremental", "description": "RESERVED. none for kinds without snapshots (they declare processed_gate instead)." },
+        "prefix": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9-]*-$", "description": "Snapshot file prefix. Never empty; the cross-type lint requires prefixes to be pairwise not prefix-of-each-other." },
+        "report_prefix": { "type": "string", "pattern": "^([a-z][a-z0-9-]*-)?$", "description": "Run-report filename prefix (generate_run_report output_prefix, bootstrap_snapshot). '' is grandfathered for type rfe only." },
+        "processed_gate": { "type": "string", "minLength": 1, "description": "RESERVED. How a kind with mode none decides an input was already processed (e.g. remote_children)." }
+      },
+      "if": { "properties": { "mode": { "const": "none" } }, "required": ["mode"] },
+      "then": { "required": ["processed_gate"], "not": { "required": ["prefix"] } },
+      "else": { "required": ["prefix", "report_prefix"] }
+    },
+    "reporting": {
+      "type": "object",
+      "required": ["item_key", "criterion_labels", "before_score_name_map"],
+      "additionalProperties": false,
+      "properties": {
+        "item_key": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Run-report key holding the per-item entries (per_rfe, per_initiative)." },
+        "criterion_labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "score field -> long label; key order = display order. Map over schema.review.score_fields." },
+        "criterion_short_labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "score field -> short label; when a key is omitted the long label applies." },
+        "before_score_name_map": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Alias (as written by the scorer) -> score field; key order verbatim." },
+        "pdf": {
+          "type": "object",
+          "required": ["extra_fields"],
+          "additionalProperties": false,
+          "properties": { "extra_fields": { "$ref": "#/$defs/string_list", "description": "generate_review_pdf REPORT_CONFIG.extra_fields." } }
+        },
+        "run_report": {
+          "type": "object",
+          "required": ["extra_entry_fields"],
+          "additionalProperties": false,
+          "properties": { "extra_entry_fields": { "$ref": "#/$defs/string_list", "description": "generate_run_report TYPE_CONFIG.extra_entry_fields." } }
+        }
+      },
+      "description": "Derived, not fields: report_title from display.entity; run-report filename from snapshot.report_prefix; review-report filename from pipeline.poll_prefix; pass_threshold 7 is scoring machinery."
+    },
+    "eval": {
+      "type": "object",
+      "required": ["config", "dataset", "mlflow_experiment", "thresholds", "timeout"],
+      "additionalProperties": false,
+      "properties": {
+        "config": { "$ref": "#/$defs/repo_path", "description": "The committed eval config (generated from PR-4)." },
+        "dataset": { "$ref": "#/$defs/repo_path", "description": "Case directory (eval.yaml dataset.path)." },
+        "mlflow_experiment": { "type": "string", "minLength": 1 },
+        "thresholds": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "min_pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+              "min_mean": { "type": "number", "minimum": 0 }
+            }
+          },
+          "description": "OPEN map judge name -> threshold. AUTHORITATIVE for the generated eval config (design section 4.5)."
+        },
+        "timeout": { "type": "integer", "minimum": 1, "description": "Per-case timeout in seconds (eval.yaml execution.timeout)." },
+        "annotations_extra": { "$ref": "#/$defs/string_list", "description": "Type-specific expected_* annotation keys beyond the shared set." }
+      }
+    },
+    "input": {
+      "type": "object",
+      "required": ["from_type", "relation"],
+      "additionalProperties": false,
+      "properties": {
+        "from_type": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "Upstream type name (may be a peer pipeline's type, not necessarily registered here)." },
+        "relation": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["clones", "parent", "link"] },
+            "link_type": { "type": "string", "minLength": 1, "description": "Issue-link type name when kind is clones or link (e.g. Cloners)." },
+            "direction": { "type": "string", "enum": ["derived_is_inward", "derived_is_outward"] },
+            "dependency_link_type": { "type": "string", "minLength": 1, "description": "Link type used between sibling items derived from the same input (e.g. Blocks)." }
+          }
+        },
+        "source_ref_field": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Frontmatter field holding the upstream ref." },
+        "gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "labels_any": { "$ref": "#/$defs/string_list", "description": "Values may be literals or ${types.<t>.labels.<key>} references to a registered type's exported label." },
+            "labels_all": { "$ref": "#/$defs/string_list" },
+            "statuses_not": { "$ref": "#/$defs/string_list" },
+            "any_of": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["labels_any"],
+                    "additionalProperties": false,
+                    "properties": { "labels_any": { "$ref": "#/$defs/string_list" } }
+                  },
+                  {
+                    "type": "object",
+                    "required": ["fields"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "fields": {
+                        "type": "object",
+                        "minProperties": 1,
+                        "additionalProperties": {
+                          "type": "object",
+                          "required": ["name_in"],
+                          "additionalProperties": false,
+                          "properties": { "name_in": { "$ref": "#/$defs/string_list" } }
+                        },
+                        "description": "field id or display name -> accepted option names."
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "description": "Upstream readiness gate, evaluated by the CONSUMING pipeline (rfe-creator ships no evaluator)."
+        },
+        "body_source": {
+          "type": "object",
+          "required": ["attachment", "fallback"],
+          "additionalProperties": false,
+          "properties": {
+            "attachment": { "type": "string", "pattern": "^(?=.*\\{key\\})\\S+$", "description": "Attachment filename template on the upstream issue (R7 convention '{key}-strategy.md')." },
+            "fallback": { "type": "string", "enum": ["description"] }
+          }
+        },
+        "copy_fields": { "$ref": "#/$defs/string_list" },
+        "skip_if": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "labels_any": { "$ref": "#/$defs/string_list" },
+            "statuses": { "$ref": "#/$defs/string_list" },
+            "single_open_unlabeled_override": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "produce": {
+      "type": "object",
+      "required": ["type", "relation"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "relation": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string", "enum": ["clones", "parent", "link"] },
+            "link_type": { "type": "string", "minLength": 1 },
+            "dependency_link_type": { "type": "string", "minLength": 1 }
+          }
+        },
+        "label_on_input": { "$ref": "#/$defs/label", "description": "Label this pipeline sets on the input once every produced item exists." }
+      }
+    }
+  }
+}

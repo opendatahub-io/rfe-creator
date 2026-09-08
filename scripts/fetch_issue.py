@@ -68,7 +68,9 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
             user,
             token,
             issue_key,
-            fields=["summary", "description", "priority", "labels", "status"],
+            # issuetype is requested for post-fetch (project, issue_type)
+            # verification (work-item-types PR-3); nothing written below reads it.
+            fields=["summary", "description", "priority", "labels", "status", "issuetype"],
         )
     except Exception as e:
         print(f"Error fetching issue {issue_key}: {e}", file=sys.stderr)
@@ -153,7 +155,7 @@ def main():
         default=None,
         help="Comma-separated list of fields to fetch "
         "(default: summary,description,priority,"
-        "labels,status). "
+        "labels,status,issuetype). "
         "Use 'comment' to also fetch comments.",
     )
     mode_group.add_argument(
@@ -221,7 +223,7 @@ def main():
 
     # Default fields when not in write-original-only mode
     if not args.fields:
-        args.fields = "summary,description,priority,labels,status"
+        args.fields = "summary,description,priority,labels,status,issuetype"
 
     if not all([server, user, token]):
         print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)

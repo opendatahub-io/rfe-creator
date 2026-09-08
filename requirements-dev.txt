@@ -1,3 +1,6 @@
 -r requirements.txt
 pytest
 jira-emulator @ git+https://github.com/jctanner/jira-emulator.git
+# JSON-Schema gate of scripts/validate_types.py and its tests only (Draft 2020-12 needs >=4.0);
+# scripts/type_registry.py stays stdlib+pyyaml and import-clean (design Q5).
+jsonschema>=4.0

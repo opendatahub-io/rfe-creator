@@ -1,0 +1,133 @@
+# types/rfe/type.yaml — the rfe work-item type descriptor.
+# Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 (§8.2 is the
+# initiative twin). PR-1 status: INERT — no script imports the registry yet; tests pin every value below
+# against the live type-keyed registries, so the descriptor is source of truth BY TEST before BY IMPORT
+# (design §10). Every value is the live literal on main (c1df503) with the consuming file:line in a
+# trailing comment; nothing here is authored. Where the design and main disagree, main wins and the
+# comment says so (Q3, Q9, Q10, Q11, Q16 of the PR-1 checklist).
+schema_version: 1
+type: rfe
+display: { entity: RFE, entity_plural: RFEs }          # split_submit.py:115-116 entity_name/_plural; generate_review_pdf.py:25-26
+kind: work-item                                         # RESERVED (design §3.2); v1 constant, no consumer. inputs/produces omitted = []
+
+identity:
+  tracker: jira                                         # every write goes through jira_utils.py REST (create_issue :172-179)
+  jira:
+    project: RHAIRFE                                    # submit.py:63; split_submit.py:111
+    issue_type: Feature Request                         # submit.py:64; split_submit.py:112; sent BY NAME jira_utils.py:175
+    key_prefixes: ["RHAIRFE-"]                          # submit.py:68 jira_prefix; generate_run_report.py:36 tracker_prefix; generate_review_pdf.py:23; check_conflicts.py:41
+    split_link_type: "Work item split"                  # split_submit.py:210,:410,:497,:610,:685,:716; emulator seed tests/conftest.py:96
+    state_map:
+      approved: Approved                                # submit.py:987 transition_issue(..., "Approved"); :981 already-Approved short-circuit
+      close_superseded: { transition: Closed, resolution: Obsolete }   # split_submit.py:820 (target status name .lower()=="closed"), :837 resolution
+  local_prefix: "RFE-"                                  # submit.py:67; generate_run_report.py:37; generate_review_pdf.py:24; next_rfe_id.py:27 holds the dash-less "RFE"
+  local_id_pattern: '^RFE-\d+$'                         # artifact_utils.py:73 (rfe-task.local_id), :120 (rfe-review.local_id); rename guard :1001 re.fullmatch(r"RFE-\d+"). ONE backslash (the design's YAML doubled it)
+  id_field: rfe_id                                      # submit.py:66; artifact_utils.py:62,:109; verify_phase.py:44; generate_run_report.py:33; check_conflicts.py:40
+
+dirs:                                                   # artifacts/ form (Q13); consumers holding the bare form get it via Descriptor.dirs(form="bare")
+  tasks: artifacts/rfe-tasks                            # pipeline_state.py:104; submit.py:69 (bare); error_collect.py:53; prep_assess.py:19
+  originals: artifacts/rfe-originals                    # submit.py:71 (bare); error_collect.py:52; check_revised.py:49; pipeline_state.py:562 (derived by str.replace)
+  reviews: artifacts/rfe-reviews                        # pipeline_state.py:105; verify_phase.py:43; submit.py:70 (bare); reassess_save.py:20
+index: { enabled: true }                                # submit.py:91 has_index; split_submit.py:125 do_rebuild_index; artifact_utils.py:1113-1170 rebuild_index -> artifacts/rfes.md
+companions:
+  comments: true                                        # fetch_issue.py:122 writes {KEY}-comments.md under --fetch-all; rfe.review/prompts/fetch-agent.md:16,:26
+  removed_context: true                                 # artifact_utils.py:727-731 companion suffixes; submit.py:1115; error_collect.py:216; check_content_preservation.py:246
+
+conventions:
+  type_label: RFE                                       # submit.py:65 (also "No {type_label} task files found." :411 — byte-stable)
+  label_prefix: rfe-creator                             # submit.py:76; split_submit.py:114
+  labels:                                               # every reserved key is spelled out; all equal "<label_prefix>-<suffix>" today (pinned)
+    rubric_pass: rfe-creator-autofix-rubric-pass        # submit.py:77; jql_query.py:89 (literal); split_submit.py:664 (composed) — PUBLISHED CONTRACT (R7): strat-creator's intake gate reads it
+    ignore: rfe-creator-ignore                          # snapshot_fetch.py:58; jql_query.py:88 (literal)
+    split_quarantine: rfe-creator-split-quarantine      # snapshot_fetch.py:59; submit.py:283 (composed)
+    split_child_marker: "rfe-creator-split-child-{parent}-{child_id}-{fingerprint}"   # split_submit.py:253 — TEMPLATE (Q12): {parent}/{child_id} are .lower()ed before rendering; {fingerprint} = sha256(cleaned)[:12] (:225-230); pinned against _child_marker_label()
+    needs_attention: rfe-creator-needs-attention        # submit.py:281,:336,:727; split_submit.py:656
+    auto_created: rfe-creator-auto-created              # submit.py:723; split_submit.py:637 (Q11: emitted, first-class)
+    auto_revised: rfe-creator-auto-revised              # submit.py:725; split_submit.py:654 (Q11)
+    split_result: rfe-creator-split-result              # split_submit.py:638 (Q11)
+    split_original: rfe-creator-split-original          # split_submit.py:807 (dry-run text), :813 (Q11)
+    feasibility:                                        # submit.py:78-82 (values); split_submit.py:161-166 (composed); key order == rfe-review feasibility enum
+      feasible: rfe-creator-feasibility-pass
+      infeasible: rfe-creator-feasibility-fail
+      indeterminate: rfe-creator-feasibility-unknown
+    # alignment: absent — submit.py:83 alignment_labels None; split_submit.py:126; no alignment dimension (pipeline_state.py:103 alignment_skill None)
+  comment_prefix: "[RFE Creator]"                       # submit.py:90; split_submit.py:113 comment_marker — PUBLISHED CONTRACT (R7)
+  removed_context_preamble: "*[RFE Creator]* The following technical implementation details were removed from the RFE description during review. This content is better suited for a RHAISTRAT and is preserved here for reference:"   # submit.py:84-89 — PUBLISHED CONTRACT (R7): strat-creator strategy-refine/SKILL.md:123 string-matches it; frozen
+  query_default: 'project = RHAIRFE AND issuetype = "Feature Request"'   # Q10: no consumer at PR-1 (queries arrive via --jql: snapshot_fetch.py:489, bootstrap_snapshot.py:407, jql_query.py:64); not pinned; JQL because identity.tracker is jira
+  parent_key_patterns: ['RFE-\d+', 'RHAIRFE-\d+']       # artifact_utils.py:99 r"^(RFE-\d+|RHAIRFE-\d+)$" (rfe-task.parent_key)
+
+schema:
+  task:
+    extra_fields:                                       # rfe-task fields beyond the shared base (artifact_utils.py:61-107)
+      size: { type: string, required: false, enum: [S, M, L, XL], default: null }   # artifact_utils.py:85-90; rebuild_index Size column :1141
+    priority:                                           # RESERVED (design §3.2 task.priority) — no consumer. Today the enum lives in artifact_utils.py:83 (rfe-task) and validate_batch_input.py:34 ALLOWED_PRIORITIES reads SCHEMAS["rfe-task"] for BOTH types; the pin test asserts equality
+      enum: [Blocker, Critical, Major, Normal, Minor, Undefined]
+      map_to_tracker: {}                                # identity map: the task vocabulary IS the Jira vocabulary (sent by name jira_utils.py:178)
+  review:
+    score_fields: [what, why, open_to_how, not_a_task, right_sized]   # artifact_utils.py:155-159 (scores), :182-186 (before_scores); generate_run_report.py:26; generate_review_pdf.py:30; verify_phase.py:46-52; compare_review_outputs.py:21
+    extra_fields: {}                                    # rfe-review has no per-type field (artifact_utils.py:108-189)
+    extra_rules: []
+
+pipeline:
+  stages: [create, review, submit, split, auto-fix, speedrun]   # .claude/skills/rfe.{create,review,submit,split,auto-fix,speedrun}/SKILL.md
+  context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
+    - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "rfe"], required: true }
+    - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
+  poll_prefix: ""                                       # pipeline_state.py:107; check_review_progress.py:19-27 unprefixed keys — grandfathered empty (rfe only); also REPORT_CONFIG.default_output "review-report.html" (generate_review_pdf.py:28, Q15)
+  state_prefix: ""                                      # check_autofix_complete.py:18 tmp/speedrun-all-ids.txt; check_review_progress.py:135-138 tmp/{review,split,autofix,speedrun}-config.yaml — grandfathered empty (rfe only)
+  scorer_agent: rfe-scorer                              # pipeline_state.py:100 scorer_type (subagent_type :240,:278,:345,:382); rfe.review/prompts/assess-agent.md:12
+  prompts:                                              # Q1: today's live paths; PIPELINE_TYPES["rfe"] pipeline_state.py:98-99; the types/<t>/prompts/* move is PR-5
+    create_guidance: .claude/skills/rfe.create/SKILL.md                 # Step 2 "Clarifying Questions" (:35); template .claude/skills/rfe.create/rfe-template.md (:54)
+    review_rules: .claude/skills/rfe.review/prompts/review-agent.md     # dirname == PIPELINE_TYPES["rfe"]["review_prompts"]
+    review_sections: .claude/skills/rfe.review/prompts/review-agent.md  # same file today (rules and body headings are not split)
+    revise_rules: .claude/skills/rfe.review/prompts/revise-agent.md
+    split_rules: .claude/skills/rfe.split/prompts/split-agent.md        # == PIPELINE_TYPES["rfe"]["split_prompt"]
+  dimensions:
+    - name: feasibility                                 # poll phase "feasibility" (check_review_progress.py:25; pipeline_state.py:198 f"{pp}feasibility")
+      prompt: .claude/skills/rfe-feasibility-review/SKILL.md   # pipeline_state.py:102 feasibility_skill
+      blocking: true                                    # Q17: ASSESS wave waits on it (wait-for-wave --also-phase feasibility, pipeline_state.py:1193-1195); no script reads a blocking flag — unpinned
+  rubric:
+    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 ASSESS_RFE_REPO default (verbatim URL)
+    ref: "e27d7ac"                                      # Q9: documentary at PR-1 — bootstrap-assess-rfe.sh:54-64 pins NO ref (git pull --ff-only; ASSESS_RFE_REF optional); e27d7ac is the vendored .context/assess-rfe checkout (== assess-rfe main); ref-pinning bootstrap is PR-2. Quoted: a digits-only ref would parse as a number
+    path: skills/assess-rfe/scripts/agent_prompt.md     # bootstrap-assess-rfe.sh:48 RUBRIC_FILE; pipeline_state.py:101 == ".context/assess-rfe/" + path (gate 2, Q24)
+    export: artifacts/rfe-rubric.md                     # bootstrap-assess-rfe.sh:103 export_rubric.py; AGENTS.md:11; rfe.create/SKILL.md:23
+  resplit: { score_field: right_sized, below: 2 }       # check_right_sized.py:53 `right_sized < 2` (type-blind); rfe.split/SKILL.md:115 (Q3: stays 2 for rfe)
+
+batch: { extra_fields: [] }                             # validate_batch_input.py:42 RFE_KNOWN_FIELDS == base {prompt, priority, labels, clarifying_context}
+snapshot:
+  prefix: "issue-snapshot-"                             # snapshot_fetch.py:60; defaults :142,:163,:281. Q16: submit.py:74 holds "" as a SENTINEL for this default (:672-673,:1170-1171) — a grandfathered projection ('' if type == rfe else prefix), never compare literally
+  report_prefix: ""                                     # generate_run_report.py:30 output_prefix; bootstrap_snapshot.py:45; submit.py:325 — grandfathered empty (rfe only)
+reporting:
+  item_key: per_rfe                                     # generate_run_report.py:29; bootstrap_snapshot.py:46
+  criterion_labels: { what: WHAT, why: WHY, open_to_how: HOW, not_a_task: Not-a-task, right_sized: Right-sized }   # generate_review_pdf.py:31-37 (key order = display order)
+  criterion_short_labels: { what: WHAT, why: WHY, open_to_how: HOW, not_a_task: Task, right_sized: Scope }   # generate_review_pdf.py:38-44 (two keys differ from the long labels)
+  before_score_name_map:                                # generate_review_pdf.py:45-56 — 10 aliases, order verbatim
+    WHY: why
+    WHAT: what
+    HOW: open_to_how
+    "Open to HOW": open_to_how
+    Not-a-task: not_a_task
+    "Not a task": not_a_task
+    Right-sized: right_sized
+    Right-sizing: right_sized
+    NAT: not_a_task
+    RS: right_sized
+  pdf: { extra_fields: [] }                             # generate_review_pdf.py:57 REPORT_CONFIG.extra_fields
+  run_report: { extra_entry_fields: [needs_attention] } # generate_run_report.py:31 TYPE_CONFIG.extra_entry_fields
+eval:
+  config: eval.yaml
+  dataset: eval/dataset/cases                           # eval.yaml:36 dataset.path
+  mlflow_experiment: rfe-speedrun-eval                  # eval.yaml:33
+  timeout: 7200                                         # eval.yaml:9
+  thresholds:                                           # eval.yaml:845-878, verbatim judge names — AUTHORITATIVE from PR-4 (design §4.5)
+    files_exist: { min_pass_rate: 1.0 }
+    frontmatter_valid: { min_pass_rate: 1.0 }
+    run_report_exists: { min_pass_rate: 1.0 }
+    recommendation_consistency: { min_pass_rate: 1.0 }
+    revision_flag_consistency: { min_pass_rate: 1.0 }
+    revision_coverage: { min_pass_rate: 0.92 }
+    pipeline_flow: { min_pass_rate: 1.0 }
+    architecture_context_used: { min_pass_rate: 1.0 }
+    rfe_quality: { min_mean: 3.5 }
+    revision_quality: { min_mean: 3.5 }
+  annotations_extra: []                                 # eval.yaml:41-57 lists no type-specific expected_* field (score_tolerance :53 is prose-only, no consumer)

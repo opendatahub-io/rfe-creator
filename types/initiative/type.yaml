@@ -1,0 +1,140 @@
+# types/initiative/type.yaml — the initiative work-item type descriptor.
+# Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 and the worked
+# example §8.2. PR-1 status: INERT — no script imports the registry yet; tests pin every value below
+# against the live type-keyed registries, so the descriptor is source of truth BY TEST before BY IMPORT
+# (design §10). Every value is the live literal on main (c1df503) with the consuming file:line in a
+# trailing comment; nothing here is authored. Where §8.2 and main disagree, main wins and the comment
+# says so (Q1, Q3, Q9, Q10, Q11, Q14 of the PR-1 checklist).
+schema_version: 1
+type: initiative
+display: { entity: Initiative, entity_plural: Initiatives }   # split_submit.py:133-134 entity_name/_plural; generate_review_pdf.py:66-67
+kind: work-item                                         # RESERVED (design §3.2); v1 constant, no consumer. inputs/produces omitted = []
+
+identity:
+  tracker: jira                                         # every write goes through jira_utils.py REST (create_issue :172-179)
+  jira:
+    project: RHOAIENG                                   # submit.py:94; split_submit.py:129
+    issue_type: Initiative                              # submit.py:95; split_submit.py:130; sent BY NAME jira_utils.py:175 (id 10103 in AGENTS.md:129 is unused)
+    key_prefixes: ["RHOAIENG-"]                         # submit.py:99 jira_prefix; generate_run_report.py:55 tracker_prefix; generate_review_pdf.py:64; check_conflicts.py:47
+    split_link_type: "Work item split"                  # split_submit.py:210,:410,:497,:610,:685,:716 (shared with rfe)
+    state_map:
+      approved: Approved                                # submit.py:987 (shared); emulator RHOAIENG workflow tests/conftest.py:114-121
+      close_superseded: { transition: Closed, resolution: Obsolete }   # split_submit.py:820 (target status name .lower()=="closed"), :837 resolution (shared)
+  local_prefix: "INIT-"                                 # submit.py:98; generate_run_report.py:56; generate_review_pdf.py:65; next_rfe_id.py --prefix INIT (initiative-create/SKILL.md:50)
+  local_id_pattern: '^INIT-\d+$'                        # artifact_utils.py:199 (initiative-task.local_id), :237 (initiative-review.local_id); rename guard :1058 re.fullmatch(r"INIT-\d+"). ONE backslash (the design's YAML doubled it)
+  id_field: initiative_id                               # submit.py:97; artifact_utils.py:191,:229; verify_phase.py:57; generate_run_report.py:53; check_conflicts.py:46
+
+dirs:                                                   # artifacts/ form (Q13); consumers holding the bare form get it via Descriptor.dirs(form="bare")
+  tasks: artifacts/initiatives                          # pipeline_state.py:116; submit.py:100 (bare); error_collect.py:58; prep_assess.py:20
+  originals: artifacts/initiative-originals             # submit.py:102 (bare); error_collect.py:57; check_revised.py:54; pipeline_state.py:562-563 (derived by str.replace)
+  reviews: artifacts/initiative-reviews                 # pipeline_state.py:117; verify_phase.py:56; submit.py:101 (bare); reassess_save.py:21
+index: { enabled: false }                               # submit.py:126 has_index; split_submit.py:145 do_rebuild_index; no initiative index file exists
+companions:
+  comments: false                                       # initiative-review/prompts/fetch-agent.md:10 fetches without comments and writes only task + original (:35-37); fetch_issue.py --fetch-all is rfe-only. Means "the fetch step produces one" — rename_initiative_to_jira_key (artifact_utils.py:1079-1080) still maps -comments.md and a test pins it
+  removed_context: true                                 # artifact_utils.py:727-731 (type-agnostic); :831-833 find_removed_context_yaml initiative branch; error_collect.py:216
+
+conventions:
+  type_label: Initiative                                # submit.py:96
+  label_prefix: initiative                              # submit.py:107; split_submit.py:132 (no -creator suffix, e22120c)
+  labels:                                               # every reserved key is spelled out; all equal "<label_prefix>-<suffix>" today (pinned)
+    rubric_pass: initiative-autofix-rubric-pass         # submit.py:108; jql_query.py:83 (literal); split_submit.py:664 (composed) — PUBLISHED CONTRACT (R7)
+    ignore: initiative-ignore                           # snapshot_fetch.py:63; jql_query.py:82 (literal)
+    split_quarantine: initiative-split-quarantine       # snapshot_fetch.py:64; submit.py:283 (composed)
+    split_child_marker: "initiative-split-child-{parent}-{child_id}-{fingerprint}"   # split_submit.py:253 — TEMPLATE (Q12): {parent}/{child_id} are .lower()ed before rendering; {fingerprint} = sha256(cleaned)[:12] (:225-230); pinned against _child_marker_label()
+    needs_attention: initiative-needs-attention         # submit.py:281,:336,:727; split_submit.py:656
+    auto_created: initiative-auto-created               # submit.py:723; split_submit.py:637 (Q11: emitted, first-class)
+    auto_revised: initiative-auto-revised               # submit.py:725; split_submit.py:654 (Q11)
+    split_result: initiative-split-result               # split_submit.py:638 (Q11)
+    split_original: initiative-split-original           # split_submit.py:807 (dry-run text), :813 (Q11)
+    feasibility:                                        # submit.py:109-113 (values); split_submit.py:161-166 (composed); key order == initiative-review feasibility enum
+      feasible: initiative-feasibility-pass
+      infeasible: initiative-feasibility-fail
+      indeterminate: initiative-feasibility-unknown
+    alignment:                                          # submit.py:114-118; split_submit.py:146-150 — present because the alignment dimension below is declared
+      strong: initiative-alignment-strong
+      partial: initiative-alignment-partial
+      weak: initiative-alignment-weak
+  comment_prefix: "[Initiative Creator]"                # submit.py:125; split_submit.py:131 comment_marker — PUBLISHED CONTRACT (R7)
+  removed_context_preamble: "*[Initiative Creator]* The following technical implementation details were removed from the Initiative description during review. This content may be useful as strategy context and is preserved here for reference:"   # submit.py:119-124 — PUBLISHED CONTRACT (R7); the design's "…" truncation is not the value; frozen
+  query_default: 'project = RHOAIENG AND issuetype = Initiative'   # Q10: no consumer at PR-1 (queries arrive via --jql: snapshot_fetch.py:489, bootstrap_snapshot.py:407, jql_query.py:64); not pinned; JQL because identity.tracker is jira
+  parent_key_patterns: ['RHAISTRAT-\d+', 'RHOAIENG-\d+', 'INIT-\d+']   # artifact_utils.py:219 r"^(RHAISTRAT-\d+|RHOAIENG-\d+|INIT-\d+)$" (initiative-task.parent_key). Q14: validate_batch_input.py:36 PARENT_KEY_PATTERN omits INIT- — known divergence, reconciled in PR-3
+
+schema:
+  task:
+    extra_fields: {}                                    # initiative-task has no field beyond the shared base — no size (artifact_utils.py:190-227; pinned by test_initiative_task_no_size_field)
+    priority:                                           # RESERVED (design §3.2 task.priority) — no consumer. Today the enum lives in artifact_utils.py:209 (initiative-task); validate_batch_input.py:34 reads SCHEMAS["rfe-task"] for both types; the pin test asserts equality
+      enum: [Blocker, Critical, Major, Normal, Minor, Undefined]
+      map_to_tracker: {}                                # identity map: the task vocabulary IS the Jira vocabulary (sent by name jira_utils.py:178)
+  review:
+    score_fields: [what, why, scope, open_to_how, right_sized]   # artifact_utils.py:272-276 (scores), :299-303 (before_scores); generate_run_report.py:40-46; generate_review_pdf.py:75-81; verify_phase.py:59-65; compare_review_outputs.py:27
+    extra_fields:
+      alignment: { type: string, required: false, enum: [strong, partial, weak, not_assessed], default: not_assessed }   # artifact_utils.py:306-313 (default is the STRING not_assessed, not null)
+    extra_rules:
+      - { when: { field: alignment, equals: weak }, then: needs_attention }   # Q22: prompt rule only — initiative-review/prompts/review-agent.md:60; eval-initiative.yaml:277-278 judge; no script consumer, unpinned
+
+pipeline:
+  stages: [create, review, submit, split, auto-fix, speedrun]   # .claude/skills/initiative-{create,review,submit,split,auto-fix,speedrun}/SKILL.md
+  context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
+    - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "initiative"], required: true }
+    - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
+  poll_prefix: "initiative-"                            # pipeline_state.py:119; check_review_progress.py:28-34 keys initiative-{split,fetch,assess,feasibility,review,revise,alignment}; REPORT_CONFIG.default_output "initiative-review-report.html" (generate_review_pdf.py:69, Q15)
+  state_prefix: "initiative-"                           # check_autofix_complete.py:22 tmp/initiative-speedrun-all-ids.txt; check_review_progress.py:139-141 tmp/initiative-{review,split,autofix}-config.yaml
+  scorer_agent: initiative-scorer                       # pipeline_state.py:112 scorer_type; bootstrap-assess-rfe.sh:52 INITIATIVE_AGENT="initiative-scorer.md"; initiative-review/prompts/assess-agent.md:12
+  prompts:                                              # Q1: today's live paths; PIPELINE_TYPES["initiative"] pipeline_state.py:110-111; the types/<t>/prompts/* move is PR-5
+    create_guidance: .claude/skills/initiative-create/SKILL.md                 # Step 1 "Clarifying Questions" (:22); template .claude/skills/initiative-create/initiative-template.md (:35)
+    review_rules: .claude/skills/initiative-review/prompts/review-agent.md     # dirname == PIPELINE_TYPES["initiative"]["review_prompts"]
+    review_sections: .claude/skills/initiative-review/prompts/review-agent.md  # same file today (rules and body headings are not split)
+    revise_rules: .claude/skills/initiative-review/prompts/revise-agent.md
+    split_rules: .claude/skills/initiative-split/prompts/split-agent.md        # == PIPELINE_TYPES["initiative"]["split_prompt"]
+  dimensions:
+    - name: feasibility                                 # poll phase "initiative-feasibility" (check_review_progress.py:31; pipeline_state.py:198)
+      prompt: .claude/skills/initiative-feasibility-review/SKILL.md   # pipeline_state.py:114 feasibility_skill
+      blocking: true                                    # Q17: ASSESS wave waits on it (pipeline_state.py:1193-1195 --also-phase); no script reads a blocking flag — unpinned
+    - name: alignment                                   # poll phase "initiative-alignment" (check_review_progress.py:34; pipeline_state.py:206)
+      prompt: .claude/skills/strategic-alignment-review/SKILL.md      # pipeline_state.py:115 alignment_skill (truthiness is the only switch, :202)
+      blocking: false                                   # Q17: initiative-review/SKILL.md:124 "Alignment is informational, not blocking"; :129 — unpinned
+      condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208)
+      skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
+  rubric:
+    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 (verbatim URL; shared)
+    ref: "6602a12e"                                     # Q9: documentary at PR-1 — bootstrap-assess-rfe.sh:54-64 pins NO ref; the initiative rubric exists only at assess-rfe PR #10's head 6602a12e (skills/assess-initiative), not on the vendored e27d7ac; ref-pinning bootstrap is PR-2. Quoted: a digits-only ref would parse as a number
+    path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
+    export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
+  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py:53 `right_sized < 2` is type-blind today; §8.2's `below: 1` is a PR-2 behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split
+
+batch: { extra_fields: [parent_key] }                   # validate_batch_input.py:43 INITIATIVE_KNOWN_FIELDS - RFE_KNOWN_FIELDS
+snapshot:
+  prefix: "initiative-snapshot-"                        # snapshot_fetch.py:65; submit.py:105 (forwarded when truthy :672-673,:1170-1171); bootstrap_snapshot.py:676-677
+  report_prefix: "initiative-run-"                      # generate_run_report.py:50 output_prefix; bootstrap_snapshot.py:49; submit.py:325
+reporting:
+  item_key: per_initiative                              # generate_run_report.py:49; bootstrap_snapshot.py:50
+  criterion_labels: { what: WHAT, why: WHY, scope: Scope, open_to_how: HOW, right_sized: Right-sized }   # generate_review_pdf.py:82-88 (key order = display order)
+  criterion_short_labels: { what: WHAT, why: WHY, scope: Scope, open_to_how: HOW, right_sized: Scope-fit }   # generate_review_pdf.py:89-95 (full map as in code)
+  before_score_name_map:                                # generate_review_pdf.py:96-105 — 8 aliases, order verbatim
+    WHAT: what
+    WHY: why
+    Scope: scope
+    HOW: open_to_how
+    "Open to HOW": open_to_how
+    Right-sized: right_sized
+    Right-sizing: right_sized
+    RS: right_sized
+  pdf: { extra_fields: [alignment] }                    # generate_review_pdf.py:106 REPORT_CONFIG.extra_fields (:1537 has_alignment)
+  run_report: { extra_entry_fields: [alignment, feasibility, needs_attention] }   # generate_run_report.py:51 TYPE_CONFIG.extra_entry_fields
+eval:
+  config: eval-initiative.yaml
+  dataset: eval/initiative-dataset/cases                # eval-initiative.yaml:36 dataset.path (§8.2 omits /cases)
+  mlflow_experiment: initiative-speedrun-eval           # eval-initiative.yaml:33
+  timeout: 8100                                         # eval-initiative.yaml:9
+  thresholds:                                           # eval-initiative.yaml:872-904, verbatim judge names — AUTHORITATIVE from PR-4 (design §4.5)
+    files_exist: { min_pass_rate: 1.0 }
+    frontmatter_valid: { min_pass_rate: 1.0 }
+    run_report_exists: { min_pass_rate: 1.0 }
+    recommendation_consistency: { min_pass_rate: 1.0 }
+    revision_flag_consistency: { min_pass_rate: 1.0 }
+    revision_coverage: { min_pass_rate: 0.92 }
+    pipeline_flow: { min_pass_rate: 1.0 }
+    architecture_context_used: { min_pass_rate: 0.85 }
+    initiative_quality: { min_mean: 3.5 }
+    revision_quality: { min_mean: 3.5 }
+  annotations_extra: [expected_alignment]               # eval-initiative.yaml:53

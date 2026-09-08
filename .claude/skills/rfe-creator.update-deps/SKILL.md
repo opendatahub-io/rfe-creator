@@ -12,8 +12,12 @@ Force update all vendored dependencies by removing cached copies and re-fetching
 
 ### 1. Update assess-rfe
 
+The removal list mirrors everything `scripts/bootstrap-assess-rfe.sh` installs: the checkout, every skill directory it vendors, and the agent definitions it copies into `.claude/agents/`.
+
 ```bash
-rm -rf .context/assess-rfe .claude/skills/assess-rfe .claude/skills/export-rubric
+rm -rf .context/assess-rfe \
+  .claude/skills/assess-rfe .claude/skills/assess-initiative .claude/skills/export-rubric \
+  .claude/agents/rfe-scorer.md .claude/agents/initiative-scorer.md
 bash scripts/bootstrap-assess-rfe.sh
 ```
 
