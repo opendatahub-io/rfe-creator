@@ -6,6 +6,5 @@
   "scripts/fetch_issue.py": 1,
   "scripts/jira_utils.py": 1,
   "scripts/pipeline_state.py": 1,
-  "scripts/submit.py": 5,
   "scripts/validate_batch_input.py": 2
 }

@@ -19,7 +19,11 @@ Grandfathered projections (explicit — never "compare literally"):
   * rfe pipeline.poll_prefix / pipeline.state_prefix / snapshot.report_prefix are '' while the
     initiative values are 'initiative-' / 'initiative-' / 'initiative-run-' (design §3.2);
   * submit.TYPE_CONFIGS['rfe']['snapshot_prefix'] is '' — a sentinel for snapshot_fetch's default
-    'issue-snapshot-' (Q16); snapshot.prefix itself is the non-empty string;
+    (the rfe snapshot.prefix, bound at import since PR-2c; Q16); snapshot.prefix itself is the
+    non-empty string. Since PR-2d _type_config derives it as '' if rfe else snapshot.prefix, and
+    split_type_arg / the report commands' --type as "omitted for rfe, the type name otherwise"
+    (an argv convention with no descriptor field) — both pinned as residues so lifting either
+    grandfather is a visible change;
   * validate_batch_input.PARENT_KEY_PATTERN omits INIT- (Q14: known divergence until PR-3);
   * the four rfe rubric-path sites in skill bodies are STALE (design §10 PR-5) and are pinned as
     such so the PR-5 fix is a visible pin change;
@@ -162,6 +166,39 @@ DEFERRED = [
 # ── matrix rows whose registry now derives from the descriptor at import (pins deleted) ─────
 # (rows, registry, "<PR>: <projection>; <what, if anything, is still literal and pinned>")
 MIGRATED = [
+    (
+        (*range(1, 19), 22, 25, 26),
+        "submit.TYPE_CONFIGS / FEASIBILITY_LABELS / --type choices / scan-rename dispatch / "
+        "approve target",
+        "PR-2d: _type_config(desc) over names() — identity.jira.{project,issue_type}, "
+        "conventions.type_label, id_field / local_prefix / write_prefix, dirs(bare), "
+        "f'{type}-task' / f'{type}-review', conventions.{label_prefix,labels.rubric_pass,"
+        "labels.feasibility,labels.alignment,removed_context_preamble,comment_prefix}, "
+        "index.enabled (same keys, key order and value types); FEASIBILITY_LABELS stays the rfe "
+        "entry; --type is registry.choices(); the id_field dispatchers are "
+        "artifact_utils.scan_tasks / rename_to_tracker_key(desc); the approve target, the "
+        "already-there short-circuit, the status lines and the comment read "
+        "identity.jira.state_map.approved once; grandfathered and still pinned as residues: the "
+        "rfe snapshot_prefix '' sentinel (9) and the split_type_arg / report --type argv "
+        "convention (10, 26); still pinned: the labels composed from label_prefix (19, 20), the "
+        "policy predicate (21), the dry-run sentinel (23), the report companion path (24) and "
+        "the R7 literals (12, 15, 16 in TestPublishedContracts)",
+    ),
+    (
+        (*range(27, 37), 42, 43, 46),
+        "split_submit.SPLIT_CONFIG / _TRACKER (link type, close-superseded) / --type choices",
+        "PR-2d: _split_config(desc) over names() — identity.jira.{project,issue_type}, "
+        "conventions.{comment_prefix,label_prefix}, display.{entity,entity_plural}, id_field, "
+        "dirs(bare), f'{type}-review', index.enabled, conventions.labels.alignment; scan_fn / "
+        "rename_fn / parse_child_fn = functools.partial(artifact_utils.<generic>, desc=desc) and "
+        "find_review_fn = artifact_utils.find_review_file (detect()-routed; pinned to land in "
+        "dirs.reviews for both id grammars, 34 residue); the six 'Work item split' sites and the "
+        "Closed / Obsolete closure read identity.jira.split_link_type and "
+        "identity.jira.state_map.close_superseded through the private _TRACKER projection "
+        "(source form pinned); --type is registry.choices(); still pinned: the feasibility "
+        "composition (37), the marker template (38), the composed labels and inheritance filter "
+        "(39-41), the comment grammar (44) and the dry-run sentinel (45)",
+    ),
     (
         (47, 48, 49, 50, 53),
         "snapshot_fetch.SNAPSHOT_CONFIG / default prefix= kwargs / --type choices",
@@ -418,7 +455,7 @@ def fm(fields, body="Body\n"):
 
 
 class TestRegistryShape:
-    # rows: 25, 46, 124, 142, 159, 160, 161 + the source form of 162 (47-50, 53-56, 60, 62, 65,
+    # rows: 124, 142, 159, 160, 161 + the source form of 162 (25, 46, 47-50, 53-56, 60, 62, 65,
     # 66, 70, 87, 102, 106, 147, 148, 153-156, 162 MIGRATED)
 
     def test_shipped_types_in_argparse_order(self):
@@ -429,8 +466,6 @@ class TestRegistryShape:
         [
             # The type-keyed dicts still spelled out by hand; a dict derived from the registry
             # (comprehension over names()) has this property by construction and is not listed.
-            ("submit.TYPE_CONFIGS", submit.TYPE_CONFIGS),
-            ("split_submit.SPLIT_CONFIG", split_submit.SPLIT_CONFIG),
             ("pipeline_state.PIPELINE_TYPES", pipeline_state.PIPELINE_TYPES),
             ("compare_review_outputs._TYPE_CONFIG", compare_review_outputs._TYPE_CONFIG),
             ("check_autofix_complete._TYPE_CONFIG", check_autofix_complete._TYPE_CONFIG),
@@ -451,8 +486,6 @@ class TestRegistryShape:
     @pytest.mark.parametrize(
         "rel, flag",
         [
-            ("scripts/submit.py", "--type"),  # :365-370
-            ("scripts/split_submit.py", "--type"),  # :853-858
             ("scripts/pipeline_state.py", "--type"),  # :848 cmd_init
             ("scripts/compare_review_outputs.py", "--type"),  # :145
             ("scripts/cleanup_partial_split.py", "--type"),  # :27
@@ -460,7 +493,7 @@ class TestRegistryShape:
         ],
     )
     def test_argparse_type_choices_are_registry_choices(self, rel, flag):
-        # rows: 25, 46, 124, 159, 160, 161 — the literal lists still carried (53, 60 MIGRATED)
+        # rows: 124, 159, 160, 161 — the literal lists still carried (25, 46, 53, 60 MIGRATED)
         # (check_revised.py / check_right_sized.py hand-parse --type without choices)
         got = choices(rel, flag)
         assert got, f"{rel}: no add_argument({flag!r}, choices=...) found"
@@ -485,11 +518,13 @@ class TestRegistryShape:
             ("scripts/snapshot_fetch.py", "--type"),
             ("scripts/bootstrap_snapshot.py", "--type"),
             ("scripts/fetch_issue.py", "--type"),  # new in PR-2c (row 65): no literal list ever
+            ("scripts/submit.py", "--type"),  # PR-2d (row 25; :365-370 at c1df503)
+            ("scripts/split_submit.py", "--type"),  # PR-2d (row 46; :853-858 at c1df503)
         ],
     )
     def test_migrated_argparse_choices_read_the_registry(self, rel, flag):
-        # MIGRATED rows 53, 60, 62, 65, 66, 70, 87, 102, 106, 147, 148, 153-156 — the literal
-        # list is gone; the source form is pinned (as
+        # MIGRATED rows 25, 46, 53, 60, 62, 65, 66, 70, 87, 102, 106, 147, 148, 153-156 — the
+        # literal list is gone; the source form is pinned (as
         # test_frontmatter_schema_choices_are_the_schema_keys pins "list(SCHEMAS.keys())") so a
         # re-introduced literal list is a visible change.
         assert choices(rel, flag) == ["_TYPES.choices()"], rel
@@ -508,40 +543,45 @@ class TestRegistryShape:
 
 
 class TestSubmitTypeConfigs:
-    # rows: 1-26
-
-    def test_binding_and_identity(self, ctx):
-        c = submit.TYPE_CONFIGS[ctx.t]
-        pin("identity.jira.project", "submit.py:63,:94", ctx.jira["project"], c["project"])
-        pin("identity.jira.issue_type", "submit.py:64,:95", ctx.jira["issue_type"], c["issue_type"])
-        pin("conventions.type_label", "submit.py:65,:96", ctx.conv["type_label"], c["type_label"])
-        pin("identity.id_field", "submit.py:66,:97", ctx.id_field, c["id_field"])
-        pin("identity.local_prefix", "submit.py:67,:98", ctx.lp, c["local_prefix"])
-        pin("identity.jira.key_prefixes[0]", "submit.py:68,:99", ctx.wp, c["jira_prefix"])
-
-    def test_dirs_bare_form_and_schema_names(self, ctx):
-        c = submit.TYPE_CONFIGS[ctx.t]
-        pin("dirs.tasks (bare)", "submit.py:69,:100", ctx.bare["tasks"], c["tasks_dir"])
-        pin("dirs.reviews (bare)", "submit.py:70,:101", ctx.bare["reviews"], c["reviews_dir"])
-        pin("dirs.originals (bare)", "submit.py:71,:102", ctx.bare["originals"], c["originals_dir"])
-        pin("f'{type}-task'", "submit.py:72,:103", ctx.task_schema, c["task_schema"])
-        pin("f'{type}-review'", "submit.py:73,:104", ctx.review_schema, c["review_schema"])
+    # rows: 9, 10 (MIGRATED value, grandfathered shape), 19, 20, 21, 23, 24 residues, 26 (argv
+    # residue) — 1-18, 22, 25, 26 MIGRATED: TYPE_CONFIGS is a descriptor projection over names()
+    # since PR-2d (submit.py:61-128 at c1df503); what stays pinned is the two grandfathers, the
+    # labels still composed from label_prefix, the policy predicate, the dry-run sentinel, the
+    # report companion path and the source form of the migrated sites
 
     def test_snapshot_prefix_is_a_grandfathered_sentinel_for_rfe(self, ctx):
-        # Q16: '' means "use snapshot_fetch's default" (guards submit.py:672-673,:1170-1171);
-        # never compare snapshot.prefix literally to this key.
+        # rows: 9 (MIGRATED value, grandfathered shape) — submit.py:74,:105 carried '' / the
+        # initiative prefix; since PR-2d _type_config derives '' if rfe else snapshot.prefix. Q16:
+        # '' means "use snapshot_fetch's default" — the rfe snapshot.prefix, bound at import since
+        # PR-2c — and the guards (:672-673,:1170-1171) forward only a truthy value, so the
+        # EFFECTIVE prefix equals snapshot.prefix for every type. Never compare snapshot.prefix
+        # literally to this key; the shape is pinned so lifting the sentinel is a visible change.
         c = submit.TYPE_CONFIGS[ctx.t]
-        expected = "" if ctx.t == "rfe" else ctx.snap["prefix"]
         pin(
             "snapshot.prefix ('' sentinel for rfe)",
             "submit.py:74,:105",
-            expected,
+            "" if ctx.t == "rfe" else ctx.snap["prefix"],
             c["snapshot_prefix"],
         )
         assert ctx.snap["prefix"], "snapshot.prefix itself is never empty (design §8.2 L531)"
+        default = inspect.signature(snapshot_fetch.update_snapshot_hashes).parameters["prefix"]
+        pin(
+            "snapshot.prefix (effective: forwarded, or the sentinel's default)",
+            "submit.py:672-673,:1170-1171",
+            ctx.snap["prefix"],
+            c["snapshot_prefix"] or default.default,
+        )
+        source = read("scripts/submit.py")
+        assert '"" if desc.name == "rfe" else desc.get("snapshot.prefix")' in source
+        assert source.count('if cfg["snapshot_prefix"]:') == 2
 
-    def test_split_type_arg_is_the_argv_convention(self, ctx):
-        # UNMAPPED argv convention (consumed submit.py:497-498): pinned as a literal.
+    def test_split_type_arg_and_report_type_flag_are_the_argv_convention(self, ctx):
+        # rows: 10 (MIGRATED value, grandfathered shape), 26 residue — the argv convention of the
+        # subprocesses submit.py spawns: no --type for rfe (its argv is byte-identical), the type
+        # name otherwise. submit.py:75,:106 carried None / "initiative" (consumed :497-498) and
+        # :192-193,:210-211 appended '--type initiative' iff initiative; since PR-2d _type_config
+        # derives None if rfe else the type name and _generate_reports tests args.type != "rfe".
+        # UNMAPPED (no descriptor field) — pinned by value and source form.
         c = submit.TYPE_CONFIGS[ctx.t]
         pin(
             "(argv) None if rfe else type",
@@ -549,76 +589,13 @@ class TestSubmitTypeConfigs:
             None if ctx.t == "rfe" else ctx.t,
             c["split_type_arg"],
         )
-
-    def test_labels(self, ctx):
-        c = submit.TYPE_CONFIGS[ctx.t]
-        pin(
-            "conventions.label_prefix",
-            "submit.py:76,:107",
-            ctx.conv["label_prefix"],
-            c["label_prefix"],
-        )
-        pin(
-            "conventions.labels.rubric_pass",
-            "submit.py:77,:108",
-            ctx.labels["rubric_pass"],
-            c["rubric_pass_label"],
-        )
-        pin(
-            "conventions.labels.feasibility",
-            "submit.py:78-82,:109-113",
-            ctx.labels["feasibility"],
-            c["feasibility_labels"],
-        )
-        pin(
-            "conventions.labels.feasibility (order)",
-            "submit.py:78-82,:109-113",
-            list(ctx.labels["feasibility"]),
-            list(c["feasibility_labels"]),
-        )
-        pin(
-            "conventions.labels.alignment",
-            "submit.py:83,:114-118",
-            ctx.labels.get("alignment"),
-            c["alignment_labels"],
-        )
-
-    def test_published_contract_strings(self, ctx):
-        c = submit.TYPE_CONFIGS[ctx.t]
-        pin(
-            "conventions.removed_context_preamble",
-            "submit.py:84-89,:119-124",
-            ctx.conv["removed_context_preamble"],
-            c["removed_context_preamble"],
-        )
-        pin(
-            "conventions.comment_prefix",
-            "submit.py:90,:125",
-            ctx.conv["comment_prefix"],
-            c["comment_prefix"],
-        )
-
-    def test_has_index(self, ctx):
-        pin(
-            "index.enabled",
-            "submit.py:91,:126",
-            ctx.d["index"]["enabled"],
-            submit.TYPE_CONFIGS[ctx.t]["has_index"],
-        )
-
-    def test_module_alias_is_the_rfe_feasibility_map(self):
-        # rows: 18 — rfe-only backward-compat alias (feasibility_label_changes default :142-143)
-        rfe = _ctx("rfe")
-        pin(
-            "labels.feasibility (rfe)",
-            "submit.py:131",
-            rfe.labels["feasibility"],
-            submit.FEASIBILITY_LABELS,
-        )
-        add, stale = submit.feasibility_label_changes(
-            "feasible", is_reject=False, original_labels=[]
-        )
-        assert (add, stale) == (rfe.labels["feasibility"]["feasible"], [])
+        source = read("scripts/submit.py")
+        assert 'None if desc.name == "rfe" else desc.name' in source
+        assert 'cmd.extend(["--type", cfg["split_type_arg"]])' in source  # :497-498
+        reports = inspect.getsource(submit._generate_reports)
+        assert reports.count('if args.type != "rfe":') == 2
+        assert reports.count('extend(["--type", args.type])') == 2
+        assert 'extend(["--type", "initiative"])' not in source
 
     def test_feasibility_label_changes_uses_the_type_map(self, ctx):
         feas = ctx.labels["feasibility"]
@@ -665,17 +642,34 @@ class TestSubmitTypeConfigs:
             assert f'cfg["{cfg_key}"]' in body, f"_build_labels no longer reads cfg[{cfg_key!r}]"
 
     def test_auto_approve_policy_and_transition_target(self, ctx):
-        # rows: 21, 22 — submit.py:805-814 (type-invariant policy), :970-991 (transition + comment)
+        # rows: 21 (residue), 22 (MIGRATED) — submit.py:805-814 is the type-invariant policy
+        # (rubric pass and feasibility == 'feasible'; design §10 'approve policy implemented once');
+        # :987/:981 carried the literal "Approved" and since PR-2d main() reads
+        # identity.jira.state_map.approved once (approved_status) for the transition target, the
+        # already-there short-circuit, the status lines and the approve comment. The source form
+        # is pinned so a re-introduced literal is a visible change, and the emulator workflows
+        # (tests/conftest.py:104-121, the global Approve transition) must keep offering the
+        # descriptor's state or the integration suites would approve into a different status
+        # than production.
         source = read("scripts/submit.py")
         assert 'review_data.get("feasibility") == "feasible"' in source
         assert "feasible" == list(ctx.labels["feasibility"])[0]
         approved = ctx.jira["state_map"]["approved"]
-        assert f'transition_issue(server, user, token, jira_key, "{approved}")' in source, (
-            "submit.py:987"
-        )
-        assert f'entry.get("jira_status") == "{approved}"' in source, "submit.py:981"
+        assert 'approved_status = desc.get("identity.jira.state_map.approved", None)' in source
+        # Optional in the schema: only --auto-approve requires it, refused before any Jira call.
+        assert "if args.auto_approve and not approved_status:" in source
+        assert "transition_issue(server, user, token, jira_key, approved_status)" in source
+        assert 'entry.get("jira_status") == approved_status' in source
         assert "f\"*{cfg['comment_prefix']}* This {type_label} has been automatically \"" in source
-        assert f'"transitioned to {approved} status based on passing rubric scoring and "' in source
+        assert (
+            'f"transitioned to {approved_status} status based on passing rubric scoring and "'
+            in source
+        )
+        assert 'transition_issue(server, user, token, jira_key, "Approved")' not in source
+        assert f'_global_approve = (None, "Approve", "{approved}")' in read("tests/conftest.py"), (
+            "identity.jira.state_map.approved: the emulator's global Approve transition "
+            "(tests/conftest.py:105) no longer targets the descriptor's state"
+        )
 
     def test_dry_run_sentinel_derivation(self, ctx):
         # rows: 23, 45 — submit.py:1079 uses jira_prefix, split_submit.py:689/:1036 use project;
@@ -695,25 +689,6 @@ class TestSubmitTypeConfigs:
         expected = os.path.join("a", "auto-fix-runs", f"{ctx.snap['report_prefix']}RUN-report.html")
         pin("snapshot.report_prefix", "submit.py:318-326", expected, got)
 
-    def test_dispatch_on_id_field(self, ctx, monkeypatch):
-        # rows: 26 — submit.py:154-164 forked-pair dispatcher keyed on id_field (collapses in PR-2)
-        calls = []
-        monkeypatch.setattr(submit, "scan_task_files", lambda a: calls.append("rfe") or [])
-        monkeypatch.setattr(
-            submit, "scan_initiative_task_files", lambda a: calls.append("initiative") or []
-        )
-        monkeypatch.setattr(submit, "rename_to_jira_key", lambda a, i, k: calls.append("rfe"))
-        monkeypatch.setattr(
-            submit, "rename_initiative_to_jira_key", lambda a, i, k: calls.append("initiative")
-        )
-        cfg = submit.TYPE_CONFIGS[ctx.t]
-        submit._scan_tasks("x", cfg)
-        submit._rename_to_jira("x", "A-1", "B-1", cfg)
-        expected = "initiative" if ctx.id_field == "initiative_id" else "rfe"
-        pin("identity.id_field discriminator", "submit.py:154-164", [expected, expected], calls)
-        # :192-193/:210-211 append '--type initiative' to the report commands iff initiative
-        assert read("scripts/submit.py").count('extend(["--type", "initiative"])') == 2
-
     def test_no_task_files_message_is_byte_stable_for_rfe(self):
         # design §10 tail: "No RFE task files found" stays byte-stable (type_label projection)
         assert 'f"Error: No {type_label} task files found."' in read("scripts/submit.py")
@@ -726,84 +701,36 @@ class TestSubmitTypeConfigs:
 
 
 class TestSplitSubmitConfig:
-    # rows: 27-46
+    # rows: 34 (residue), 37, 38, 39, 40, 41, 44, 45 — 27-36, 42, 43, 46 MIGRATED: SPLIT_CONFIG is
+    # a descriptor projection over names() since PR-2d (split_submit.py:109-151 at c1df503) and
+    # the link type / close-superseded state come from identity.jira through _TRACKER; what stays
+    # pinned is the composition (feasibility set, marker template, labels, inheritance filter),
+    # the comment grammar, the dry-run sentinel and the source form of the migrated sites
 
-    def test_binding_conventions_display(self, ctx):
+    def test_generics_bound_to_the_descriptor_and_find_review_in_dirs_reviews(self, ctx, tmp_path):
+        # rows: 34 (MIGRATED value, residue) — split_submit.py:121-124,:139-144 selected the
+        # per-type pair by id_field; since PR-2d scan_fn / rename_fn / parse_child_fn are
+        # functools.partial(artifact_utils.<generic>, desc=desc) and find_review_fn is
+        # artifact_utils.find_review_file for every type, which routes by registry.detect(child_id)
+        # (the deleted _direct_review_path built the path from the config's reviews_dir). What
+        # stays pinned is the equality that makes that routing a no-op: for both id grammars of
+        # the type it renders the path under THIS type's dirs.reviews — the PR-3 binding overlay
+        # must keep it true (or bind the lookup to the descriptor).
         s = split_submit.SPLIT_CONFIG[ctx.t]
-        pin("identity.jira.project", "split_submit.py:111,:129", ctx.jira["project"], s["project"])
-        pin(
-            "identity.jira.issue_type",
-            "split_submit.py:112,:130",
-            ctx.jira["issue_type"],
-            s["issue_type"],
-        )
-        pin(
-            "conventions.comment_prefix",
-            "split_submit.py:113,:131",
-            ctx.conv["comment_prefix"],
-            s["comment_marker"],
-        )
-        pin(
-            "conventions.label_prefix",
-            "split_submit.py:114,:132",
-            ctx.conv["label_prefix"],
-            s["label_prefix"],
-        )
-        pin(
-            "display.entity",
-            "split_submit.py:115,:133",
-            ctx.d["display"]["entity"],
-            s["entity_name"],
-        )
-        pin(
-            "display.entity_plural",
-            "split_submit.py:116,:134",
-            ctx.d["display"]["entity_plural"],
-            s["entity_name_plural"],
-        )
-        pin("identity.id_field", "split_submit.py:117,:135", ctx.id_field, s["id_field"])
-        pin(
-            "dirs.reviews (bare)", "split_submit.py:118,:136", ctx.bare["reviews"], s["reviews_dir"]
-        )
-        pin("f'{type}-review'", "split_submit.py:119,:137", ctx.review_schema, s["review_schema"])
-        pin(
-            "dirs.originals (bare)",
-            "split_submit.py:120,:138",
-            ctx.bare["originals"],
-            s["originals_dir"],
-        )
-        pin(
-            "index.enabled",
-            "split_submit.py:125,:145",
-            ctx.d["index"]["enabled"],
-            s["do_rebuild_index"],
-        )
-        pin(
-            "conventions.labels.alignment",
-            "split_submit.py:126,:146-150",
-            ctx.labels.get("alignment"),
-            s["alignment_labels"],
-        )
-
-    def test_forked_callables_selected_by_id_field(self, ctx, tmp_path):
-        # rows: 34 — split_submit.py:121-124,:139-144; find_review_fn pinned by rendered path
-        s = split_submit.SPLIT_CONFIG[ctx.t]
-        if ctx.id_field == "rfe_id":
-            expected = (
-                artifact_utils.scan_task_files,
-                artifact_utils.rename_to_jira_key,
-                artifact_utils.parse_child_artifact,
-            )
-        else:
-            expected = (
-                artifact_utils.scan_initiative_task_files,
-                artifact_utils.rename_initiative_to_jira_key,
-                artifact_utils.parse_child_initiative,
-            )
-        assert (s["scan_fn"], s["rename_fn"], s["parse_child_fn"]) == expected
+        for key, generic in (
+            ("scan_fn", artifact_utils.scan_tasks),
+            ("rename_fn", artifact_utils.rename_to_tracker_key),
+            ("parse_child_fn", artifact_utils.parse_child),
+        ):
+            assert s[key].func is generic, key
+            assert s[key].keywords["desc"].name == ctx.t, key
+        assert s["find_review_fn"] is artifact_utils.find_review_file
         for ident in ctx.sample_ids:
             review = write(
                 tmp_path / ctx.bare["reviews"] / f"{ident}-review.md", fm({ctx.id_field: ident})
+            )
+            assert str(review) == os.path.join(
+                str(tmp_path), s["reviews_dir"], f"{ident}-review.md"
             )
             pin(
                 "dirs.reviews",
@@ -813,7 +740,8 @@ class TestSplitSubmitConfig:
             )
 
     def test_feasibility_labels_second_definition(self, ctx):
-        # rows: 13, 37 — split_submit.py:161-166 composes what submit.py:78-82 spells out
+        # rows: 37 (13 MIGRATED) — split_submit.py:161-166 composes what submit.py:78-82 spelled
+        # out and TYPE_CONFIGS now projects from conventions.labels.feasibility
         pin(
             "conventions.labels.feasibility",
             "split_submit.py:161-166",
@@ -891,31 +819,34 @@ class TestSplitSubmitConfig:
                 ctx.labels[key],
             )
 
-    def test_split_link_type_literal_sites(self, ctx):
-        # rows: 42 — six literal sites :210,:410,:497,:610,:685,:716; emulator seed conftest.py:96
+    def test_split_link_type_and_close_superseded_read_identity_jira(self, ctx):
+        # rows: 42, 43 (MIGRATED) — split_submit.py:210,:410,:497,:610,:685,:716 carried the
+        # literal 'Work item split' and :816-839 Closed / Obsolete; since PR-2d both come from
+        # identity.jira.split_link_type and identity.jira.state_map.close_superseded through the
+        # private _TRACKER projection (keyed by the (project, issue_type) pair every SPLIT_CONFIG
+        # entry carries; read with a None default because the schema leaves both optional and a
+        # registered type that never splits must not break the import). The source form is
+        # pinned so a re-introduced literal is a visible change, the case-insensitive target match
+        # is kept, and the emulator seed (tests/conftest.py:96) must keep offering the
+        # descriptor's link type or the integration suites would exercise another transaction.
         link = ctx.jira["split_link_type"]
-        assert link == "Work item split"
-        pin(
-            "identity.jira.split_link_type (6 sites)",
-            "split_submit.py:210-716",
-            6,
-            read("scripts/split_submit.py").count(link),
-        )
-        assert f'"name": "{link}"' in read("tests/conftest.py")
-
-    def test_close_superseded_state_map(self, ctx):
-        # rows: 43 — split_submit.py:816-839 (:820 target matched case-insensitively, :837
-        # resolution)
         close = ctx.jira["state_map"]["close_superseded"]
+        assert link and close["transition"] and close["resolution"], "both shipped types split"
         source = read("scripts/split_submit.py")
-        assert f'.lower() == "{close["transition"].lower()}"' in source, "split_submit.py:820"
-        assert f'fields={{"resolution": {{"name": "{close["resolution"]}"}}}}' in source, (
-            "split_submit.py:837"
-        )
+        for literal in (link, close["transition"], close["resolution"]):
+            assert f'"{literal}"' not in source, literal
+        assert '"split_link_type": desc.get("identity.jira.split_link_type", None),' in source
         assert (
-            f"Would transition {{parent_key}} to {close['transition']} "
-            f"(resolution: {close['resolution']})" in source
+            '"close_superseded": desc.get("identity.jira.state_map.close_superseded", None),'
+            in source
         )
+        # _inspect_child, discover_state, phase2_create_link / phase3_close
+        assert source.count('_tracker(config)["split_link_type"]') == 3
+        assert source.count('_tracker(config)["close_superseded"]') == 1
+        assert 'if t["to"].get("name", "").lower() == target_status.lower():' in source
+        assert 'fields={"resolution": {"name": resolution}},' in source
+        assert "(resolution: {resolution})" in source
+        assert f'"name": "{link}"' in read("tests/conftest.py")
 
     def test_durable_store_comment_grammar_round_trips(self, ctx):
         # rows: 44 — split_submit.py:353-389 (reader regexes), :550,:614-617,:721-731,:769-776

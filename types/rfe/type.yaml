@@ -1,6 +1,6 @@
 # types/rfe/type.yaml — the rfe work-item type descriptor.
 # Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 (§8.2 is the
-# initiative twin). Status (PR-2c): 24 scripts read this descriptor at import (types/README.md "Adoption
+# initiative twin). Status (PR-2d): 26 scripts read this descriptor at import (types/README.md "Adoption
 # status"); the values a pending script still carries are pinned equal to it by test, so the descriptor
 # is source of truth BY IMPORT for adopted scripts and BY TEST for the rest (design §10). Every value is
 # the live literal on main (c1df503) with the consuming file:line AT THAT COMMIT in a trailing comment

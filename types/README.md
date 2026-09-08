@@ -10,7 +10,7 @@ reference). Design: `design-proposals/work-item-types-unified.md` §3.2 (contrac
 and are invoked by their cwd-relative path (`python3 scripts/type_registry.py …`, design §3.5.1).
 The provider guide is `docs/type-provider-guide.md`.
 
-**Status (PR-2c): 24 scripts read the registry** (table below). An adopted script does
+**Status (PR-2d): 26 scripts read the registry** (table below). An adopted script does
 `import type_registry` and `_TYPES = type_registry.load()` once at import and builds its per-type
 table over the registry (`_TYPES.names()` or iteration — both in `names()` order), so a drop-in
 type appears in it without a code change. Adopted scripts use DESCRIPTOR values only (`Descriptor.get`, `dirs()`, `labels`,
@@ -36,7 +36,29 @@ companion gated on `companions.comments`). Those two tables are built at import 
 registered type — and `submit.py` imports `snapshot_fetch` — so a drop-in must carry
 `conventions.labels.{ignore,split_quarantine}` and `snapshot.{prefix,report_prefix}` (gate 1
 already requires the two `snapshot` keys but not the two labels; copying `types/rfe/` keeps them
-all) or the import fails with a `KeyError` naming the type and the field. Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py`
+all) or the import fails with a `KeyError` naming the type and the field. Since PR-2d the Jira write
+path is a projection too: `submit.TYPE_CONFIGS` and `split_submit.SPLIT_CONFIG` build over `names()`
+from `identity.jira.{project,issue_type,key_prefixes}`, `identity.{id_field,local_prefix}`,
+`dirs.{tasks,reviews,originals}`, `display.{entity,entity_plural}`,
+`conventions.{type_label,label_prefix,comment_prefix,removed_context_preamble}`,
+`conventions.labels.{rubric_pass,feasibility}` (`alignment` optional), `index.enabled` and
+`snapshot.prefix` (all schema-required except the two label keys — a drop-in missing either fails
+the import of `submit.py` with the same `KeyError`); the task scan / rename go through the
+`artifact_utils` generics keyed on the descriptor, `--auto-approve` transitions to
+`identity.jira.state_map.approved` (optional in the schema, read with a `None` default at startup:
+a type without it submits, and only `--auto-approve` is refused — a usage error naming the type
+and the field, before any scan or Jira call), and a split links with
+`identity.jira.split_link_type` and closes the parent with
+`identity.jira.state_map.close_superseded` (both optional too, read with a `None` default at
+import: a type that never splits may omit them, and `split_submit.py` refuses to split a parent
+of such a type before any scan or Jira call — exit 5, the systemic code, so `submit.py`'s split
+loop aborts instead of flagging every parent; it recovers the two facts by the
+`(project, issue_type)` pair, so two registered types sharing a pair fail its import with a
+`RegistryError` naming both). Two rfe
+grandfathers stay pinned as residues — submit's `''` `snapshot_prefix` sentinel and the argv
+convention that passes no `--type` for rfe to `split_submit.py` and the report scripts — and the
+`auto-created` / `auto-revised` / `needs-attention` / `split-quarantine` labels are still composed
+from `conventions.label_prefix`. Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py`
 to its descriptor projection — source of truth *by test* until it adopts (§10); that file's
 `MIGRATED` list names the matrix rows already covered *by import*, and each adoption deletes its
 pin.
@@ -71,6 +93,8 @@ itself is fine — `resolve()` follows the link).
 | `reassess_save.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
 | `snapshot_fetch.py` | `SNAPSHOT_CONFIG` (`conventions.labels.{ignore,split_quarantine}`, `snapshot.prefix`), default `prefix=` of `find_previous_snapshot` / `load_snapshot_from_dir` / `update_snapshot_hashes` (rfe `snapshot.prefix`, bound at import), `--type` choices | PR-2c; the hard-filter JQL wrapper and the `f"{prefix}{ts}.yaml"` file name are composition, still pinned by source form |
 | `split_collect.py` | `_TYPE_CONFIG`, `_set_revise` defaults, `--type` choices | PR-2a |
+| `split_submit.py` | `SPLIT_CONFIG` (descriptor projection over `names()`: `identity.jira.{project,issue_type}`, `conventions.{comment_prefix,label_prefix}`, `display.{entity,entity_plural}`, `id_field`, `dirs`, `index.enabled`, alignment labels; `scan_fn` / `rename_fn` / `parse_child_fn` bound to the `artifact_utils` generics, `find_review_fn` = `find_review_file`), the split link type and the close-superseded transition / resolution from `identity.jira.{split_link_type,state_map.close_superseded}`, `--type` choices | PR-2d; the feasibility set, the split-child marker and every phase label are still composed from `conventions.label_prefix`; the durable-store comment grammar and the `<PROJECT>-DRY` sentinel are composition, pinned by source form |
+| `submit.py` | `TYPE_CONFIGS` (descriptor projection over `names()`), `--type` choices, task scan / rename via `artifact_utils.scan_tasks` / `rename_to_tracker_key(desc)`, approve target from `identity.jira.state_map.approved` | PR-2d; grandfathered: the rfe `snapshot_prefix` `''` sentinel and the `split_type_arg` / report `--type` argv convention (no `--type` for rfe); the `auto-created` / `auto-revised` / `needs-attention` / `split-quarantine` labels are still composed from `conventions.label_prefix` |
 | `validate_batch_input.py` | `ALLOWED_PRIORITIES`, known fields, `--type` choices | PR-2a; `PARENT_KEY_PATTERN` literal until PR-3 (Q14) |
 | `verify_phase.py` | phase tables, `_TYPE_CONFIG`, error-stub score tail, `--type` choices | PR-2a |
 | `check_autofix_complete.py` | `_TYPE_CONFIG` | pending |
@@ -79,8 +103,6 @@ itself is fine — `resolve()` follows the link).
 | `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
 | `jira_utils.py` | `strip_metadata` prefix regex | pending |
 | `pipeline_state.py` | `PIPELINE_TYPES` (prompt/skill entries move in PR-5) | pending |
-| `split_submit.py` | `SPLIT_CONFIG` | pending (last, with `submit.py`) |
-| `submit.py` | `TYPE_CONFIGS` | pending (last; emulator suites in CI) |
 
 ## Adding a type
 

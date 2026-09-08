@@ -21,7 +21,7 @@ be lifted verbatim into the ``creator-core`` follow-up (design §10 item 10), so
 them free of repo-specific helpers: JSON-Schema validation lives in
 ``scripts/validate_types.py`` (the only place ``jsonschema`` is imported), not here.
 
-Adoption status (PR-2a): 18 scripts load the registry at import (module-level
+Adoption status (PR-2d): 26 scripts load the registry at import (module-level
 ``_TYPES = type_registry.load()``; the table in ``types/README.md`` lists them) and use
 DESCRIPTOR values only; ``detect()``/``owns()`` are the design §5 rung-3 seed. The values a
 pending script still carries are pinned equal to the descriptors by test, and the remaining

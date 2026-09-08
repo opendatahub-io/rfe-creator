@@ -5,7 +5,7 @@ authoritative text lives. Design: `design-proposals/work-item-types-unified.md` 
 §3.2.1 (binding override), §3.3 (gates), §3.4 (provider obligations), §3.5 (discovery), §3.7
 (cross-type chain).
 
-**Status (PR-2c): 24 scripts read the registry at import** — the "Adoption status" table in
+**Status (PR-2d): 26 scripts read the registry at import** — the "Adoption status" table in
 [`types/README.md`](../types/README.md) lists them and what is still pending. Since PR-2b the
 artifact schemas (`artifact_utils.SCHEMAS`), the scan / rename / parse helpers and the poll phase
 table (`check_review_progress.PHASE_CHECKS`) are projections too, so a registered type gets its
@@ -13,7 +13,9 @@ table (`check_review_progress.PHASE_CHECKS`) are projections too, so a registere
 a code change; since PR-2c so are the snapshot tables (`snapshot_fetch.SNAPSHOT_CONFIG`,
 `bootstrap_snapshot.BOOTSTRAP_CONFIG`) and the `fetch_issue.py --fetch-all` layout (`--type`,
 default `rfe`), so a registered type gets its hard-filter labels, snapshot / run-report file
-prefixes and fetch layout the same way. Every per-type value a pending script still carries is pinned by test to its
+prefixes and fetch layout the same way; since PR-2d the Jira write path (`submit.TYPE_CONFIGS`,
+`split_submit.SPLIT_CONFIG`) is a projection too, so a registered type submits, approves, splits
+and closes with its own binding and conventions. Every per-type value a pending script still carries is pinned by test to its
 descriptor projection; each adoption deletes its pin (design §10). Adopted scripts use descriptor
 values only; the effective binding override is not consulted until PR-3.
 
@@ -65,7 +67,8 @@ Rules that are easy to trip:
   `conventions.labels.{ignore,split_quarantine}` and `snapshot.prefix`, and
   `bootstrap_snapshot.BOOTSTRAP_CONFIG` reads `snapshot.report_prefix` and `reporting.item_key`,
   over every registered type when the module is imported — and `submit.py` imports
-  `snapshot_fetch`. Gate 1 already requires `snapshot.prefix` and `snapshot.report_prefix`
+  `snapshot_fetch` (since PR-2d it loads the registry directly as well). Gate 1 already requires
+  `snapshot.prefix` and `snapshot.report_prefix`
   (schema `$defs/snapshot`, the `else` branch of the `mode` conditional; the prefix is also
   linted non-empty and collision-free) and `reporting.item_key`, but NOT
   `conventions.labels.ignore` / `.split_quarantine` (`$defs/labels` is an open map with no
@@ -75,6 +78,26 @@ Rules that are easy to trip:
   `prefix=` explicitly to the snapshot helpers (their default is the rfe `snapshot.prefix`).
   `fetch_issue.py --fetch-all --type <t>` reads `dirs.{tasks,originals}`, `identity.id_field`
   and `companions.comments` (all schema-required).
+- **Submit facts are read at import, for every type.** `submit.TYPE_CONFIGS` and
+  `split_submit.SPLIT_CONFIG` read `identity.jira.{project,issue_type,key_prefixes}`,
+  `identity.{id_field,local_prefix}`, `dirs.{tasks,reviews,originals}`,
+  `display.{entity,entity_plural}`,
+  `conventions.{type_label,label_prefix,comment_prefix,removed_context_preamble}`,
+  `conventions.labels.{rubric_pass,feasibility}` (`alignment` optional), `index.enabled` and
+  `snapshot.prefix` over every registered type when either module is imported. Everything but
+  the two label keys is schema-required, so a drop-in that omits `labels.rubric_pass` or
+  `labels.feasibility` passes gate 1 and fails the import of `submit.py` with a `KeyError`
+  naming the type and the field. `identity.jira.split_link_type` and
+  `identity.jira.state_map.{approved,close_superseded}` are optional in the schema, so their
+  absence is refused when it matters rather than at import: `split_submit.py` reads the link
+  type and the close-superseded transition / resolution with a `None` default at import and
+  refuses to split a parent of a type missing any of them before any scan or Jira call (exit 5,
+  the systemic code, so `submit.py`'s split loop aborts instead of flagging every parent);
+  because it recovers those two facts by the `(project, issue_type)` pair, two registered types
+  sharing a pair fail its import with a `RegistryError` naming both. `submit.py` reads
+  `state_map.approved` with a `None` default at startup and only `--auto-approve` requires it
+  (a usage error naming the type and the field, before any scan or Jira call). Copying
+  `types/rfe/` keeps them all.
 - **Frozen strings (R7).** `conventions.labels.rubric_pass`, `conventions.removed_context_preamble`
   and the `{key}-strategy.md` attachment convention are consumed downstream; change them only with
   a migration note.
