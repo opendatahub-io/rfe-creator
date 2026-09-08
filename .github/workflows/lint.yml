@@ -52,3 +52,10 @@ jobs:
 
     - name: Run tests
       run: python3 -m pytest tests/ -v -k "not integration"
+
+    # The Jira write path (submit.py, split_submit.py) reads the type registry; the
+    # jira-emulator suites are its equivalence proof and gate that adoption
+    # (design work-item-types-unified.md section 10 item 2). jira-emulator comes from
+    # requirements-dev.txt; the server runs in-process on a free local port.
+    - name: Run emulator integration tests
+      run: python3 -m pytest tests/ -v -k integration
