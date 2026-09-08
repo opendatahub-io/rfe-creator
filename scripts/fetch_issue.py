@@ -31,7 +31,12 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import type_registry
 from jira_utils import adf_to_markdown, get_comments, get_issue, require_env
+
+_TYPES = type_registry.load()
 
 
 def _desc_to_markdown(desc_raw):
@@ -51,13 +56,19 @@ def _format_comment_date(iso_date):
     return iso_date[:10]
 
 
-def _fetch_all(issue_key, artifacts_dir, server, user, token):
-    """Fetch issue and write all artifact files.
+def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe"):
+    """Fetch issue and write all artifact files for one work-item type.
 
-    Returns 0 on success, 1 on error.
+    The artifact layout is the ``type_name`` descriptor's (design
+    work-item-types-unified.md §10 item 2): the task and original directories
+    are ``dirs.tasks`` / ``dirs.originals``, the frontmatter id field is
+    ``identity.id_field`` and the ``<KEY>-comments.md`` companion is written
+    only when ``companions.comments`` is true. Returns 0 on success, 1 on error.
     """
-    tasks_dir = os.path.join(artifacts_dir, "rfe-tasks")
-    originals_dir = os.path.join(artifacts_dir, "rfe-originals")
+    desc = _TYPES.get(type_name)
+    dirs = desc.dirs(form="bare")
+    tasks_dir = os.path.join(artifacts_dir, dirs["tasks"])
+    originals_dir = os.path.join(artifacts_dir, dirs["originals"])
     os.makedirs(tasks_dir, exist_ok=True)
     os.makedirs(originals_dir, exist_ok=True)
 
@@ -79,7 +90,11 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     fields = issue.get("fields", {})
     desc_md = _desc_to_markdown(fields.get("description"))
 
-    # Extract field values
+    # Extract field values. The "Major" fallback below and status=Ready in the
+    # frontmatter are shared pipeline conventions, not type facts: every type's
+    # task schema carries the same priority vocabulary and status enum
+    # (artifact_utils._STATUS_ENUM), so they stay literal here rather than
+    # being read from the descriptor.
     summary = fields.get("summary", "")
     priority_obj = fields.get("priority")
     priority = priority_obj.get("name", "Major") if isinstance(priority_obj, dict) else "Major"
@@ -97,7 +112,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
         "scripts/frontmatter.py",
         "set",
         task_path,
-        f"rfe_id={issue_key}",
+        f"{desc.id_field}={issue_key}",
         f"title={summary}",
         f"priority={priority}",
         "status=Ready",
@@ -114,32 +129,37 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token):
     with open(orig_path, "w", encoding="utf-8") as f:
         f.write(desc_md + "\n")
 
-    # Fetch and write comments
-    try:
-        comments = get_comments(server, user, token, issue_key)
-    except Exception as e:
-        print(f"Error fetching comments for {issue_key}: {e}", file=sys.stderr)
-        return 1
+    written = [task_path, orig_path]
 
-    comments_path = os.path.join(tasks_dir, f"{issue_key}-comments.md")
-    with open(comments_path, "w", encoding="utf-8") as f:
-        f.write(f"# Comments: {issue_key}\n\n")
-        if not comments:
-            f.write("No comments found.\n")
-        else:
-            for c in comments:
-                author = c.get("author", {}).get("displayName", "Unknown")
-                date = _format_comment_date(c.get("created", ""))
-                body = c.get("body", {})
-                if isinstance(body, dict):
-                    body = adf_to_markdown(body).strip()
-                elif body is not None:
-                    body = str(body).strip()
-                else:
-                    body = ""
-                f.write(f"## {author} — {date}\n\n{body}\n\n")
+    # Fetch and write comments — only for types whose fetch step produces the
+    # companion (companions.comments); no comment request is made otherwise.
+    if desc.get("companions.comments"):
+        try:
+            comments = get_comments(server, user, token, issue_key)
+        except Exception as e:
+            print(f"Error fetching comments for {issue_key}: {e}", file=sys.stderr)
+            return 1
 
-    print(f"OK: wrote {task_path}, {orig_path}, {comments_path}")
+        comments_path = os.path.join(tasks_dir, f"{issue_key}-comments.md")
+        with open(comments_path, "w", encoding="utf-8") as f:
+            f.write(f"# Comments: {issue_key}\n\n")
+            if not comments:
+                f.write("No comments found.\n")
+            else:
+                for c in comments:
+                    author = c.get("author", {}).get("displayName", "Unknown")
+                    date = _format_comment_date(c.get("created", ""))
+                    body = c.get("body", {})
+                    if isinstance(body, dict):
+                        body = adf_to_markdown(body).strip()
+                    elif body is not None:
+                        body = str(body).strip()
+                    else:
+                        body = ""
+                    f.write(f"## {author} — {date}\n\n{body}\n\n")
+        written.append(comments_path)
+
+    print(f"OK: wrote {', '.join(written)}")
     return 0
 
 
@@ -164,6 +184,16 @@ def main():
         help="Fetch issue and write all artifact files "
         "(rfe-tasks, rfe-originals, comments) to "
         "the given directory.",
+    )
+    parser.add_argument(
+        "--type",
+        choices=_TYPES.choices(),
+        default="rfe",
+        help="Work-item type whose artifact layout --fetch-all "
+        "writes: task and original directories, frontmatter "
+        "id field and comments companion come from "
+        "types/<type>/type.yaml (default: rfe). Not used by "
+        "the other modes.",
     )
 
     parser.add_argument(
@@ -194,7 +224,7 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(2)
-        rc = _fetch_all(args.issue_key, args.fetch_all, server, user, token)
+        rc = _fetch_all(args.issue_key, args.fetch_all, server, user, token, args.type)
         sys.exit(rc)
 
     # --write-original-only mode: no --fields means caller just wants
