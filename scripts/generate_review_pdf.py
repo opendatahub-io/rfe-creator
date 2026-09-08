@@ -2,6 +2,7 @@
 """Generate an HTML review report from review artifacts."""
 
 import difflib
+import html
 import io
 import os
 import re
@@ -28,7 +29,10 @@ PASS_THRESHOLD = 7
 def _report_config(desc):
     """Project one descriptor onto the REPORT_CONFIG entry main() reads."""
     dirs = desc.dirs("bare")
-    entity = desc.get("display.entity")
+    # Descriptor display strings reach the report HTML raw (title <h1>, table
+    # headings); escape them once here. Identity for the shipped "RFE" /
+    # "Initiative" values, so output bytes are unchanged (CodeRabbit, PR #176).
+    entity = html.escape(desc.get("display.entity"), quote=True)
     criterion_labels = dict(desc.get("reporting.criterion_labels"))
     return {
         "reviews_dir": dirs["reviews"],
@@ -38,7 +42,7 @@ def _report_config(desc):
         "jira_prefix": desc.write_prefix,
         "local_prefix": desc.local_prefix,
         "entity_name": entity,
-        "entity_name_plural": desc.get("display.entity_plural"),
+        "entity_name_plural": html.escape(desc.get("display.entity_plural"), quote=True),
         # Interpolated raw into the <h1>, hence the entity for the ampersand.
         "report_title": f"{entity} Review &amp; Remediation Report",
         "default_output": f"{desc.get('pipeline.poll_prefix')}review-report.html",

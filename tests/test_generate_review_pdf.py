@@ -432,3 +432,40 @@ class TestReportConfigIsRegistryDerived:
         assert "mutated" not in desc.get("reporting.criterion_labels")
         assert "mutated" not in desc.get("reporting.before_score_name_map")
         assert "mutated" not in desc.get("reporting.pdf.extra_fields")
+
+
+def test_report_config_escapes_descriptor_display_strings():
+    """display.entity / entity_plural are interpolated into HTML; escape at derivation."""
+    import generate_review_pdf as grp
+
+    class _Desc:
+        id_field = "x_id"
+        write_prefix = "X-"
+        local_prefix = "LX-"
+
+        def dirs(self, form="artifacts"):
+            return {"reviews": "x-reviews", "tasks": "x-tasks", "originals": "x-originals"}
+
+        def get(self, key, default=None):
+            return {
+                "display.entity": "<Widget> & Co",
+                "display.entity_plural": "Widgets<script>",
+                "reporting.criterion_labels": {"what": "WHAT"},
+                "reporting.criterion_short_labels": {},
+                "reporting.before_score_name_map": {},
+                "reporting.pdf.extra_fields": [],
+                "pipeline.poll_prefix": "x-",
+                "schema.review.score_fields": ["what"],
+            }.get(key, default)
+
+        @property
+        def score_fields(self):
+            return ["what"]
+
+    cfg = grp._report_config(_Desc())
+    assert cfg["entity_name"] == "&lt;Widget&gt; &amp; Co"
+    assert cfg["entity_name_plural"] == "Widgets&lt;script&gt;"
+    assert cfg["report_title"].startswith("&lt;Widget&gt; &amp; Co Review &amp; Remediation Report")
+    # Shipped values are unchanged by escaping.
+    for name in ("rfe", "initiative"):
+        assert grp.REPORT_CONFIG[name]["entity_name"] in ("RFE", "Initiative")
