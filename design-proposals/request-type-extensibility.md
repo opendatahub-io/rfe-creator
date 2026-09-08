@@ -45,7 +45,7 @@ PR #143 added initiatives by mirroring: 6 user-facing skill pairs + per-type fea
 
 ### 2.1 Layout: `types/<type>/`
 
-```
+```text
 types/
   _schema/type.schema.json        # JSON Schema for type.yaml (schema_version gate)
   rfe/
@@ -241,7 +241,7 @@ Implemented in `type_registry.py resolve` (a script — never LLM judgment), inv
 
 ### 3.3 What a user sees
 
-```
+```console
 /rfe.create Users need SSO for the model registry          # notice "Type: rfe", no question
 /rfe.create --type initiative --parent RHAISTRAT-42 …      # explicit
 /initiative-create Consolidate model-serving stacks         # alias, exactly as today

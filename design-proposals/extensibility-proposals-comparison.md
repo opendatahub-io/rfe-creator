@@ -3,7 +3,7 @@
 **Status:** Analysis (input to reconciling the two proposals)
 **Date:** 2026-08-12
 **Compares:** `design-proposals/adr-pluggable-work-item-types.md` (2026-08-10, incl. its review Appendix A of 2026-08-12) and `design-proposals/request-type-extensibility.md` (2026-08-12)
-**Method:** every load-bearing or disputed factual claim in both documents was verified against merged main (`8888b18`), assess-rfe PR #10 (`6602a12`), the three GitLab pipeline repos, and the agent-eval-harness repo — by reading **and executing** code (regex/schema execution against synthetic artifacts, difflib measurements, exhaustive greps). 37 claims checked: 29 confirmed, 8 partially confirmed with corrections, 1 embedded sub-claim refuted. Errata for both documents in §7.
+**Method:** every load-bearing or disputed factual claim in both documents was verified against merged main (`8888b18`), assess-rfe PR #10 (`6602a12`), the three GitLab pipeline repos, and the agent-eval-harness repo — by reading **and executing** code (regex/schema execution against synthetic artifacts, difflib measurements, exhaustive greps). 38 claims checked: 29 confirmed, 8 partially confirmed with corrections, 1 embedded sub-claim refuted. Errata for both documents in §7.
 
 **Update baked in:** backward compatibility for the `initiative-*` skill names is **not required** — they have no users today (confirmed: zero production CI references; the only CI consumer of a typed name is `eval-initiative.yaml:3`, a per-PR config field that self-migrates). Both documents over-weighted alias preservation; the sections below account for that.
 
@@ -44,7 +44,7 @@ The drift diagnosis both share is real and verified beyond either document's exa
 
 ### 3.1 Skill-layer mechanism: generated flat bodies (ADR A.2) vs runtime-generic bodies (RTE §3.1)
 
-The only deep disagreement. Both keep judgement per-type, so the fight is **only over the 5 dispatch SKILL.md pairs (69–95% normalized-identical) plus `assess-agent.md` (100%)**.
+The only deep disagreement. Both keep judgement per-type, so the fight is **only over the 5 dispatch SKILL.md pairs (69–95% normalized-identical) plus `assess-agent.md` (100% after token normalization; the two files are not byte-identical)**.
 
 | | Generated flat (one authored template → N checked-in flat bodies, CI-verified regeneration) | Runtime-generic (one body + Step-0 `resolve` + script-supplied per-type paths) |
 |---|---|---|
@@ -144,7 +144,7 @@ Keep **two documents with a hierarchy**, not a merge into one:
 1. **The ADR remains the decision record** for: one intake / many destinations; the RHAISTRAT flip as target state; the DoR-derived initiative rubric (with an explicit disposition for PR #10's rubric before discarding its 33 calibration examples); classification as eventual product behavior. Fold Appendix A's corrections into the body (the body currently loses arguments with its own appendix), and add the §5 errata.
 2. **RTE becomes the implementation spec** referenced by the ADR for everything mechanical: descriptor schema and layout, registry/loader, validation gates, provenance, migration mechanics, CI impact. Amend it per §5 — most importantly, make it flip-ready (prefix lists, `(project, issue_type)` identity, `is_existing`, multi-candidate detect), which is a schema change best made *before* `schema_version: 1` freezes.
 3. **Sequence merge** (reconciling ADR A.6 with RTE PR-1…8):
-   - P1 = RTE PR-1/PR-2 + A.1's widened scope (prefix predicates and schema regexes enter the pin-test sweep) + `work_type`/`jira_key` frontmatter fields.
+   - P1 = RTE PR-1/PR-2 + A.1's widened scope (prefix predicates and schema regexes enter the pin-test sweep) + `work_type`/`jira_key` frontmatter fields (superseded: the unified design fixes the canonical fields as `type`, `tracker_ref`, `local_id`).
    - P2 = the rubric track (ADR A.6's placement — before any skill collapse re-baselines eval) with the PR #10 disposition decided.
    - P3 = skill-layer collapse per §3.1's assessment (runtime-generic base; optionally keep `rfe.auto-fix` flat), *excluding create*, eval-gated with the threshold defined (A.5's open point).
    - P4 = RTE PR-3 (detection ladder + self-describing artifacts) — the flip prerequisite.

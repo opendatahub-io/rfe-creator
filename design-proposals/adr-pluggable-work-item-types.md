@@ -17,7 +17,7 @@ Initiative support is the evidence that the stages generalize. It delivered a wo
 
 Today one intake reaches one destination: RFE → RHAIRFE / Feature Request.
 
-```
+```text
                                     ┌─→  Feature      (RHAISTRAT)
 Feature Request  ──[ classify ]──→  │
    (intake)                         └─→  Initiative   (RHAISTRAT)
@@ -160,7 +160,7 @@ Classification is not new machinery. It is a signal the system already computes 
 
 Rubrics stay external, but external must not mean one plugin per type. That repo is already close: its scoring skill takes the rubric as a substituted path at agent launch, and its run setup takes a project key as an argument. Type-specific there is the rubric text, not the machinery.
 
-```
+```text
 assess/                        (renamed from assess-rfe)
   skills/{assess,export-rubric}/
   rubrics/{rfe,initiative}/agent_prompt.md
