@@ -1,6 +1,6 @@
 # types/rfe/type.yaml — the rfe work-item type descriptor.
 # Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 (§8.2 is the
-# initiative twin). Status (PR-2a): 18 scripts read this descriptor at import (types/README.md "Adoption
+# initiative twin). Status (PR-2b): 21 scripts read this descriptor at import (types/README.md "Adoption
 # status"); the values a pending script still carries are pinned equal to it by test, so the descriptor
 # is source of truth BY IMPORT for adopted scripts and BY TEST for the rest (design §10). Every value is
 # the live literal on main (c1df503) with the consuming file:line AT THAT COMMIT in a trailing comment
@@ -62,7 +62,7 @@ schema:
   task:
     extra_fields:                                       # rfe-task fields beyond the shared base (artifact_utils.py:61-107)
       size: { type: string, required: false, enum: [S, M, L, XL], default: null }   # artifact_utils.py:85-90; rebuild_index Size column :1141
-    priority:                                           # validate_batch_input.py ALLOWED_PRIORITIES reads THIS enum for BOTH types (registry-derived since PR-2a); artifact_utils.py:83 (rfe-task) still carries the literal, pinned equal by test
+    priority:                                           # validate_batch_input.py ALLOWED_PRIORITIES reads THIS enum for BOTH types (registry-derived since PR-2a); artifact_utils.py:83 (rfe-task) held the literal until SCHEMAS derived it (PR-2b)
       enum: [Blocker, Critical, Major, Normal, Minor, Undefined]
       map_to_tracker: {}                                # identity map: the task vocabulary IS the Jira vocabulary (sent by name jira_utils.py:178)
   review:

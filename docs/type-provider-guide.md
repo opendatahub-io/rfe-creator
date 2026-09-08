@@ -5,11 +5,14 @@ authoritative text lives. Design: `design-proposals/work-item-types-unified.md` 
 §3.2.1 (binding override), §3.3 (gates), §3.4 (provider obligations), §3.5 (discovery), §3.7
 (cross-type chain).
 
-**Status (PR-2a): 18 scripts read the registry at import** — the "Adoption status" table in
-[`types/README.md`](../types/README.md) lists them and what is still pending. Every per-type
-value a pending script still carries is pinned by test to its descriptor projection; each
-adoption deletes its pin (design §10). Adopted scripts use descriptor values only; the effective
-binding override is not consulted until PR-3.
+**Status (PR-2b): 21 scripts read the registry at import** — the "Adoption status" table in
+[`types/README.md`](../types/README.md) lists them and what is still pending. Since PR-2b the
+artifact schemas (`artifact_utils.SCHEMAS`), the scan / rename / parse helpers and the poll phase
+table (`check_review_progress.PHASE_CHECKS`) are projections too, so a registered type gets its
+`<type>-task` / `<type>-review` schemas, its `<poll_prefix><phase>` rows and the generics without
+a code change. Every per-type value a pending script still carries is pinned by test to its
+descriptor projection; each adoption deletes its pin (design §10). Adopted scripts use descriptor
+values only; the effective binding override is not consulted until PR-3.
 
 ## The surface, in one table
 
@@ -22,7 +25,7 @@ binding override is not consulted until PR-3.
 | Validator (gates 1–3) | `scripts/validate_types.py` (`make lint` runs gate 1) |
 | Anti-regression prefix lint and its ratchet baseline | `scripts/lint_prefix_predicates.py`, `tests/data/prefix_predicate_baseline.json` (only ever shrinks) |
 | Recorded gaps (R1): what the v1 vocabulary cannot say | `NOT EXPRESSIBLE AT V1` comments in `tests/fixtures/types/epic/type.yaml`; `not_expressible_at_v1` in `tests/fixtures/types/strategy-inputs.yaml` |
-| Contract tests | `tests/test_type_registry.py`, `tests/test_validate_types.py`, `tests/test_lint_prefix_predicates.py`, `tests/test_type_registry_pins.py` |
+| Contract tests | `tests/test_type_registry.py`, `tests/test_validate_types.py`, `tests/test_lint_prefix_predicates.py`, `tests/test_type_registry_pins.py`; `tests/test_schemas_golden.py` pins the derived artifact schemas byte for byte |
 
 ## Adding a type
 
@@ -44,6 +47,17 @@ Rules that are easy to trip:
 - **Second-requester rule.** New vocabulary is promoted only when a second type needs it. Tiers, in
   order: descriptor data → declarative rule → a companion skill in your own repo consuming the
   declared-stable script CLIs → core PR.
+- **Schemas need every schema fact.** `artifact_utils.SCHEMAS` derives `<type>-task` /
+  `<type>-review` from `identity.{tracker,id_field,local_id_pattern}`,
+  `conventions.parent_key_patterns`, `schema.task.priority.enum` and `schema.review.score_fields`
+  (plus the optional `schema.{task,review}.extra_fields`). Gate 1 does not require all of them,
+  so a drop-in that omits one is registered but gets no schemas (and no `frontmatter.py` path
+  entry): every read / write / validate against it fails with "Unknown schema type" instead of
+  the import failing. That tolerance is for drop-in roots only — a type under `types/` itself is
+  built unconditionally, and a missing fact fails the import with a `KeyError` naming the field.
+  `check_review_progress.PHASE_CHECKS` applies the same rule to `dirs.{tasks,reviews}` and
+  `pipeline.poll_prefix`: a drop-in without them polls no phase. Copying `types/rfe/` keeps them
+  all.
 - **Frozen strings (R7).** `conventions.labels.rubric_pass`, `conventions.removed_context_preamble`
   and the `{key}-strategy.md` attachment convention are consumed downstream; change them only with
   a migration note.
