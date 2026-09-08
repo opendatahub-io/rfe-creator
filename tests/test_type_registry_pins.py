@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Pin tests: the type descriptors equal every live type-keyed registry (PR-1, inert registry).
+"""Pin tests: the type descriptors equal every type-keyed registry a script still carries.
 
 design-proposals/work-item-types-unified.md §10 item 1: the descriptor becomes source of truth
-BY TEST before BY IMPORT. No production script imports scripts/type_registry.py in PR-1, so this
-file is the only thing tying types/<t>/type.yaml to the hardcoded dicts, literals and prefix
-sniffers the scripts still carry. Every assertion reads <descriptor projection> == <live value>;
+BY TEST before BY IMPORT. PR-1 shipped the registry inert and pinned every hardcoded dict, literal
+and prefix sniffer in scripts/ to a descriptor projection. Each PR-2 migration (§10 item 2) turns
+a pinned registry into an import-time projection of scripts/type_registry.py and DELETES its pin
+here — a pin of a derived value is a tautology — so what remains pins exactly the registries that
+still carry their own literals. Every assertion reads <descriptor projection> == <live value>;
 its message names the descriptor field (design §3.2 / §8.2) and the consuming file:line on main
 at c1df503 (checklist Q25 — the citation baseline, not the worktree's current line numbers).
 
 How to read a failure: either a script changed a pinned value (update the descriptor in the same
 PR — that is the mechanic) or a descriptor drifted from the code it documents. Neither may happen
-silently. When a PR-2+ script starts reading the registry, delete its pin here.
+silently. When a PR-2+ script starts reading the registry, delete its pin here and move its rows
+to MIGRATED.
 
 Grandfathered projections (explicit — never "compare literally"):
   * rfe pipeline.poll_prefix / pipeline.state_prefix / snapshot.report_prefix are '' while the
@@ -22,8 +25,9 @@ Grandfathered projections (explicit — never "compare literally"):
     such so the PR-5 fix is a visible pin change.
 
 Rows of the PR-1 pin matrix that carry no descriptor projection are listed in DEFERRED with a
-reason, so the coverage of the matrix is auditable from this file alone. Every test carries a
-``# rows:`` comment naming the matrix rows it covers.
+reason, and rows whose registry now derives from the descriptor at import are listed in MIGRATED
+with the migrating PR, so the coverage of the matrix is auditable from this file alone. Every
+test carries a ``# rows:`` comment naming the matrix rows it covers.
 """
 
 import ast
@@ -42,28 +46,18 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import artifact_utils  # noqa: E402
-import batch_summary  # noqa: E402
 import bootstrap_snapshot  # noqa: E402
 import check_autofix_complete  # noqa: E402
 import check_conflicts  # noqa: E402
 import check_review_progress  # noqa: E402
-import check_revised  # noqa: E402
-import check_right_sized  # noqa: E402
-import collect_recommendations  # noqa: E402
 import compare_review_outputs  # noqa: E402
-import error_collect  # noqa: E402
-import filter_for_revision  # noqa: E402
 import frontmatter  # noqa: E402
 import generate_review_pdf  # noqa: E402
 import generate_run_report  # noqa: E402
 import jira_utils  # noqa: E402
-import next_rfe_id  # noqa: E402
 import pipeline_state  # noqa: E402
 import prep_assess  # noqa: E402
-import preserve_review_state  # noqa: E402
-import reassess_save  # noqa: E402
 import snapshot_fetch  # noqa: E402
-import split_collect  # noqa: E402
 import split_submit  # noqa: E402
 import submit  # noqa: E402
 import type_registry  # noqa: E402
@@ -159,6 +153,90 @@ DEFERRED = [
         223,
         "headless completion strings and return paths",
         "shared skeleton headless-return block; no descriptor field (design §10 PR-5)",
+    ),
+]
+
+# ── matrix rows whose registry now derives from the descriptor at import (pins deleted) ─────
+# (rows, registry, "<PR>: <projection>; <what, if anything, is still literal and pinned>")
+MIGRATED = [
+    (
+        (62,),
+        "jql_query default exclusion wrapper",
+        "PR-2a: conventions.labels.{ignore,rubric_pass}",
+    ),
+    (
+        (66,),
+        "check_conflicts._TYPE_CONFIG",
+        "PR-2a: dirs(bare).originals / id_field / key_prefixes[0]; still pinned: the scanner fork "
+        "selected by type name and the startswith(jira_prefix) predicate (prefix-union later)",
+    ),
+    (
+        (67,),
+        "next_rfe_id.DEFAULT_PREFIX / DEFAULT_DIR",
+        "PR-2a: rfe local_prefix (dash-less) / dirs.tasks",
+    ),
+    (
+        (69,),
+        "validate_batch_input.ALLOWED_PRIORITIES",
+        "PR-2a: rfe schema.task.priority.enum for both types; row 170 (artifact_utils) stays and "
+        "tests/test_validate_batch_input.py holds the two equal until the schemas derive",
+    ),
+    (
+        (70,),
+        "validate_batch_input.{RFE,INITIATIVE}_KNOWN_FIELDS",
+        "PR-2a: base set ∪ batch.extra_fields",
+    ),
+    (
+        tuple(range(71, 82)),
+        "generate_run_report.TYPE_CONFIG / SCORE_FIELDS",
+        "PR-2a: descriptor projection per key; still pinned: the scanner fork selected by type "
+        "name",
+    ),
+    (
+        (87, 102, 106, 147, 148, 153, 154, 155, 156),
+        "argparse choices of the migrated scripts (+ rows 62, 66, 70)",
+        "PR-2a: registry.choices(); the source form is pinned by "
+        "test_migrated_argparse_choices_read_the_registry",
+    ),
+    (
+        tuple(range(89, 101)),
+        "generate_review_pdf.REPORT_CONFIG",
+        "PR-2a: descriptor projection per key; PASS_THRESHOLD stays a pinned constant (Q15)",
+    ),
+    ((105,), "batch_summary._TYPE_CONFIG", "PR-2a: dirs view of generate_run_report.TYPE_CONFIG"),
+    (
+        (143, 144, 145, 146),
+        "verify_phase._TYPE_CONFIG / phase tables / error-stub score tail",
+        "PR-2a: dirs x phases + pipeline.dimensions[].name, id_field, scores.<f>=0 over "
+        "score_fields; still pinned: the fixed stub vocabulary and its schema acceptance",
+    ),
+    ((148,), "reassess_save._TYPE_CONFIG", "PR-2a: dirs.reviews"),
+    ((149,), "check_revised._TYPE_CONFIG", "PR-2a: dirs(bare) + f'{type}-review'"),
+    (
+        (150, 151, 152),
+        "prefix sniffers preserve_review_state / prep_assess / filter_for_revision",
+        "PR-2a: registry.detect(id) or rfe (tests/test_type_registry.py::TestDetect)",
+    ),
+    ((153,), "collect_recommendations._review_dir", "PR-2a: dirs(bare).reviews"),
+    (
+        (154,),
+        "error_collect._TYPE_CONFIG",
+        "PR-2a: dirs; still pinned: the removed-context companion line",
+    ),
+    (
+        (155,),
+        "split_collect._TYPE_CONFIG / _set_revise defaults",
+        "PR-2a: dirs.reviews + f'{type}-review'; still pinned: the split-status path line",
+    ),
+    (
+        (156,),
+        "collect_children id_field",
+        "PR-2a: identity.id_field; still pinned: the scanner fork",
+    ),
+    (
+        (157,),
+        "check_right_sized._TYPE_CONFIG / resplit threshold",
+        "PR-2a: dirs.reviews + pipeline.resplit; below == 2 stays a descriptor guard (Q3)",
     ),
 ]
 
@@ -272,8 +350,8 @@ def fm(fields, body="Body\n"):
 
 
 class TestRegistryShape:
-    # rows: 25, 46, 53, 60, 62, 66, 70, 87, 102, 106, 124, 142, 147, 148, 153, 154, 155, 156,
-    # 159, 160, 161, 162
+    # rows: 25, 46, 53, 60, 124, 142, 159, 160, 161, 162 (62, 66, 70, 87, 102, 106, 147, 148,
+    # 153-156 MIGRATED)
 
     def test_shipped_types_in_argparse_order(self):
         assert TYPES == ["rfe", "initiative"]
@@ -281,23 +359,15 @@ class TestRegistryShape:
     @pytest.mark.parametrize(
         "name, live",
         [
+            # The type-keyed dicts still spelled out by hand; a dict derived from the registry
+            # (comprehension over names()) has this property by construction and is not listed.
             ("submit.TYPE_CONFIGS", submit.TYPE_CONFIGS),
             ("split_submit.SPLIT_CONFIG", split_submit.SPLIT_CONFIG),
             ("snapshot_fetch.SNAPSHOT_CONFIG", snapshot_fetch.SNAPSHOT_CONFIG),
             ("bootstrap_snapshot.BOOTSTRAP_CONFIG", bootstrap_snapshot.BOOTSTRAP_CONFIG),
-            ("generate_run_report.TYPE_CONFIG", generate_run_report.TYPE_CONFIG),
-            ("generate_review_pdf.REPORT_CONFIG", generate_review_pdf.REPORT_CONFIG),
             ("pipeline_state.PIPELINE_TYPES", pipeline_state.PIPELINE_TYPES),
-            ("verify_phase._TYPE_CONFIG", verify_phase._TYPE_CONFIG),
-            ("check_conflicts._TYPE_CONFIG", check_conflicts._TYPE_CONFIG),
-            ("check_right_sized._TYPE_CONFIG", check_right_sized._TYPE_CONFIG),
-            ("check_revised._TYPE_CONFIG", check_revised._TYPE_CONFIG),
             ("compare_review_outputs._TYPE_CONFIG", compare_review_outputs._TYPE_CONFIG),
-            ("error_collect._TYPE_CONFIG", error_collect._TYPE_CONFIG),
-            ("split_collect._TYPE_CONFIG", split_collect._TYPE_CONFIG),
-            ("reassess_save._TYPE_CONFIG", reassess_save._TYPE_CONFIG),
             ("check_autofix_complete._TYPE_CONFIG", check_autofix_complete._TYPE_CONFIG),
-            ("batch_summary._TYPE_CONFIG", batch_summary._TYPE_CONFIG),
         ],
     )
     def test_every_type_keyed_registry_has_exactly_the_shipped_types(self, name, live):
@@ -327,31 +397,42 @@ class TestRegistryShape:
             ("scripts/split_submit.py", "--type"),  # :853-858
             ("scripts/snapshot_fetch.py", "--type"),  # :490-495
             ("scripts/bootstrap_snapshot.py", "--type"),  # :417-422
-            ("scripts/jql_query.py", "--project"),  # :66-71
-            ("scripts/check_conflicts.py", "--type"),  # :60
-            ("scripts/validate_batch_input.py", "--type"),  # :108-113
-            ("scripts/generate_run_report.py", "--type"),  # :395-400
-            ("scripts/generate_review_pdf.py", "--type"),  # :372-377
-            ("scripts/batch_summary.py", "--type"),  # :22
             ("scripts/pipeline_state.py", "--type"),  # :848 cmd_init
-            ("scripts/verify_phase.py", "--type"),  # :140
-            ("scripts/reassess_save.py", "--type"),  # :29
-            ("scripts/collect_recommendations.py", "--type"),  # :97-102
-            ("scripts/error_collect.py", "--type"),  # :67
-            ("scripts/split_collect.py", "--type"),  # :38
-            ("scripts/collect_children.py", "--type"),  # :20-25
             ("scripts/compare_review_outputs.py", "--type"),  # :145
             ("scripts/cleanup_partial_split.py", "--type"),  # :27
             ("scripts/check_content_preservation.py", "--type"),  # :208
         ],
     )
     def test_argparse_type_choices_are_registry_choices(self, rel, flag):
-        # rows: 25, 46, 53, 60, 62, 66, 70, 87, 102, 106, 124, 142, 147, 148, 153, 154, 155, 156,
-        # 159, 160, 161, 162
+        # rows: 25, 46, 53, 60, 124, 159, 160, 161 — the literal lists still carried
+        # (check_revised.py / check_right_sized.py hand-parse --type without choices)
         got = choices(rel, flag)
         assert got, f"{rel}: no add_argument({flag!r}, choices=...) found"
         for one in got:
             pin("registry.choices()", f"{rel} {flag}", REG.choices(), one)
+
+    @pytest.mark.parametrize(
+        "rel, flag",
+        [
+            ("scripts/jql_query.py", "--project"),
+            ("scripts/check_conflicts.py", "--type"),
+            ("scripts/validate_batch_input.py", "--type"),
+            ("scripts/generate_run_report.py", "--type"),
+            ("scripts/generate_review_pdf.py", "--type"),
+            ("scripts/batch_summary.py", "--type"),
+            ("scripts/verify_phase.py", "--type"),
+            ("scripts/reassess_save.py", "--type"),
+            ("scripts/collect_recommendations.py", "--type"),
+            ("scripts/error_collect.py", "--type"),
+            ("scripts/split_collect.py", "--type"),
+            ("scripts/collect_children.py", "--type"),
+        ],
+    )
+    def test_migrated_argparse_choices_read_the_registry(self, rel, flag):
+        # MIGRATED rows 62, 66, 70, 87, 102, 106, 147, 148, 153-156 — the literal list is gone;
+        # the source form is pinned (as test_frontmatter_schema_choices_are_the_schema_keys pins
+        # "list(SCHEMAS.keys())") so a re-introduced literal list is a visible change.
+        assert choices(rel, flag) == ["_TYPES.choices()"], rel
 
     def test_pipeline_types_and_state_validation_share_the_choices(self):
         # scripts/pipeline_state.py:507-509 — type binds at init (design §5)
@@ -873,10 +954,11 @@ class TestSnapshotAndBootstrap:
         assert "updated_jql = f'{jql} AND updated >= \"{run_jql_ts}\"'" in boot_src
 
     def test_bootstrap_config_matches_run_report_writer(self, ctx):
-        # rows: 54, 55 — bootstrap_snapshot.py:45-50 == generate_run_report.py:29-30,:49-50
-        # (tests/test_report_roundtrip.py keeps the real-CLI round trip; PR1-10)
+        # rows: 54, 55 — bootstrap_snapshot.py:45-50 reads what generate_run_report.py writes;
+        # the writer's TYPE_CONFIG is registry-derived since PR-2a (MIGRATED rows 71-81), so the
+        # reader is pinned to the descriptor directly (tests/test_report_roundtrip.py keeps the
+        # real-CLI round trip; PR1-10)
         bc = bootstrap_snapshot.BOOTSTRAP_CONFIG[ctx.t]
-        g = generate_run_report.TYPE_CONFIG[ctx.t]
         pin(
             "snapshot.report_prefix",
             "bootstrap_snapshot.py:45,:49",
@@ -884,22 +966,10 @@ class TestSnapshotAndBootstrap:
             bc["report_prefix"],
         )
         pin(
-            "snapshot.report_prefix",
-            "generate_run_report.py:30,:50",
-            ctx.snap["report_prefix"],
-            g["output_prefix"],
-        )
-        pin(
             "reporting.item_key",
             "bootstrap_snapshot.py:46,:50",
             ctx.rep["item_key"],
             bc["item_key"],
-        )
-        pin(
-            "reporting.item_key",
-            "generate_run_report.py:29,:49",
-            ctx.rep["item_key"],
-            g["item_key"],
         )
 
     def test_run_report_reader_path_is_report_prefix_plus_run(self, ctx, tmp_path):
@@ -964,17 +1034,8 @@ class TestSnapshotAndBootstrap:
 
 
 class TestJqlAndJiraUtils:
-    # rows: 62, 63, 64
-
-    def test_jql_query_default_wrapper_literals(self, ctx):
-        # rows: 62 — scripts/jql_query.py:79-90: labels are LITERALS; excludes rubric_pass,
-        # not split_quarantine (design §3.6 invariant 4)
-        source = read("scripts/jql_query.py")
-        assert f'" AND (labels not in ({ctx.labels["ignore"]},"' in source
-        assert f'" {ctx.labels["rubric_pass"]}) OR labels is EMPTY)"' in source
-        assert ctx.labels["split_quarantine"] not in source
-        branch = 'if args.project == "initiative":' if ctx.t == "initiative" else "else:"
-        assert branch in source
+    # rows: 63, 64 (62 MIGRATED — tests/test_jql_query.py holds the wrapper byte-identical and
+    # design §3.6 invariant 4: split_quarantine is never excluded)
 
     def test_strip_metadata_heading_regex_is_a_known_divergence(self, ctx):
         # rows: 63 — jira_utils.py:736 literal union (RFE-|RHAIRFE-|STRAT-|RHAISTRAT-) != the
@@ -1027,7 +1088,8 @@ class TestJqlAndJiraUtils:
 
 
 class TestSmallRegistries:
-    # rows: 65-70, 105-107, 148-161
+    # rows: 65, 66 (residue), 68, 107, 154-161 (residues) — 66, 67, 69, 70, 105, 148-157
+    # MIGRATED as listed above
 
     def test_fetch_issue_is_rfe_only(self):
         # rows: 65 — fetch_issue.py:59-60,:71,:83,:98,:101,:122,:224 (no --type)
@@ -1039,21 +1101,12 @@ class TestSmallRegistries:
         assert ('f"{issue_key}-comments.md"' in source) is rfe.d["companions"]["comments"]
         assert "--type" not in source
 
-    def test_check_conflicts(self, ctx):
-        # rows: 66 — check_conflicts.py:36-49,:60,:76 (predicate startswith(jira_prefix) ->
-        # prefix-union in PR-2)
+    def test_check_conflicts_scan_fork_and_write_prefix_predicate(self, ctx):
+        # rows: 66 — the dict is MIGRATED; still literal in check_conflicts.py: the forked
+        # scanner pair selected by type name (_SCAN_FNS, collapses with artifact_utils' pair) and
+        # the startswith(jira_prefix) predicate — key_prefixes[0] only, prefix-union in a later
+        # PR-2 step
         tc = check_conflicts._TYPE_CONFIG[ctx.t]
-        expected = {
-            "originals_dir": ctx.bare["originals"],
-            "id_field": ctx.id_field,
-            "jira_prefix": ctx.wp,
-        }
-        pin(
-            "dirs.originals/id_field/key_prefixes[0]",
-            "check_conflicts.py:36-49",
-            expected,
-            {k: v for k, v in tc.items() if k != "scan_fn"},
-        )
         scan = (
             artifact_utils.scan_initiative_task_files
             if ctx.id_field == "initiative_id"
@@ -1061,19 +1114,6 @@ class TestSmallRegistries:
         )
         assert tc["scan_fn"] is scan
         assert 'item_id.startswith(tc["jira_prefix"])' in read("scripts/check_conflicts.py")
-
-    def test_next_rfe_id_defaults_are_the_rfe_values(self):
-        # rows: 67 — next_rfe_id.py:27-28 (dash-less prefix), :34, :36, :90 (3-digit pad is shared
-        # grammar)
-        rfe = _ctx("rfe")
-        pin(
-            "identity.local_prefix (dash-less)",
-            "next_rfe_id.py:27",
-            rfe.lp.rstrip("-"),
-            next_rfe_id.DEFAULT_PREFIX,
-        )
-        pin("dirs.tasks", "next_rfe_id.py:28", rfe.dirs["tasks"], next_rfe_id.DEFAULT_DIR)
-        assert 'f"{prefix}-{highest + 1 + i:03d}"' in read("scripts/next_rfe_id.py")
 
     def test_batch_parent_key_pattern_known_divergence(self):
         # rows: 68 — Q14: validate_batch_input.py:36 omits INIT- while artifact_utils.py:219 accepts
@@ -1092,10 +1132,11 @@ class TestSmallRegistries:
         assert validate_batch_input.PARENT_KEY_PATTERN.match(local_parent) is None
         assert re.match(registry_pattern, local_parent)
 
-    def test_priority_enum_has_one_home(self, ctx):
-        # rows: 69, 170 — validate_batch_input.py:34 reads SCHEMAS['rfe-task'] for BOTH types;
-        # artifact_utils.py:83,:209; descriptor home schema.task.priority (PR1-14, map_to_tracker ==
-        # {})
+    def test_priority_enum_in_the_task_schemas(self, ctx):
+        # rows: 170 — artifact_utils.py:83,:209; descriptor home schema.task.priority (PR1-14,
+        # map_to_tracker == {}). Row 69 (validate_batch_input.ALLOWED_PRIORITIES) is MIGRATED: it
+        # reads the rfe descriptor, and tests/test_validate_batch_input.py holds it equal to both
+        # task schemas until they derive too.
         prio = ctx.schema["task"]["priority"]
         pin(
             "schema.task.priority.enum",
@@ -1103,42 +1144,11 @@ class TestSmallRegistries:
             prio["enum"],
             artifact_utils.SCHEMAS[ctx.task_schema]["priority"]["enum"],
         )
-        pin(
-            "schema.task.priority.enum",
-            "validate_batch_input.py:34",
-            prio["enum"],
-            validate_batch_input.ALLOWED_PRIORITIES,
-        )
-        assert (
-            validate_batch_input.ALLOWED_PRIORITIES
-            is artifact_utils.SCHEMAS["rfe-task"]["priority"]["enum"]
-        )
         assert prio["map_to_tracker"] == {}
         assert prio["enum"] == ["Blocker", "Critical", "Major", "Normal", "Minor", "Undefined"]
 
-    def test_batch_known_fields(self, ctx):
-        # rows: 70 — validate_batch_input.py:42-43,:51 (base set is a shared constant)
-        known = (
-            validate_batch_input.INITIATIVE_KNOWN_FIELDS
-            if ctx.t == "initiative"
-            else validate_batch_input.RFE_KNOWN_FIELDS
-        )
-        pin(
-            "batch.extra_fields ∪ base",
-            "validate_batch_input.py:42-43",
-            {"prompt", "priority", "labels", "clarifying_context"}
-            | set(ctx.d["batch"]["extra_fields"]),
-            known,
-        )
-
-    def test_batch_summary(self, ctx):
-        # rows: 105, 107 — batch_summary.py:13-16 (redundant with TYPE_CONFIG), :87,:97-111 literals
-        pin(
-            "dirs (bare)",
-            "batch_summary.py:13-16",
-            {"reviews_dir": ctx.bare["reviews"], "tasks_dir": ctx.bare["tasks"]},
-            batch_summary._TYPE_CONFIG[ctx.t],
-        )
+    def test_batch_summary_literals(self, ctx):
+        # rows: 107 — batch_summary.py:87,:97-111 literals (row 105's dirs dict is MIGRATED)
         source = read("scripts/batch_summary.py")
         assert f'scores.get("{ctx.pipe["resplit"]["score_field"]}")' in source
         assert f'f"{{score}}/{2 * len(ctx.score_fields)}"' in source, (
@@ -1147,125 +1157,42 @@ class TestSmallRegistries:
         for key in ctx.labels["feasibility"]:
             assert key in artifact_utils.SCHEMAS[ctx.review_schema]["feasibility"]["enum"]
 
-    def test_reassess_save(self, ctx):
-        # rows: 148 — reassess_save.py:19-22
-        pin(
-            "dirs.reviews",
-            "reassess_save.py:19-22",
-            {"reviews_dir": ctx.dirs["reviews"]},
-            reassess_save._TYPE_CONFIG[ctx.t],
-        )
-
-    def test_check_revised(self, ctx):
-        # rows: 149 — check_revised.py:47-58 (hand-parsed --type :123-129; no choices validation)
-        expected = {
-            "originals_dir": ctx.bare["originals"],
-            "tasks_dir": ctx.bare["tasks"],
-            "review_schema": ctx.review_schema,
-        }
-        pin(
-            "dirs (bare) + review schema",
-            "check_revised.py:47-58",
-            expected,
-            check_revised._TYPE_CONFIG[ctx.t],
-        )
-        assert 'if "--type" in argv:' in read("scripts/check_revised.py")
-
-    def test_prefix_sniffers(self, ctx):
-        # rows: 150, 151, 152 — preserve_review_state.py:23-36, prep_assess.py:18-26,
-        # filter_for_revision.py:27-30 (default branch is rfe; PR-2 detect())
+    def test_assess_staging_dir_is_shared(self):
+        # rows: 150-152 are MIGRATED (detect()); what stays type-neutral and byte-stable is the
+        # assess staging dir prep_assess writes and verify_phase / PHASE_CHECKS read (design §10)
         assert prep_assess.SINGLE_DIR == ASSESS_STAGING
-        for ident in ctx.sample_ids:
-            pin(
-                "dirs.reviews",
-                "preserve_review_state.py:27-28",
-                ctx.dirs["reviews"],
-                preserve_review_state._reviews_dir(ident),
-            )
-            pin(
-                "f'{type}-review'",
-                "preserve_review_state.py:31-32",
-                ctx.review_schema,
-                preserve_review_state._schema(ident),
-            )
-            assert preserve_review_state._is_initiative(ident) is (ctx.t == "initiative")
-            pin(
-                "dirs.tasks",
-                "prep_assess.py:23-26",
-                ctx.dirs["tasks"],
-                prep_assess._task_dir_for(ident),
-            )
-            pin(
-                "dirs.reviews + review schema",
-                "filter_for_revision.py:27-30",
-                (f"{ctx.dirs['reviews']}/{ident}-review.md", ctx.review_schema),
-                filter_for_revision._review_path_and_schema(ident),
-            )
+        assert verify_phase.ASSESS_STAGING == ASSESS_STAGING
 
-    def test_collect_recommendations(self, ctx):
-        # rows: 153 — collect_recommendations.py:16-19 (ternary: anything != initiative -> rfe)
-        pin(
-            "dirs.reviews (bare)",
-            "collect_recommendations.py:16-19",
-            ctx.bare["reviews"],
-            os.path.basename(collect_recommendations._review_dir(ctx.t)),
-        )
-
-    def test_error_collect(self, ctx):
-        # rows: 154 — error_collect.py:49-60, :216 companion (companions.removed_context)
-        expected = {
-            "reviews_dir": ctx.dirs["reviews"],
-            "originals_dir": ctx.dirs["originals"],
-            "tasks_dir": ctx.dirs["tasks"],
-        }
-        pin("dirs", "error_collect.py:49-60", expected, error_collect._TYPE_CONFIG[ctx.t])
+    def test_error_collect_removed_context_companion(self, ctx):
+        # rows: 154 — error_collect.py:216 companion (companions.removed_context); the dirs dict
+        # is MIGRATED
         assert ctx.d["companions"]["removed_context"] is True
         assert "rc = f\"{tc['tasks_dir']}/{rfe_id}-removed-context.yaml\"" in read(
             "scripts/error_collect.py"
         )
 
-    def test_split_collect(self, ctx):
-        # rows: 155 — split_collect.py:25-31, :60 status path, :98 rfe defaults baked into
-        # _set_revise
-        pin(
-            "dirs.reviews + review schema",
-            "split_collect.py:25-31",
-            {"reviews_dir": ctx.dirs["reviews"], "review_schema": ctx.review_schema},
-            split_collect._TYPE_CONFIG[ctx.t],
-        )
-        params = inspect.signature(split_collect._set_revise).parameters
-        rfe = _ctx("rfe")
-        pin(
-            "dirs.reviews (rfe default)",
-            "split_collect.py:98",
-            (rfe.dirs["reviews"], rfe.review_schema),
-            (params["reviews_dir"].default, params["review_schema"].default),
-        )
+    def test_split_collect_status_path(self):
+        # rows: 155 — split_collect.py:60 status path; the dirs dict and the _set_revise rfe
+        # defaults are MIGRATED
         assert "status_path = f\"{tc['reviews_dir']}/{pid}-split-status.yaml\"" in read(
             "scripts/split_collect.py"
         )
 
-    def test_collect_children_branch(self, ctx):
-        # rows: 156 — collect_children.py:34-39 inline branch
-        source = read("scripts/collect_children.py")
-        scan = "scan_initiative_task_files" if ctx.t == "initiative" else "scan_task_files"
+    def test_collect_children_scan_fork(self):
+        # rows: 156 — collect_children.py:34-39: id_field is MIGRATED; the forked scanner pair is
+        # still selected by type name (collapses with artifact_utils' pair)
         assert re.search(
-            rf"tasks = {scan}\(artifacts_dir\)\s+id_field = \"{ctx.id_field}\"", source
+            r'if args\.type == "initiative":\s+tasks = scan_initiative_task_files\(artifacts_dir\)'
+            r"\s+else:\s+tasks = scan_task_files\(artifacts_dir\)",
+            read("scripts/collect_children.py"),
         ), "collect_children.py:34-39"
 
-    def test_check_right_sized_and_resplit_threshold(self, ctx):
-        # rows: 157 — check_right_sized.py:18-21, :52-53; Q3: below == 2 for BOTH types today
-        pin(
-            "dirs.reviews",
-            "check_right_sized.py:18-21",
-            {"reviews_dir": ctx.dirs["reviews"]},
-            check_right_sized._TYPE_CONFIG[ctx.t],
-        )
-        source = read("scripts/check_right_sized.py")
+    def test_resplit_threshold_is_two_for_both_types(self, ctx):
+        # rows: 157 — check_right_sized.py reads pipeline.resplit since PR-2a (MIGRATED), which
+        # inverts the Q3 note: setting the initiative descriptor to below: 1 now IS the behaviour
+        # change, so it must stay a visible pin change rather than a silent descriptor edit
         resplit = ctx.pipe["resplit"]
-        assert f'scores.get("{resplit["score_field"]}")' in source, "check_right_sized.py:52"
-        assert f"right_sized < {resplit['below']}" in source, "check_right_sized.py:53"
-        assert resplit["below"] == 2, "Q3: initiative below:1 is a PR-2 behaviour change"
+        assert resplit["below"] == 2, "Q3: initiative below:1 is a behaviour change"
         assert resplit["score_field"] in ctx.score_fields
 
     def test_check_autofix_complete_encodes_state_prefix(self, ctx):
@@ -1321,80 +1248,21 @@ class TestSmallRegistries:
 
 
 class TestRunReportConfig:
-    # rows: 71-87
+    # rows: 82-86 (71-81, 87 MIGRATED)
 
-    def test_type_config(self, ctx):
+    def test_scan_tasks_fork_and_child_parent_prefixes_guard(self, ctx):
+        # rows: 71-80 are MIGRATED; still literal: the forked scanner pair selected by type name
+        # (generate_run_report.py _SCAN_TASKS — collapses with artifact_utils' pair), plus the
+        # derivation guard that child_parent_prefixes is (local_prefix, *key_prefixes) and NOT
+        # conventions.parent_key_patterns (RHAISTRAT- must stay excluded, :104)
         g = generate_run_report.TYPE_CONFIG[ctx.t]
-        pin(
-            "schema.review.score_fields (order)",
-            "generate_run_report.py:26,:40-46",
-            ctx.score_fields,
-            g["score_fields"],
-        )
-        pin(
-            "dirs.reviews (bare)",
-            "generate_run_report.py:27,:47",
-            ctx.bare["reviews"],
-            g["reviews_dir"],
-        )
-        pin("dirs.tasks (bare)", "generate_run_report.py:28,:48", ctx.bare["tasks"], g["tasks_dir"])
-        pin(
-            "reporting.item_key",
-            "generate_run_report.py:29,:49",
-            ctx.rep["item_key"],
-            g["item_key"],
-        )
-        pin(
-            "snapshot.report_prefix",
-            "generate_run_report.py:30,:50",
-            ctx.snap["report_prefix"],
-            g["output_prefix"],
-        )
-        pin(
-            "reporting.run_report.extra_entry_fields",
-            "generate_run_report.py:31,:51",
-            ctx.rep["run_report"]["extra_entry_fields"],
-            g["extra_entry_fields"],
-        )
-        pin("identity.id_field", "generate_run_report.py:33,:53", ctx.id_field, g["id_field"])
-        pin(
-            "(local_prefix, *key_prefixes)",
-            "generate_run_report.py:35,:54,:104",
-            (ctx.lp, *ctx.jira["key_prefixes"]),
-            g["child_parent_prefixes"],
-        )
-        pin(
-            "identity.jira.key_prefixes[0]",
-            "generate_run_report.py:36,:55,:120,:212-213",
-            ctx.wp,
-            g["tracker_prefix"],
-        )
-        pin(
-            "identity.local_prefix",
-            "generate_run_report.py:37,:56,:120,:270",
-            ctx.lp,
-            g["local_prefix"],
-        )
         scan = (
             artifact_utils.scan_task_files
             if ctx.id_field == "rfe_id"
             else artifact_utils.scan_initiative_task_files
         )
-        assert g["scan_tasks"] is scan, (
-            "generate_run_report.py:32,:52 forked pair keyed on id_field"
-        )
-        # child_parent_prefixes must NOT be conventions.parent_key_patterns (RHAISTRAT- excluded
-        # :104)
+        assert g["scan_tasks"] is scan, "generate_run_report.py _SCAN_TASKS forked pair"
         assert "RHAISTRAT-" not in g["child_parent_prefixes"]
-
-    def test_dead_rfe_default_export(self):
-        # rows: 81 — generate_run_report.py:60
-        pin(
-            "schema.review.score_fields (rfe)",
-            "generate_run_report.py:60",
-            _ctx("rfe").score_fields,
-            generate_run_report.SCORE_FIELDS,
-        )
 
     def test_predicates_and_rfe_only_keys_in_source(self, ctx):
         # rows: 82, 83, 84, 85, 86 —
@@ -1421,109 +1289,19 @@ class TestRunReportConfig:
 
 
 class TestReviewPdfConfig:
-    # rows: 89-104
+    # rows: 101, 103, 104 (89-100, 102 MIGRATED)
 
-    def test_report_config(self, ctx):
-        r = generate_review_pdf.REPORT_CONFIG[ctx.t]
-        pin(
-            "dirs.reviews (bare)",
-            "generate_review_pdf.py:19,:60",
-            ctx.bare["reviews"],
-            r["reviews_dir"],
-        )
-        pin("dirs.tasks (bare)", "generate_review_pdf.py:20,:61", ctx.bare["tasks"], r["tasks_dir"])
-        pin(
-            "dirs.originals (bare)",
-            "generate_review_pdf.py:21,:62",
-            ctx.bare["originals"],
-            r["originals_dir"],
-        )
-        pin(
-            "identity.id_field (dead key)",
-            "generate_review_pdf.py:22,:63",
-            ctx.id_field,
-            r["id_field"],
-        )
-        pin(
-            "identity.jira.key_prefixes[0]",
-            "generate_review_pdf.py:23,:64",
-            ctx.wp,
-            r["jira_prefix"],
-        )
-        pin("identity.local_prefix", "generate_review_pdf.py:24,:65", ctx.lp, r["local_prefix"])
-        pin(
-            "display.entity",
-            "generate_review_pdf.py:25,:66",
-            ctx.d["display"]["entity"],
-            r["entity_name"],
-        )
-        pin(
-            "display.entity_plural",
-            "generate_review_pdf.py:26,:67",
-            ctx.d["display"]["entity_plural"],
-            r["entity_name_plural"],
-        )
-        pin(
-            "f'{display.entity} Review &amp; Remediation Report'",
-            "generate_review_pdf.py:27,:68",
-            f"{ctx.d['display']['entity']} Review &amp; Remediation Report",
-            r["report_title"],
-        )
-        pin(
-            "f'{pipeline.poll_prefix}review-report.html' (Q15)",
-            "generate_review_pdf.py:28,:69",
-            f"{ctx.pp}review-report.html",
-            r["default_output"],
-        )
+    def test_pass_threshold_is_a_constant(self, ctx):
+        # rows: 89-100 are MIGRATED; Q15: the passing total is scoring machinery — one module
+        # constant for every type — and the '/10' denominators are 2 * len(score_fields)
         pin(
             "PASS_THRESHOLD constant (Q15)",
-            "generate_review_pdf.py:29,:70,:431",
+            "generate_review_pdf.PASS_THRESHOLD",
             PASS_THRESHOLD,
-            r["pass_threshold"],
+            generate_review_pdf.PASS_THRESHOLD,
         )
+        assert generate_review_pdf.REPORT_CONFIG[ctx.t]["pass_threshold"] == PASS_THRESHOLD
         assert 2 * len(ctx.score_fields) == 10, "'/10' denominators == 2 * len(score_fields)"
-        pin(
-            "schema.review.score_fields (order)",
-            "generate_review_pdf.py:30,:75-81",
-            ctx.score_fields,
-            r["criterion_keys"],
-        )
-        pin(
-            "reporting.criterion_labels",
-            "generate_review_pdf.py:31-37,:82-88",
-            ctx.rep["criterion_labels"],
-            r["criterion_labels"],
-        )
-        pin(
-            "reporting.criterion_labels (order)",
-            "generate_review_pdf.py:31-37,:82-88",
-            list(ctx.rep["criterion_labels"]),
-            list(r["criterion_labels"]),
-        )
-        pin(
-            "reporting.criterion_short_labels",
-            "generate_review_pdf.py:38-44,:89-95",
-            ctx.rep["criterion_short_labels"],
-            r["criterion_short_labels"],
-        )
-        pin(
-            "reporting.before_score_name_map",
-            "generate_review_pdf.py:45-56,:96-105",
-            ctx.rep["before_score_name_map"],
-            r["before_score_name_map"],
-        )
-        pin(
-            "reporting.before_score_name_map (order)",
-            "generate_review_pdf.py:45-56,:96-105",
-            list(ctx.rep["before_score_name_map"]),
-            list(r["before_score_name_map"]),
-        )
-        pin(
-            "reporting.pdf.extra_fields",
-            "generate_review_pdf.py:57,:106,:1537",
-            ctx.rep["pdf"]["extra_fields"],
-            r["extra_fields"],
-        )
 
     def test_parse_before_scores_default_map_is_rfe(self, ctx):
         # rows: 101 — generate_review_pdf.py:119-123 rfe default in a shared helper
@@ -1964,47 +1742,13 @@ class TestPhaseChecks:
 
 
 class TestVerifyPhase:
-    # rows: 143-147
-
-    def test_phase_outputs_agree_with_phase_checks(self, ctx):
-        # rows: 143 — verify_phase.py:23-38 (no create/revise rows)
-        v = verify_phase._TYPE_CONFIG[ctx.t]
-        expected = {
-            k: p
-            for k, p in _expected_phase_rows(ctx).items()
-            if k not in ("create", f"{ctx.pp}revise")
-        }
-        expected = {k[len(ctx.pp) :]: p for k, p in expected.items()}
-        pin(
-            "dirs x dimension names",
-            "verify_phase.py:23-38",
-            expected,
-            {k: f("X") for k, f in v["phases"].items()},
-        )
-        for k, f in v["phases"].items():
-            assert f("X") == check_review_progress.PHASE_CHECKS[f"{ctx.pp}{k}"]("X")
-
-    def test_type_config(self, ctx):
-        # rows: 144, 145 — verify_phase.py:40-67
-        v = verify_phase._TYPE_CONFIG[ctx.t]
-        pin("dirs.reviews", "verify_phase.py:43,:56", ctx.dirs["reviews"], v["reviews_dir"])
-        pin("identity.id_field", "verify_phase.py:44,:57", ctx.id_field, v["id_field"])
-        pin(
-            "f'{type}-review' (dead key)",
-            "verify_phase.py:45,:58",
-            ctx.review_schema,
-            v["review_schema"],
-        )
-        pin(
-            "schema.review.score_fields -> scores.<f>=0",
-            "verify_phase.py:46-52,:59-65",
-            [f"scores.{f}=0" for f in ctx.score_fields],
-            v["score_fields"],
-        )
+    # rows: 146 (143-145, 147 MIGRATED — tests/test_verify_phase.py::TestAgreesWithProgressChecker
+    # keeps the derived phase table equal to the still-literal check_review_progress.PHASE_CHECKS)
 
     def test_error_stub_command_and_schema_acceptance(self, ctx, tmp_path, monkeypatch):
-        # rows: 146 — verify_phase.py:105-127; the review schema must accept the stub shape
-        # (validate_types gate 1 restates this; design §3.3)
+        # rows: 146 — verify_phase.py:105-127; the score tail is registry-derived since PR-2a;
+        # pinned here: the fixed stub vocabulary, and that the (still literal) review schema in
+        # artifact_utils accepts the stub shape (validate_types gate 1 restates this; design §3.3)
         monkeypatch.chdir(tmp_path)
         captured = []
         real_run = subprocess.run  # verify_phase shares the subprocess module object
@@ -3087,3 +2831,14 @@ class TestDeferredList:
         rows = [row for row, _, _ in DEFERRED]
         assert rows == sorted(rows) and len(set(rows)) == len(rows)
         assert all(reason for _, _, reason in DEFERRED)
+
+    def test_migrated_entries_are_well_formed_and_disjoint_from_deferred(self):
+        deferred = {row for row, _, _ in DEFERRED}
+        firsts = []
+        for rows, registry, note in MIGRATED:
+            assert rows and list(rows) == sorted(rows), registry
+            assert all(isinstance(row, int) for row in rows), registry
+            assert registry and note.startswith("PR-2"), registry
+            assert not deferred & set(rows), (registry, deferred & set(rows))
+            firsts.append(rows[0])
+        assert firsts == sorted(firsts)

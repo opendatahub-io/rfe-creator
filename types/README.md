@@ -10,10 +10,56 @@ reference). Design: `design-proposals/work-item-types-unified.md` §3.2 (contrac
 and are invoked by their cwd-relative path (`python3 scripts/type_registry.py …`, design §3.5.1).
 The provider guide is `docs/type-provider-guide.md`.
 
-**PR-1 status: inert.** No production script imports the registry yet. Every value in the two
-shipped descriptors is the live literal on `main` with its consuming `file:line` in a trailing
-comment, and `tests/` pin each type-keyed registry dict against a descriptor projection — the
-descriptor is source of truth *by test* before *by import* (§10). Scripts migrate in the PR-2 series.
+**Status (PR-2a): 18 scripts read the registry** (table below). An adopted script does
+`import type_registry` and `_TYPES = type_registry.load()` once at import and builds its per-type
+table as a comprehension over `_TYPES.names()`, so a drop-in type appears in it without a code
+change. Adopted scripts use DESCRIPTOR values only (`Descriptor.get`, `dirs()`, `labels`,
+`key_prefixes`, `write_prefix`, `local_prefix`, `id_field`, `score_fields`; the prefix sniffs
+became `TypeRegistry.detect()`); the effective binding (`binding()`) and `resolve` are PR-3.
+Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py` to its
+descriptor projection — source of truth *by test* until it adopts (§10); that file's `MIGRATED`
+list names the matrix rows already covered *by import*, and each adoption deletes its pin.
+
+`type_registry.DEFAULT_ROOT` is `__file__`-relative (`<scripts dir>/../types`): a harness that
+copies `scripts/*.py` elsewhere must copy or symlink `types/` beside it (symlinking `scripts/`
+itself is fine — `resolve()` follows the link).
+
+## Adoption status
+
+| Script | Registry it read from the descriptor | Status |
+|---|---|---|
+| `batch_summary.py` | `_TYPE_CONFIG` (dirs view of `generate_run_report.TYPE_CONFIG`), `--type` choices | PR-2a |
+| `check_conflicts.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a; scanner fork by type name and `startswith(jira_prefix)` → prefix-union pending |
+| `check_revised.py` | `_TYPE_CONFIG` | PR-2a |
+| `check_right_sized.py` | `_TYPE_CONFIG`, `pipeline.resplit` | PR-2a |
+| `collect_children.py` | `id_field`, `--type` choices | PR-2a; scanner fork by type name pending |
+| `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
+| `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
+| `filter_for_revision.py` | prefix sniff → `detect()` | PR-2a |
+| `generate_review_pdf.py` | `REPORT_CONFIG`, `--type` choices | PR-2a |
+| `generate_run_report.py` | `TYPE_CONFIG`, `--type` choices | PR-2a; scanner fork by type name and the `tracker_ref`/role predicates pending |
+| `jql_query.py` | default exclusion wrapper, `--project` choices | PR-2a |
+| `next_rfe_id.py` | `DEFAULT_PREFIX` / `DEFAULT_DIR` | PR-2a |
+| `prep_assess.py` | prefix sniff → `detect()` | PR-2a |
+| `preserve_review_state.py` | prefix sniff → `detect()` | PR-2a |
+| `reassess_save.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
+| `split_collect.py` | `_TYPE_CONFIG`, `_set_revise` defaults, `--type` choices | PR-2a |
+| `validate_batch_input.py` | `ALLOWED_PRIORITIES`, known fields, `--type` choices | PR-2a; `PARENT_KEY_PATTERN` literal until PR-3 (Q14) |
+| `verify_phase.py` | phase tables, `_TYPE_CONFIG`, error-stub score tail, `--type` choices | PR-2a |
+| `artifact_utils.py` | `SCHEMAS`, forked scan/rename/parse pairs, sniff dispatchers | pending |
+| `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG`, `issue-snapshot-` probe | pending |
+| `check_autofix_complete.py` | `_TYPE_CONFIG` | pending |
+| `check_content_preservation.py` | inline dir branch | pending |
+| `check_review_progress.py` | `PHASE_CHECKS` | pending |
+| `cleanup_partial_split.py` | inline dir branch | pending |
+| `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
+| `fetch_issue.py` | rfe-only paths | pending |
+| `frontmatter.py` | `_detect_schema_type` | pending |
+| `jira_utils.py` | `strip_metadata` prefix regex | pending |
+| `pipeline_state.py` | `PIPELINE_TYPES` (prompt/skill entries move in PR-5) | pending |
+| `snapshot_fetch.py` | `SNAPSHOT_CONFIG` | pending |
+| `split_submit.py` | `SPLIT_CONFIG` | pending (last, with `submit.py`) |
+| `submit.py` | `TYPE_CONFIGS` | pending (last; emulator suites in CI) |
 
 ## Adding a type
 
@@ -127,8 +173,9 @@ Alongside: `python3 scripts/lint_prefix_predicates.py` rejects new literal key/s
 
 ## Where the descriptors deliberately differ from the design text
 
-`main` wins over the prose; each is commented inline: `resplit.below: 2` for both (code is
-type-blind; the initiative `1` is a PR-2 change), `rubric.ref` values are documentary until the
+`main` wins over the prose; each is commented inline: `resplit.below: 2` for both
+(`check_right_sized.py` reads it since PR-2a, so the initiative `1` of §8.2 is a deliberate later
+behaviour change, Q3), `rubric.ref` values are documentary until the
 bootstrap pins refs (PR-2), `rubric.repo` carries the full URL the bootstrap holds, rfe
 `snapshot.prefix` is `issue-snapshot-` (submit's `''` is a grandfathered sentinel projection),
 `query_default` has no consumer, `auto_created`/`auto_revised`/`split_result`/`split_original` are
