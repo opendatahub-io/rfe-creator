@@ -271,6 +271,10 @@ def path_messages(desc, repo_root):
         seen_names = set()
         for dim in dimensions:
             dname = dim.get("name") if isinstance(dim, dict) else None
+            # Only strings take part: a malformed name (list, mapping, number) is the
+            # JSON-Schema check's finding, and an unhashable one must not raise here.
+            if not isinstance(dname, str):
+                continue
             if dname in engine_phases:
                 messages.append(f"pipeline.dimensions name {dname!r} collides with an engine phase")
             elif dname in seen_names:

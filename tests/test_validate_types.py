@@ -1429,3 +1429,21 @@ def test_gate1_rejects_dimension_names_that_collide_with_engine_phases(tmp_path)
     msgs = validate_types.path_messages(desc, tmp_path)
     assert any("collides with an engine phase" in m for m in msgs)
     assert any("declared twice" in m for m in msgs)
+
+
+def test_gate1_ignores_malformed_dimension_names(tmp_path):
+    """An unhashable or non-string name is the schema check's finding, not a TypeError here."""
+    desc = _FakeDesc(
+        "x",
+        {
+            "pipeline.dimensions": [
+                {"name": []},
+                {"name": {"a": 1}},
+                {"name": 3},
+                {"name": "review"},
+            ]
+        },
+    )
+    msgs = validate_types.path_messages(desc, tmp_path)
+    assert any("collides with an engine phase" in m for m in msgs)
+    assert not any("declared twice" in m for m in msgs)
