@@ -33,6 +33,8 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import (
     SCHEMAS,
     ValidationError,
@@ -43,6 +45,30 @@ from artifact_utils import (
     update_frontmatter,
     write_frontmatter,
 )
+
+_TYPES = type_registry.load()
+
+
+# Path component -> schema name, from every type's ``dirs``: registry order, each type's
+# reviews dir tested before its tasks dir (rfe-reviews/, rfe-tasks/, initiative-reviews/,
+# initiatives/ — the order the hand-written table had). A substring test, so both
+# ``artifacts/rfe-tasks/X.md`` and a bare ``rfe-tasks/X.md`` resolve. Only types that
+# contribute schemas take part (a partial drop-in descriptor has no SCHEMAS entries).
+def _schema_by_dir(types, schemas):
+    """Build the path-component -> schema-name table (see the comment above)."""
+    table = []
+    for desc in types:
+        for dir_key, kind in (("reviews", "review"), ("tasks", "task")):
+            # A drop-in may contribute schemas without declaring every directory; skip
+            # the missing key instead of failing the import of every frontmatter write.
+            bare = desc.get(f"dirs.{dir_key}", None)
+            if bare is None or f"{desc.name}-{kind}" not in schemas:
+                continue
+            table.append((f"{desc.dirs('bare')[dir_key]}/", f"{desc.name}-{kind}"))
+    return table
+
+
+_SCHEMA_BY_DIR = _schema_by_dir(_TYPES, SCHEMAS)
 
 
 def _coerce_value(value_str, field_spec):
@@ -74,15 +100,10 @@ def _coerce_value(value_str, field_spec):
 
 
 def _detect_schema_type(path):
-    """Detect schema type from file path."""
-    if "/rfe-reviews/" in path or "rfe-reviews/" in path:
-        return "rfe-review"
-    if "/rfe-tasks/" in path or "rfe-tasks/" in path:
-        return "rfe-task"
-    if "/initiative-reviews/" in path or "initiative-reviews/" in path:
-        return "initiative-review"
-    if "/initiatives/" in path or "initiatives/" in path:
-        return "initiative-task"
+    """Detect schema type from file path (the ``dirs.reviews`` / ``dirs.tasks`` component)."""
+    for needle, schema_type in _SCHEMA_BY_DIR:
+        if needle in path:
+            return schema_type
     return None
 
 

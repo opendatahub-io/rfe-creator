@@ -261,6 +261,16 @@ class TestAgreesWithProgressChecker:
     def test_initiative_paths_match(self, phase):
         assert _INITIATIVE_PHASE_OUTPUT[phase]("X-1") == PHASE_CHECKS[f"initiative-{phase}"]("X-1")
 
+    def test_every_registry_type_matches(self):
+        """Both tables derive from the same descriptors; the agreement must hold per type."""
+        import type_registry
+        from verify_phase import _PHASE_OUTPUT
+
+        for desc in type_registry.load(extra_roots=[], env={}):
+            pp = desc.get("pipeline.poll_prefix")
+            for phase, output in _PHASE_OUTPUT[desc.name].items():
+                assert output("X-1") == PHASE_CHECKS[f"{pp}{phase}"]("X-1"), (desc.name, phase)
+
 
 # ── Registry derivation ───────────────────────────────────────────────────────
 

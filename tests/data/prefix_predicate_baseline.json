@@ -1,5 +1,4 @@
 {
-  "scripts/artifact_utils.py": 29,
   "scripts/batch_summary.py": 1,
   "scripts/bootstrap_snapshot.py": 2,
   "scripts/cleanup_partial_split.py": 1,

@@ -31,22 +31,18 @@ import os
 import sys
 
 import type_registry
-from artifact_utils import scan_initiative_task_files, scan_task_files
+from artifact_utils import scan_tasks
 from jira_utils import check_description_conflict, require_env
 
 _TYPES = type_registry.load()
 
-# The task scanners are still a forked pair in artifact_utils (they collapse into one generic
-# later in the PR-2 series), so they are the one entry selected by type name rather than read
-# from the descriptor. A registered type without a scanner gets None and is refused in main().
-_SCAN_FNS = {"rfe": scan_task_files, "initiative": scan_initiative_task_files}
-
 # Derived from the type registry (design work-item-types-unified.md §10 item 2): the bare dir
 # form (Q13), identity.id_field and the descriptor write prefix identity.<tracker>.key_prefixes[0].
+# The task tree itself is read by artifact_utils.scan_tasks over the same descriptor, so every
+# registered type — shipped or drop-in — is scanned from its own dirs.tasks.
 _TYPE_CONFIG = {
     name: {
         "originals_dir": _TYPES.get(name).dirs(form="bare")["originals"],
-        "scan_fn": _SCAN_FNS.get(name),
         "id_field": _TYPES.get(name).id_field,
         "jira_prefix": _TYPES.get(name).key_prefixes[0],
     }
@@ -66,9 +62,6 @@ def main():
     args = parser.parse_args()
 
     tc = _TYPE_CONFIG[args.type]
-    if tc["scan_fn"] is None:
-        print(f"Error: no task scanner is registered for type {args.type!r}.", file=sys.stderr)
-        sys.exit(2)
 
     server, user, token = require_env()
     if not all([server, user, token]):
@@ -77,7 +70,7 @@ def main():
 
     originals_dir = os.path.join(args.artifacts_dir, tc["originals_dir"])
 
-    tasks = tc["scan_fn"](args.artifacts_dir)
+    tasks = scan_tasks(args.artifacts_dir, _TYPES.get(args.type))
     jira_items = []
     for task_path, task_data in tasks:
         item_id = task_data[tc["id_field"]]

@@ -10,15 +10,26 @@ reference). Design: `design-proposals/work-item-types-unified.md` §3.2 (contrac
 and are invoked by their cwd-relative path (`python3 scripts/type_registry.py …`, design §3.5.1).
 The provider guide is `docs/type-provider-guide.md`.
 
-**Status (PR-2a): 18 scripts read the registry** (table below). An adopted script does
+**Status (PR-2b): 21 scripts read the registry** (table below). An adopted script does
 `import type_registry` and `_TYPES = type_registry.load()` once at import and builds its per-type
-table as a comprehension over `_TYPES.names()`, so a drop-in type appears in it without a code
-change. Adopted scripts use DESCRIPTOR values only (`Descriptor.get`, `dirs()`, `labels`,
-`key_prefixes`, `write_prefix`, `local_prefix`, `id_field`, `score_fields`; the prefix sniffs
-became `TypeRegistry.detect()`); the effective binding (`binding()`) and `resolve` are PR-3.
-Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py` to its
-descriptor projection — source of truth *by test* until it adopts (§10); that file's `MIGRATED`
-list names the matrix rows already covered *by import*, and each adoption deletes its pin.
+table over the registry (`_TYPES.names()` or iteration — both in `names()` order), so a drop-in
+type appears in it without a code change. Adopted scripts use DESCRIPTOR values only (`Descriptor.get`, `dirs()`, `labels`,
+`key_prefixes`, `write_prefix`, `local_prefix`, `local_id_pattern`, `id_field`, `score_fields`;
+the prefix sniffs became `TypeRegistry.detect()`); the effective binding (`binding()`) and
+`resolve` are PR-3. Since PR-2b the artifact schemas and the poll phase table are projections
+too: `artifact_utils.SCHEMAS` builds `<type>-task` / `<type>-review` for every registered type
+that declares `identity.{tracker,id_field,local_id_pattern}`, `conventions.parent_key_patterns`,
+`schema.task.priority.enum` and `schema.review.score_fields` (plus the optional
+`schema.{task,review}.extra_fields`; a partial drop-in gets no schema — and no `frontmatter.py`
+path entry — instead of breaking the import, while a shipped type missing one fails the import),
+the scan / rename / parse helpers are generics over a `Descriptor` (the historical per-type names
+remain as wrappers), and `check_review_progress.PHASE_CHECKS` is `dirs` x `pipeline.poll_prefix`
+x `pipeline.dimensions[].name` (a drop-in without `dirs.{tasks,reviews}` and
+`pipeline.poll_prefix` contributes no rows). `tests/test_schemas_golden.py` pins the derived
+schemas byte for byte. Every value a pending script still carries is pinned by `tests/test_type_registry_pins.py`
+to its descriptor projection — source of truth *by test* until it adopts (§10); that file's
+`MIGRATED` list names the matrix rows already covered *by import*, and each adoption deletes its
+pin.
 
 `type_registry.DEFAULT_ROOT` is `__file__`-relative (`<scripts dir>/../types`): a harness that
 copies `scripts/*.py` elsewhere must copy or symlink `types/` beside it (symlinking `scripts/`
@@ -28,16 +39,19 @@ itself is fine — `resolve()` follows the link).
 
 | Script | Registry it read from the descriptor | Status |
 |---|---|---|
+| `artifact_utils.py` | `SCHEMAS` (`<type>-task` / `<type>-review` per type), `scan_tasks` / `scan_reviews` / `rename_to_tracker_key` / `parse_child` generics over a `Descriptor` (the per-type names are wrappers), `detect()` in `find_review_file` / `find_removed_context_yaml` | PR-2b; name-keyed until PR-3: the rename error label, rfe's slug-tolerant review lookup and `parse_child`'s rfe markdown fallbacks; the `rfes.md` index contract stays literal (`index.enabled`) |
 | `batch_summary.py` | `_TYPE_CONFIG` (dirs view of `generate_run_report.TYPE_CONFIG`), `--type` choices | PR-2a |
-| `check_conflicts.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a; scanner fork by type name and `startswith(jira_prefix)` → prefix-union pending |
+| `check_conflicts.py` | `_TYPE_CONFIG`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b; `startswith(jira_prefix)` → prefix-union pending |
 | `check_revised.py` | `_TYPE_CONFIG` | PR-2a |
+| `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices | PR-2b; `_detect_fast` config allowlist literal until the `initiative-speedrun-config` drift is fixed deliberately; the rfe-only `create` row (`_CREATE_BARRIER_TYPES`, lifted in PR-5) and the initiative row order (`_LEGACY_ROW_ORDER`, CLI choices text) are documented legacy literals |
 | `check_right_sized.py` | `_TYPE_CONFIG`, `pipeline.resplit` | PR-2a |
-| `collect_children.py` | `id_field`, `--type` choices | PR-2a; scanner fork by type name pending |
+| `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
 | `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
 | `filter_for_revision.py` | prefix sniff → `detect()` | PR-2a |
+| `frontmatter.py` | `_detect_schema_type` path table (`_SCHEMA_BY_DIR`), `schema` / `--schema-type` choices through `SCHEMAS` | PR-2b |
 | `generate_review_pdf.py` | `REPORT_CONFIG`, `--type` choices | PR-2a |
-| `generate_run_report.py` | `TYPE_CONFIG`, `--type` choices | PR-2a; scanner fork by type name and the `tracker_ref`/role predicates pending |
+| `generate_run_report.py` | `TYPE_CONFIG` (`scan_tasks` bound to `artifact_utils.scan_tasks(desc)`), `--type` choices | PR-2a, PR-2b; the `tracker_ref`/role predicates pending (PR-3) |
 | `jql_query.py` | default exclusion wrapper, `--project` choices | PR-2a |
 | `next_rfe_id.py` | `DEFAULT_PREFIX` / `DEFAULT_DIR` | PR-2a |
 | `prep_assess.py` | prefix sniff → `detect()` | PR-2a |
@@ -46,15 +60,12 @@ itself is fine — `resolve()` follows the link).
 | `split_collect.py` | `_TYPE_CONFIG`, `_set_revise` defaults, `--type` choices | PR-2a |
 | `validate_batch_input.py` | `ALLOWED_PRIORITIES`, known fields, `--type` choices | PR-2a; `PARENT_KEY_PATTERN` literal until PR-3 (Q14) |
 | `verify_phase.py` | phase tables, `_TYPE_CONFIG`, error-stub score tail, `--type` choices | PR-2a |
-| `artifact_utils.py` | `SCHEMAS`, forked scan/rename/parse pairs, sniff dispatchers | pending |
 | `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG`, `issue-snapshot-` probe | pending |
 | `check_autofix_complete.py` | `_TYPE_CONFIG` | pending |
 | `check_content_preservation.py` | inline dir branch | pending |
-| `check_review_progress.py` | `PHASE_CHECKS` | pending |
 | `cleanup_partial_split.py` | inline dir branch | pending |
 | `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
 | `fetch_issue.py` | rfe-only paths | pending |
-| `frontmatter.py` | `_detect_schema_type` | pending |
 | `jira_utils.py` | `strip_metadata` prefix regex | pending |
 | `pipeline_state.py` | `PIPELINE_TYPES` (prompt/skill entries move in PR-5) | pending |
 | `snapshot_fetch.py` | `SNAPSHOT_CONFIG` | pending |
@@ -111,10 +122,11 @@ and `produces[]` (§3.7 cross-type chain; rfe-creator ships no gate evaluator),
 `identity.jira.{duplicate_link_type, state_map.close_duplicate, state_map.ready, priority}`, the whole
 `identity.github` branch (§8.6 shape; adapter/emulator are first-requester work), `classification`,
 `dirs.{dupes,merges}`, `companions.extra_suffixes`, `conventions.labels.{processing,human_sign_off,
-templates}`, `conventions.query_default`, `schema.task.priority` (task-side vocabulary +
-`map_to_tracker`; today's enum is pinned equal to `artifact_utils.SCHEMAS`),
-`schema.review.{extra_scores,extra_rules}`, `pipeline.context_sources` (descriptive; SETUP is still
-hardcoded), `pipeline.dimensions[].{blocking, condition.context_exists, setup}`,
+templates}`, `conventions.query_default`, `schema.task.priority.map_to_tracker` (the `enum`
+beside it feeds `artifact_utils.SCHEMAS` and `validate_batch_input.ALLOWED_PRIORITIES` since
+PR-2b / PR-2a; the map has no consumer), `schema.review.{extra_scores,extra_rules}`,
+`pipeline.context_sources` (descriptive; SETUP is still hardcoded),
+`pipeline.dimensions[].{blocking, condition.context_exists, setup}`,
 `snapshot.{mode,processed_gate}`.
 
 The third data point (R1) is the paper descriptor `tests/fixtures/types/epic/type.yaml` for

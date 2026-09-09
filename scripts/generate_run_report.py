@@ -6,6 +6,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from functools import partial
 
 import yaml
 
@@ -16,8 +17,7 @@ from artifact_utils import (
     find_review_file,
     read_frontmatter,
     resolve_ids,
-    scan_initiative_task_files,
-    scan_task_files,
+    scan_tasks,
 )
 
 DEFAULT_ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
@@ -27,11 +27,6 @@ DEFAULT_ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 # §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
 # overrides land with resolve() in a later PR.
 _TYPES = type_registry.load()
-
-# The forked task scanners, selected by type name. The artifact_utils pair collapses into
-# one generic keyed on dirs.tasks + identity.id_field in a later PR; until then a type
-# without an entry here has no scanner.
-_SCAN_TASKS = {"rfe": scan_task_files, "initiative": scan_initiative_task_files}
 
 
 def _type_config(desc):
@@ -45,7 +40,9 @@ def _type_config(desc):
         # rfe's empty prefix is grandfathered (the report file is named by the run id alone).
         "output_prefix": desc.get("snapshot.report_prefix", ""),
         "extra_entry_fields": list(desc.get("reporting.run_report.extra_entry_fields", [])),
-        "scan_tasks": _SCAN_TASKS.get(desc.name),
+        # artifact_utils.scan_tasks bound to this descriptor (dirs.tasks, validated as
+        # <type>-task, sorted by identity.id_field); called as scan_tasks(artifacts_dir).
+        "scan_tasks": partial(scan_tasks, desc=desc),
         "id_field": desc.id_field,
         # parent_key values that mean "split from"; see split_children_map. The local
         # prefix plus the tracker key prefixes — NOT conventions.parent_key_patterns, which

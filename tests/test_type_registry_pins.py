@@ -51,7 +51,6 @@ import check_autofix_complete  # noqa: E402
 import check_conflicts  # noqa: E402
 import check_review_progress  # noqa: E402
 import compare_review_outputs  # noqa: E402
-import frontmatter  # noqa: E402
 import generate_review_pdf  # noqa: E402
 import generate_run_report  # noqa: E402
 import jira_utils  # noqa: E402
@@ -120,12 +119,13 @@ DEFERRED = [
     (
         178,
         "artifact_utils.find_artifact_file (rfe-only, DEAD)",
-        "no callers; deletion candidate — nothing a pin could protect",
+        "DELETED in PR-2b (no callers: grep over scripts/, tests/, .claude/, eval/ hit only the "
+        "definition); nothing a pin could protect",
     ),
     (
         181,
         "artifact_utils.find_removed_context_file (legacy .md, DEAD)",
-        "no callers; deletion candidate",
+        "DELETED in PR-2b (no callers)",
     ),
     (
         188,
@@ -167,8 +167,9 @@ MIGRATED = [
     (
         (66,),
         "check_conflicts._TYPE_CONFIG",
-        "PR-2a: dirs(bare).originals / id_field / key_prefixes[0]; still pinned: the scanner fork "
-        "selected by type name and the startswith(jira_prefix) predicate (prefix-union later)",
+        "PR-2a: dirs(bare).originals / id_field / key_prefixes[0]; PR-2b: the task scan is "
+        "artifact_utils.scan_tasks(desc) (no scan_fn key); still pinned: the "
+        "startswith(jira_prefix) predicate (prefix-union later)",
     ),
     (
         (67,),
@@ -178,8 +179,8 @@ MIGRATED = [
     (
         (69,),
         "validate_batch_input.ALLOWED_PRIORITIES",
-        "PR-2a: rfe schema.task.priority.enum for both types; row 170 (artifact_utils) stays and "
-        "tests/test_validate_batch_input.py holds the two equal until the schemas derive",
+        "PR-2a: rfe schema.task.priority.enum for both types; the task schemas derive the same "
+        "enum per type since PR-2b (row 170)",
     ),
     (
         (70,),
@@ -189,8 +190,9 @@ MIGRATED = [
     (
         tuple(range(71, 82)),
         "generate_run_report.TYPE_CONFIG / SCORE_FIELDS",
-        "PR-2a: descriptor projection per key; still pinned: the scanner fork selected by type "
-        "name",
+        "PR-2a: descriptor projection per key; PR-2b: scan_tasks = "
+        "functools.partial(artifact_utils.scan_tasks, desc=desc); still pinned: the "
+        "child_parent_prefixes derivation guard (RHAISTRAT- excluded)",
     ),
     (
         (87, 102, 106, 147, 148, 153, 154, 155, 156),
@@ -204,6 +206,16 @@ MIGRATED = [
         "PR-2a: descriptor projection per key; PASS_THRESHOLD stays a pinned constant (Q15)",
     ),
     ((105,), "batch_summary._TYPE_CONFIG", "PR-2a: dirs view of generate_run_report.TYPE_CONFIG"),
+    (
+        tuple(range(125, 141)),
+        "check_review_progress.PHASE_CHECKS / check_id modes",
+        "PR-2b: dirs x poll_prefix x {fetch, assess (shared staging), review, revise, split} + "
+        "pipeline.dimensions[].name (+ the rfe-only create row), identity.id_field in the create "
+        "mode, modes by phase base; still literal and pinned: the create grandfather "
+        "_CREATE_BARRIER_TYPES (row 125 residue here), the initiative row order "
+        "(_LEGACY_ROW_ORDER — CLI choices text; tests/test_check_review_progress.py), the "
+        "_detect_fast allowlist (141) and the choices source form (142)",
+    ),
     (
         (143, 144, 145, 146),
         "verify_phase._TYPE_CONFIG / phase tables / error-stub score tail",
@@ -230,13 +242,40 @@ MIGRATED = [
     ),
     (
         (156,),
-        "collect_children id_field",
-        "PR-2a: identity.id_field; still pinned: the scanner fork",
+        "collect_children id_field / scan",
+        "PR-2a: identity.id_field; PR-2b: artifact_utils.scan_tasks(desc) — the type-name "
+        "if/else is gone",
     ),
     (
         (157,),
         "check_right_sized._TYPE_CONFIG / resplit threshold",
         "PR-2a: dirs.reviews + pipeline.resplit; below == 2 stays a descriptor guard (Q3)",
+    ),
+    (
+        (162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 174, 175),
+        "artifact_utils.SCHEMAS",
+        "PR-2b: _task_schema / _review_schema over _TYPES — keys names() x {task, review}; "
+        "identity.id_field (the field's name), local_id_pattern | key_prefixes + digits (its "
+        "grammar), identity.local_id_pattern (the four local_id sites), "
+        "conventions.parent_key_patterns, schema.task.priority.enum, schema.task.extra_fields "
+        "(rfe size), schema.review.score_fields (scores / before_scores), "
+        "schema.review.extra_fields (initiative alignment); byte-pinned by "
+        "tests/test_schemas_golden.py; still pinned: the shared status / recommendation / "
+        "feasibility vocabularies (172, 173), the alignment cross-field residue (175) and the "
+        "frontmatter choices source form (162)",
+    ),
+    (
+        (179, 180, 182, 183, 184, 185, 186, 187),
+        "artifact_utils helpers / frontmatter._detect_schema_type",
+        "PR-2b: find_artifact_file_including_archived reads the rfe descriptor; "
+        "find_removed_context_yaml / find_review_file route via registry.detect(id) or rfe; "
+        "scan_tasks / scan_reviews / rename_to_tracker_key / parse_child take a Descriptor (the "
+        "per-type names are wrappers); rebuild_index reads the rfe id_field; "
+        "frontmatter._SCHEMA_BY_DIR from dirs; still literal and pinned: _is_companion_file "
+        "(177), the rfes.md index contract (186 residue) and — name-keyed until PR-3 — the "
+        "rename ValueError label, rfe's slug-tolerant review lookup and parse_child's rfe "
+        "markdown fallbacks (184, 185 residue; tests/test_artifact_utils.py holds their "
+        "behaviour)",
     ),
 ]
 
@@ -350,8 +389,8 @@ def fm(fields, body="Body\n"):
 
 
 class TestRegistryShape:
-    # rows: 25, 46, 53, 60, 124, 142, 159, 160, 161, 162 (62, 66, 70, 87, 102, 106, 147, 148,
-    # 153-156 MIGRATED)
+    # rows: 25, 46, 53, 60, 124, 142, 159, 160, 161 + the source form of 162 (62, 66, 70, 87,
+    # 102, 106, 147, 148, 153-156, 162 MIGRATED)
 
     def test_shipped_types_in_argparse_order(self):
         assert TYPES == ["rfe", "initiative"]
@@ -373,18 +412,10 @@ class TestRegistryShape:
     def test_every_type_keyed_registry_has_exactly_the_shipped_types(self, name, live):
         pin("registry names()", name, set(TYPES), set(live))
 
-    def test_schemas_keys_are_types_times_task_review(self):
-        # scripts/artifact_utils.py:61,:108,:190,:228 — key order == types x {task, review}
-        expected = [f"{t}-{k}" for t in TYPES for k in ("task", "review")]
-        pin(
-            "names() x {task,review}",
-            "artifact_utils.py:61-228",
-            expected,
-            list(artifact_utils.SCHEMAS),
-        )
-
     def test_frontmatter_schema_choices_are_the_schema_keys(self):
-        # scripts/frontmatter.py:229-231,:237-242,:254-259
+        # scripts/frontmatter.py:229-231,:237-242,:254-259 — row 162's SCHEMAS keys are MIGRATED
+        # (a comprehension over _TYPES; tests/test_schemas_golden.py holds the key order); the
+        # source form of the choices is pinned so a re-introduced literal list is a visible change
         for got in choices("scripts/frontmatter.py", "schema_type") + choices(
             "scripts/frontmatter.py", "--schema-type"
         ):
@@ -1088,8 +1119,8 @@ class TestJqlAndJiraUtils:
 
 
 class TestSmallRegistries:
-    # rows: 65, 66 (residue), 68, 107, 154-161 (residues) — 66, 67, 69, 70, 105, 148-157
-    # MIGRATED as listed above
+    # rows: 65, 66 (residue), 68, 107, 154, 155, 157-161 (residues) — 66, 67, 69, 70, 105,
+    # 148-157, 170 MIGRATED as listed above
 
     def test_fetch_issue_is_rfe_only(self):
         # rows: 65 — fetch_issue.py:59-60,:71,:83,:98,:101,:122,:224 (no --type)
@@ -1101,51 +1132,28 @@ class TestSmallRegistries:
         assert ('f"{issue_key}-comments.md"' in source) is rfe.d["companions"]["comments"]
         assert "--type" not in source
 
-    def test_check_conflicts_scan_fork_and_write_prefix_predicate(self, ctx):
-        # rows: 66 — the dict is MIGRATED; still literal in check_conflicts.py: the forked
-        # scanner pair selected by type name (_SCAN_FNS, collapses with artifact_utils' pair) and
-        # the startswith(jira_prefix) predicate — key_prefixes[0] only, prefix-union in a later
+    def test_check_conflicts_write_prefix_predicate(self, ctx):
+        # rows: 66 — the dict is MIGRATED and the task scan is artifact_utils.scan_tasks(desc)
+        # since PR-2b (no scan_fn entry); still literal in check_conflicts.py: the
+        # startswith(jira_prefix) predicate — key_prefixes[0] only, prefix-union in a later
         # PR-2 step
-        tc = check_conflicts._TYPE_CONFIG[ctx.t]
-        scan = (
-            artifact_utils.scan_initiative_task_files
-            if ctx.id_field == "initiative_id"
-            else artifact_utils.scan_task_files
-        )
-        assert tc["scan_fn"] is scan
+        assert "scan_fn" not in check_conflicts._TYPE_CONFIG[ctx.t]
         assert 'item_id.startswith(tc["jira_prefix"])' in read("scripts/check_conflicts.py")
 
     def test_batch_parent_key_pattern_known_divergence(self):
-        # rows: 68 — Q14: validate_batch_input.py:36 omits INIT- while artifact_utils.py:219 accepts
-        # it; the descriptor carries the wider list; reconciled in PR-3
+        # rows: 68 — Q14: validate_batch_input.py:36 omits INIT- while the initiative task schema
+        # (derived from conventions.parent_key_patterns since PR-2b, row 169 MIGRATED) accepts
+        # it; reconciled in PR-3
         init = _ctx("initiative")
         registry_pattern = "^(" + "|".join(init.conv["parent_key_patterns"]) + ")$"
         assert validate_batch_input.PARENT_KEY_PATTERN.pattern == r"^(RHAISTRAT-\d+|RHOAIENG-\d+)$"
         assert validate_batch_input.PARENT_KEY_PATTERN.pattern != registry_pattern
-        pin(
-            "conventions.parent_key_patterns",
-            "artifact_utils.py:219",
-            registry_pattern,
-            artifact_utils.SCHEMAS["initiative-task"]["parent_key"]["pattern"],
-        )
         local_parent = f"{init.lp}001"
         assert validate_batch_input.PARENT_KEY_PATTERN.match(local_parent) is None
         assert re.match(registry_pattern, local_parent)
-
-    def test_priority_enum_in_the_task_schemas(self, ctx):
-        # rows: 170 — artifact_utils.py:83,:209; descriptor home schema.task.priority (PR1-14,
-        # map_to_tracker == {}). Row 69 (validate_batch_input.ALLOWED_PRIORITIES) is MIGRATED: it
-        # reads the rfe descriptor, and tests/test_validate_batch_input.py holds it equal to both
-        # task schemas until they derive too.
-        prio = ctx.schema["task"]["priority"]
-        pin(
-            "schema.task.priority.enum",
-            f"artifact_utils.SCHEMAS[{ctx.task_schema!r}]",
-            prio["enum"],
-            artifact_utils.SCHEMAS[ctx.task_schema]["priority"]["enum"],
+        assert re.match(
+            artifact_utils.SCHEMAS["initiative-task"]["parent_key"]["pattern"], local_parent
         )
-        assert prio["map_to_tracker"] == {}
-        assert prio["enum"] == ["Blocker", "Critical", "Major", "Normal", "Minor", "Undefined"]
 
     def test_batch_summary_literals(self, ctx):
         # rows: 107 — batch_summary.py:87,:97-111 literals (row 105's dirs dict is MIGRATED)
@@ -1162,6 +1170,7 @@ class TestSmallRegistries:
         # assess staging dir prep_assess writes and verify_phase / PHASE_CHECKS read (design §10)
         assert prep_assess.SINGLE_DIR == ASSESS_STAGING
         assert verify_phase.ASSESS_STAGING == ASSESS_STAGING
+        assert check_review_progress.ASSESS_STAGING == ASSESS_STAGING
 
     def test_error_collect_removed_context_companion(self, ctx):
         # rows: 154 — error_collect.py:216 companion (companions.removed_context); the dirs dict
@@ -1177,15 +1186,6 @@ class TestSmallRegistries:
         assert "status_path = f\"{tc['reviews_dir']}/{pid}-split-status.yaml\"" in read(
             "scripts/split_collect.py"
         )
-
-    def test_collect_children_scan_fork(self):
-        # rows: 156 — collect_children.py:34-39: id_field is MIGRATED; the forked scanner pair is
-        # still selected by type name (collapses with artifact_utils' pair)
-        assert re.search(
-            r'if args\.type == "initiative":\s+tasks = scan_initiative_task_files\(artifacts_dir\)'
-            r"\s+else:\s+tasks = scan_task_files\(artifacts_dir\)",
-            read("scripts/collect_children.py"),
-        ), "collect_children.py:34-39"
 
     def test_resplit_threshold_is_two_for_both_types(self, ctx):
         # rows: 157 — check_right_sized.py reads pipeline.resplit since PR-2a (MIGRATED), which
@@ -1250,18 +1250,12 @@ class TestSmallRegistries:
 class TestRunReportConfig:
     # rows: 82-86 (71-81, 87 MIGRATED)
 
-    def test_scan_tasks_fork_and_child_parent_prefixes_guard(self, ctx):
-        # rows: 71-80 are MIGRATED; still literal: the forked scanner pair selected by type name
-        # (generate_run_report.py _SCAN_TASKS — collapses with artifact_utils' pair), plus the
-        # derivation guard that child_parent_prefixes is (local_prefix, *key_prefixes) and NOT
-        # conventions.parent_key_patterns (RHAISTRAT- must stay excluded, :104)
+    def test_child_parent_prefixes_guard(self, ctx):
+        # rows: 71-81 are MIGRATED (the scanner is artifact_utils.scan_tasks bound to the
+        # descriptor since PR-2b); still pinned: the derivation guard that child_parent_prefixes
+        # is (local_prefix, *key_prefixes) and NOT conventions.parent_key_patterns (RHAISTRAT-
+        # must stay excluded, :104)
         g = generate_run_report.TYPE_CONFIG[ctx.t]
-        scan = (
-            artifact_utils.scan_task_files
-            if ctx.id_field == "rfe_id"
-            else artifact_utils.scan_initiative_task_files
-        )
-        assert g["scan_tasks"] is scan, "generate_run_report.py _SCAN_TASKS forked pair"
         assert "RHAISTRAT-" not in g["child_parent_prefixes"]
 
     def test_predicates_and_rfe_only_keys_in_source(self, ctx):
@@ -1641,77 +1635,20 @@ def _expected_phase_rows(ctx):
 
 
 class TestPhaseChecks:
-    # rows: 125-142
+    # rows: 125 (residue), 141, 142 (125-140 MIGRATED: PHASE_CHECKS and the check_id modes derive
+    # from dirs x poll_prefix x pipeline.dimensions[].name since PR-2b;
+    # tests/test_check_review_progress.py::TestDerivedFromRegistry holds the projection, today's
+    # 14-key order and the four modes)
 
-    def test_whole_table_is_the_union_over_types(self):
-        # rows: 125 — check_review_progress.py:18-36; 14 rows; no initiative-create (#148 rfe-only)
-        expected = {}
-        for t in TYPES:
-            expected.update(_expected_phase_rows(_ctx(t)))
-        live = {k: f("X") for k, f in check_review_progress.PHASE_CHECKS.items()}
-        pin(
-            "dirs x poll_prefix x dimension names (+ rfe create)",
-            "check_review_progress.py:18-36",
-            expected,
-            live,
-        )
-        assert len(check_review_progress.PHASE_CHECKS) == 14
+    def test_create_barrier_is_the_rfe_only_grandfather(self):
+        # rows: 125 (residue) — check_review_progress._CREATE_BARRIER_TYPES: the PR #148 create
+        # barrier is still a name-keyed literal (no descriptor fact says which pipeline polls one),
+        # so PR-5's generic speedrun body inheriting it for every type is a visible pin change
+        # here, not a silent descriptor edit
+        assert check_review_progress._CREATE_BARRIER_TYPES == ("rfe",)
+        assert "create" in check_review_progress.PHASE_CHECKS
         assert "initiative-create" not in check_review_progress.PHASE_CHECKS
-
-    def test_each_row_for_the_type(self, ctx):
-        # rows: 126-139 — one pin per PHASE_CHECKS key derived for this type
-        for key, path in _expected_phase_rows(ctx).items():
-            pin(
-                f"PHASE_CHECKS[{key!r}]",
-                "check_review_progress.py:18-36",
-                path,
-                check_review_progress.PHASE_CHECKS[key]("X"),
-            )
-
-    def test_check_modes(self, ctx, tmp_path, monkeypatch):
-        # rows: 127, 140 — check_review_progress.py:39-84: FOUR modes (exists, frontmatter_valid,
-        # score_present, revised_or_split); literal tuples :61/:72 — a third type falls through to
-        # exists
-        monkeypatch.chdir(tmp_path)
-        rows = _expected_phase_rows(ctx)
-        check = check_review_progress.check_id
-        for key in rows:
-            assert check(key, "X") == "pending", f"{key}: missing output must be pending"
-        review = Path(rows[f"{ctx.pp}review"])
-        write(review, fm({ctx.id_field: "X"}))
-        assert check(f"{ctx.pp}review", "X") == "pending"  # score_present: no score yet
-        write(review, fm({ctx.id_field: "X", "score": 7}))
-        assert check(f"{ctx.pp}review", "X") == "completed"
-        write(review, fm({ctx.id_field: "X", "score": 0, "error": "assess_failed"}))
-        assert check(f"{ctx.pp}review", "X") == "error"
-        assert check(f"{ctx.pp}revise", "X") == "pending"  # revised_or_split
-        write(review, fm({ctx.id_field: "X", "auto_revised": True}))
-        assert check(f"{ctx.pp}revise", "X") == "completed"
-        write(review, fm({ctx.id_field: "X", "recommendation": "split"}))
-        assert check(f"{ctx.pp}revise", "X") == "completed"
-        for key in (
-            f"{ctx.pp}fetch",
-            f"{ctx.pp}assess",
-            f"{ctx.pp}split",
-            *(f"{ctx.pp}{d['name']}" for d in ctx.pipe["dimensions"]),
-        ):
-            write(rows[key], "anything\n")
-            assert check(key, "X") == "completed", f"{key}: exists mode"
-        if ctx.t == "rfe":
-            task = Path(rows["create"])
-            write(task, "# no frontmatter yet\n")
-            assert check("create", "X") == "pending"
-            write(task, fm({ctx.id_field: "Y"}))
-            assert check("create", "X") == "pending"  # frontmatter_valid: id must match (:58)
-            write(task, fm({ctx.id_field: "X"}))
-            assert check("create", "X") == "completed"
-            assert 'data.get("rfe_id") != rfe_id' in read("scripts/check_review_progress.py")
-        assert 'if phase in ("review", "initiative-review"):' in read(
-            "scripts/check_review_progress.py"
-        )
-        assert 'if phase in ("revise", "initiative-revise"):' in read(
-            "scripts/check_review_progress.py"
-        )
+        assert len(check_review_progress.PHASE_CHECKS) == 14
 
     def test_detect_fast_config_allowlist(self):
         # rows: 141 — check_review_progress.py:134-141; each ==
@@ -1742,13 +1679,14 @@ class TestPhaseChecks:
 
 
 class TestVerifyPhase:
-    # rows: 146 (143-145, 147 MIGRATED — tests/test_verify_phase.py::TestAgreesWithProgressChecker
-    # keeps the derived phase table equal to the still-literal check_review_progress.PHASE_CHECKS)
+    # rows: 146 (143-145, 147 MIGRATED — both phase tables derive from the same descriptors since
+    # PR-2b; tests/test_verify_phase.py::TestAgreesWithProgressChecker holds them equal per type)
 
     def test_error_stub_command_and_schema_acceptance(self, ctx, tmp_path, monkeypatch):
         # rows: 146 — verify_phase.py:105-127; the score tail is registry-derived since PR-2a;
-        # pinned here: the fixed stub vocabulary, and that the (still literal) review schema in
-        # artifact_utils accepts the stub shape (validate_types gate 1 restates this; design §3.3)
+        # pinned here: the fixed stub vocabulary, and that the review schema artifact_utils
+        # derives from the same descriptor accepts the stub shape (validate_types gate 1 restates
+        # this; design §3.3)
         monkeypatch.chdir(tmp_path)
         captured = []
         real_run = subprocess.run  # verify_phase shares the subprocess module object
@@ -1789,128 +1727,18 @@ class TestVerifyPhase:
         assert ids.read_text() == ""
 
 
-# ── artifact_utils.SCHEMAS and helpers ────────────────────────────────────────────────────────
-
-# Shared base fields of every task / review schema (artifact_utils.py:61-107 / :108-189, plus the
-# PR-1 additions `type`/`tracker_ref` — Q4, no default). Per-type fields are schema.*.extra_fields.
-BASE_TASK_KEYS = {
-    "local_id",
-    "type",
-    "tracker_ref",
-    "title",
-    "priority",
-    "status",
-    "parent_key",
-    "original_labels",
-}
-BASE_REVIEW_KEYS = {
-    "local_id",
-    "type",
-    "tracker_ref",
-    "score",
-    "pass",
-    "recommendation",
-    "feasibility",
-    "auto_revised",
-    "needs_attention",
-    "scores",
-    "error",
-    "before_score",
-    "needs_attention_reason",
-    "before_scores",
-}
-
-
-def _id_pattern(ctx):
-    # artifact_utils.py:65,:194 — do NOT re.escape the prefix (the live literal has a bare dash)
-    return (
-        "^("
-        + "|".join(
-            [ctx.ident["local_id_pattern"].strip("^$")]
-            + [kp + r"\d+" for kp in ctx.jira["key_prefixes"]]
-        )
-        + ")$"
-    )
+# ── artifact_utils.SCHEMAS and helpers (residues) ─────────────────────────────────────────────
 
 
 class TestArtifactSchemas:
-    # rows: 162-175
-
-    def test_id_patterns(self, ctx):
-        # rows: 163, 164 — artifact_utils.py:65,:112,:194,:232
-        task, review = (
-            artifact_utils.SCHEMAS[ctx.task_schema],
-            artifact_utils.SCHEMAS[ctx.review_schema],
-        )
-        pin(
-            "local_id_pattern | key_prefixes",
-            "artifact_utils.py:65,:194",
-            _id_pattern(ctx),
-            task[ctx.id_field]["pattern"],
-        )
-        pin(
-            "local_id_pattern | key_prefixes",
-            "artifact_utils.py:112,:232",
-            _id_pattern(ctx),
-            review[ctx.id_field]["pattern"],
-        )
-        for ident in ctx.sample_ids:
-            assert re.fullmatch(task[ctx.id_field]["pattern"], ident), ident
-
-    def test_local_id_patterns_four_sites(self, ctx):
-        # rows: 165-168 — artifact_utils.py:73,:120,:199,:237 (design §10 item 1); PR1-16 composite
-        # id
-        pattern = ctx.ident["local_id_pattern"]
-        pin(
-            "identity.local_id_pattern",
-            "artifact_utils.py:73,:199",
-            pattern,
-            artifact_utils.SCHEMAS[ctx.task_schema]["local_id"]["pattern"],
-        )
-        pin(
-            "identity.local_id_pattern",
-            "artifact_utils.py:120,:237",
-            pattern,
-            artifact_utils.SCHEMAS[ctx.review_schema]["local_id"]["pattern"],
-        )
-        assert pattern.count("\\") == 1, "YAML must hold ONE backslash (the design doubled it)"
-        assert re.fullmatch(pattern, "RHAISTRAT-1234-E001") is None, (
-            "PR1-16: composite sibling id must not match"
-        )
-        assert re.fullmatch(pattern, f"{ctx.lp}001")
-
-    def test_parent_key_pattern(self, ctx):
-        # rows: 169 — artifact_utils.py:99,:219 (review schemas have no parent_key)
-        pin(
-            "conventions.parent_key_patterns",
-            "artifact_utils.py:99,:219",
-            "^(" + "|".join(ctx.conv["parent_key_patterns"]) + ")$",
-            artifact_utils.SCHEMAS[ctx.task_schema]["parent_key"]["pattern"],
-        )
-        assert "parent_key" not in artifact_utils.SCHEMAS[ctx.review_schema]
-
-    def test_task_extra_fields(self, ctx):
-        # rows: 171 — artifact_utils.py:85-90 (rfe size); initiative has none
-        task = artifact_utils.SCHEMAS[ctx.task_schema]
-        live_extra = {k: v for k, v in task.items() if k not in BASE_TASK_KEYS | {ctx.id_field}}
-        pin(
-            "schema.task.extra_fields",
-            "artifact_utils.py:61-107,:190-227",
-            ctx.schema["task"]["extra_fields"],
-            live_extra,
-        )
-        if ctx.t == "rfe":
-            assert live_extra["size"] == {
-                "type": "string",
-                "required": False,
-                "enum": ["S", "M", "L", "XL"],
-                "default": None,
-            }
-        assert ("size" in task) is (ctx.t == "rfe")
+    # rows: 172, 173, 175 (residue) (162-171, 174, 175 MIGRATED: SCHEMAS derives from the
+    # descriptors and tests/test_schemas_golden.py pins the derived dicts byte for byte)
 
     def test_shared_enums(self, ctx):
-        # rows: 172, 173 — artifact_utils.py:94,:214 status; :134,:139,:251,:256
-        # recommendation/feasibility
+        # rows: 172, 173 — artifact_utils._STATUS_ENUM / _RECOMMENDATION_ENUM / _FEASIBILITY_ENUM:
+        # the task/review vocabularies shared by every type stay module constants (UNMAPPED);
+        # the feasibility enum is deliberately NOT derived from conventions.labels.feasibility,
+        # so the label map's key order is pinned equal to it
         task, review = (
             artifact_utils.SCHEMAS[ctx.task_schema],
             artifact_utils.SCHEMAS[ctx.review_schema],
@@ -1927,177 +1755,48 @@ class TestArtifactSchemas:
         ]
         pin(
             "list(conventions.labels.feasibility)",
-            "artifact_utils.py:139,:256",
+            "artifact_utils._FEASIBILITY_ENUM",
             list(ctx.labels["feasibility"]),
             review["feasibility"]["enum"],
         )
 
-    def test_scores_and_before_scores_fields(self, ctx):
-        # rows: 174 — artifact_utils.py:154-160,:181-187,:271-277,:298-304 (restated 4x)
+    def test_alignment_vocabulary_agrees_across_descriptor_fields(self, ctx):
+        # rows: 175 (residue) — the review schema's alignment enum (schema.review.extra_fields,
+        # derived) must admit every conventions.labels.alignment key (submit's alignment_labels)
+        # and the dimension's skip_stub.result (what pipeline_state._write_poll_stub writes when
+        # there is no RHAISTRAT parent); validate_types does not cross-check these fields
         review = artifact_utils.SCHEMAS[ctx.review_schema]
-        for key in ("scores", "before_scores"):
-            pin(
-                "schema.review.score_fields",
-                f"artifact_utils {ctx.review_schema}.{key}.fields",
-                ctx.score_fields,
-                list(review[key]["fields"]),
-            )
-            assert all(
-                spec == {"type": "int", "required": True} for spec in review[key]["fields"].values()
-            )
-
-    def test_review_extra_fields(self, ctx):
-        # rows: 175 — artifact_utils.py:306-313 initiative alignment (default is the STRING
-        # not_assessed)
-        review = artifact_utils.SCHEMAS[ctx.review_schema]
-        live_extra = {k: v for k, v in review.items() if k not in BASE_REVIEW_KEYS | {ctx.id_field}}
-        pin(
-            "schema.review.extra_fields",
-            "artifact_utils.py:108-189,:228-315",
-            ctx.schema["review"]["extra_fields"],
-            live_extra,
-        )
-        if "alignment" in ctx.labels:
-            enum = live_extra["alignment"]["enum"]
-            assert live_extra["alignment"] == {
-                "type": "string",
-                "required": False,
-                "enum": ["strong", "partial", "weak", "not_assessed"],
-                "default": "not_assessed",
-            }
-            assert set(ctx.labels["alignment"]) <= set(enum)
-            assert ctx.dims["alignment"]["skip_stub"]["result"] in enum
-            assert ctx.schema["review"]["extra_fields"]["alignment"]["default"] == "not_assessed"
+        if "alignment" not in ctx.labels:
+            assert "alignment" not in review
+            return
+        enum = review["alignment"]["enum"]
+        assert set(ctx.labels["alignment"]) <= set(enum)
+        assert ctx.dims["alignment"]["skip_stub"]["result"] in enum
+        assert review["alignment"]["default"] in enum
 
 
 class TestArtifactHelpers:
-    # rows: 177, 179, 180, 182, 183, 184, 185, 186, 187
+    # rows: 177, 184, 185, 186 (residue) (179, 180, 182-187 MIGRATED: the generics take a
+    # Descriptor and the lookups route via registry.detect(); tests/test_artifact_utils.py and
+    # tests/test_frontmatter.py hold the projections)
 
     def test_companion_suffixes_are_type_agnostic(self, ctx):
-        # rows: 177 — artifact_utils.py:727-731; companions.comments=false (initiative) must NOT
-        # remove
-        # -comments.md from the predicate nor from rename_initiative_to_jira_key (:1079-1080)
+        # rows: 177 — artifact_utils._is_companion_file; companions.comments=false (initiative)
+        # must NOT remove -comments.md from the predicate nor from the rename generic's suffix
+        # map (rename_to_tracker_key renames a -comments.md for every type)
         for suffix in ("-comments.md", "-removed-context.md", "-removed-context.yaml"):
             assert artifact_utils._is_companion_file(f"{ctx.sample_ids[0]}{suffix}")
         assert not artifact_utils._is_companion_file(f"{ctx.sample_ids[0]}.md")
-        rename = (
-            artifact_utils.rename_initiative_to_jira_key
-            if ctx.t == "initiative"
-            else artifact_utils.rename_to_jira_key
+        assert 'filename.endswith("-comments.md")' in inspect.getsource(
+            artifact_utils.rename_to_tracker_key
         )
-        assert 'filename.endswith("-comments.md")' in inspect.getsource(rename)
         assert ctx.d["companions"]["removed_context"] is True
 
-    def test_archived_lookup_wrapper_passes_the_rfe_triple(self, monkeypatch):
-        # rows: 179 — artifact_utils.py:783-812 (:811 wrapper); generate_review_pdf.py:401-406
-        # passes
-        # the same triple from REPORT_CONFIG
-        rfe = _ctx("rfe")
-        seen = []
-        monkeypatch.setattr(
-            artifact_utils, "find_task_file_including_archived", lambda *a: seen.append(a)
-        )
-        artifact_utils.find_artifact_file_including_archived("a", "RFE-1")
-        pin(
-            "(dirs.tasks bare, key_prefixes[0], local_prefix)",
-            "artifact_utils.py:811",
-            ("a", "RFE-1", rfe.bare["tasks"], rfe.wp, rfe.lp),
-            seen[0],
-        )
-        assert re.search(
-            r'config\["tasks_dir"\],\s+config\["jira_prefix"\],\s+config\["local_prefix"\],',
-            read("scripts/generate_review_pdf.py"),
-        )
-
-    def test_removed_context_and_review_lookups(self, ctx, tmp_path):
-        # rows: 180, 182 — artifact_utils.py:815-835 (sniff dispatcher), :881-899 (find_review_file)
-        for ident in ctx.sample_ids:
-            rc = write(
-                tmp_path / ctx.bare["tasks"] / f"{ident}-removed-context.yaml", "blocks: []\n"
-            )
-            pin(
-                "dirs.tasks (bare)",
-                "artifact_utils.py:831-835",
-                str(rc),
-                artifact_utils.find_removed_context_yaml(str(tmp_path), ident),
-            )
-            review = write(
-                tmp_path / ctx.bare["reviews"] / f"{ident}-review.md", fm({ctx.id_field: ident})
-            )
-            pin(
-                "dirs.reviews (bare)",
-                "artifact_utils.py:886",
-                str(review),
-                artifact_utils.find_review_file(str(tmp_path), ident),
-            )
-
-    def test_scan_pairs(self, ctx, tmp_path):
-        # rows: 183 — artifact_utils.py:902-981 (bodies byte-identical apart from three literals)
-        scan = (
-            artifact_utils.scan_task_files
-            if ctx.id_field == "rfe_id"
-            else artifact_utils.scan_initiative_task_files
-        )
-        b, a = ctx.sample_ids[1], ctx.sample_ids[0]
-        for ident in (b, a):
-            write(
-                tmp_path / ctx.bare["tasks"] / f"{ident}.md",
-                fm({ctx.id_field: ident, "title": "T", "priority": "Major", "status": "Ready"}),
-            )
-        write(tmp_path / ctx.bare["tasks"] / f"{a}-comments.md", "No comments found.\n")
-        found = scan(str(tmp_path))
-        pin(
-            "dirs.tasks (bare) sorted by id_field",
-            "artifact_utils.py:909-981",
-            sorted([a, b]),
-            [d[ctx.id_field] for _, d in found],
-        )
-        assert all(os.path.dirname(p) == str(tmp_path / ctx.bare["tasks"]) for p, _ in found)
-        source = inspect.getsource(scan)
-        assert (
-            f'"{ctx.bare["tasks"]}"' in source
-            and f'"{ctx.task_schema}"' in source
-            and f'"{ctx.id_field}"' in source
-        )
-        rfe = _ctx("rfe")
-        review_src = inspect.getsource(artifact_utils.scan_review_files)
-        assert (
-            f'"{rfe.bare["reviews"]}"' in review_src and '"rfe-review"' in review_src
-        )  # rfe-only, unforked
-
-    def test_rename_guards_and_updates(self, ctx):
-        # rows: 184 — artifact_utils.py:987-1049 / :1052-1107 (guards :1001,:1003 / :1058,:1060)
-        rename = (
-            artifact_utils.rename_initiative_to_jira_key
-            if ctx.t == "initiative"
-            else artifact_utils.rename_to_jira_key
-        )
-        source = inspect.getsource(rename)
-        guards = [p for p, _ in re.findall(r're\.fullmatch\(r"([^"]+)", (\w+)\)', source)]
-        pin(
-            "local_id_pattern (unanchored) + key_prefixes[0]\\d+",
-            "artifact_utils.py:1001-1003,:1058-1060",
-            [ctx.ident["local_id_pattern"].strip("^$"), ctx.wp + r"\d+"],
-            guards,
-        )
-        assert f'os.path.join(artifacts_dir, "{ctx.bare["tasks"]}")' in source
-        assert f'os.path.join(artifacts_dir, "{ctx.bare["reviews"]}")' in source
-        assert f'{{"{ctx.id_field}": jira_key, "status": "Submitted", "local_id": ' in source
-        assert f'{{"{ctx.id_field}": jira_key, "local_id": ' in source
-        assert f'"{ctx.task_schema}"' in source and f'"{ctx.review_schema}"' in source
-
-    def test_parse_child_title_fallback_is_rfe_only(self, ctx):
-        # rows: 185 — artifact_utils.py:1176-1225 (:1196 the single non-guard prefix literal)
-        rfe_src = inspect.getsource(artifact_utils.parse_child_artifact)
-        assert 'r"^#\\s+%s\\d+:\\s+(.+)$"' % _ctx("rfe").lp in rfe_src
-        assert "re.match" not in inspect.getsource(artifact_utils.parse_child_initiative)
-        assert "Normal" in ctx.schema["task"]["priority"]["enum"]
-        for fn in (artifact_utils.parse_child_artifact, artifact_utils.parse_child_initiative):
-            assert '"Normal"' in inspect.getsource(fn)
-
     def test_rebuild_index_is_the_rfe_index(self):
-        # rows: 186 — artifact_utils.py:1113-1170; runs iff index.enabled (callers pinned via
-        # submit.has_index / split_submit.do_rebuild_index)
+        # rows: 186 (residue) — rebuild_index runs iff index.enabled (callers pinned via
+        # submit.has_index / split_submit.do_rebuild_index) and reads the rfe id_field from the
+        # registry since PR-2b; the index contract itself (file name, heading, columns) has no
+        # descriptor field and stays literal
         rfe = _ctx("rfe")
         source = inspect.getsource(artifact_utils.rebuild_index)
         assert rfe.d["index"]["enabled"] and not _ctx("initiative").d["index"]["enabled"]
@@ -2105,28 +1804,27 @@ class TestArtifactHelpers:
             '"rfes.md"',
             '"# RFE Summary"',
             '"| ID | Title | Priority | Size | Score | Rec | Status |"',
-            f'"{rfe.id_field}"',
         ):
             assert literal in source, literal
         assert "scan_task_files(" in source and "scan_review_files(" in source
         assert "Size" in source and "size" in rfe.schema["task"]["extra_fields"]
 
-    def test_frontmatter_detects_schema_from_dirs(self, ctx):
-        # rows: 187 — frontmatter.py:76-86 path-substring table (reviews tested before tasks per
-        # type)
-        pin(
-            "dirs.tasks -> f'{type}-task'",
-            "frontmatter.py:76-86",
-            ctx.task_schema,
-            frontmatter._detect_schema_type(f"{ctx.dirs['tasks']}/X.md"),
-        )
-        pin(
-            "dirs.reviews -> f'{type}-review'",
-            "frontmatter.py:76-86",
-            ctx.review_schema,
-            frontmatter._detect_schema_type(f"{ctx.dirs['reviews']}/X-review.md"),
-        )
-        assert frontmatter._detect_schema_type("artifacts/elsewhere/X.md") is None
+    def test_name_keyed_residues_until_pr3(self):
+        # rows: 184, 185 (residue) — three artifact_utils projections are keyed on the type NAME
+        # because no descriptor fact expresses them (the same kind of grandfather as
+        # check_review_progress._CREATE_BARRIER_TYPES): the rename ValueError label, rfe's
+        # slug-tolerant review lookup and parse_child's rfe markdown fallbacks. PR-3's
+        # resolution ladder generalises or retires them, so lifting one is a visible pin change
+        # here, not a silent edit; tests/test_artifact_utils.py holds their behaviour
+        rfe, init = REG.get("rfe"), REG.get("initiative")
+        assert artifact_utils._rename_error_label(rfe) == "rename_to_jira_key"
+        assert artifact_utils._rename_error_label(init) == "rename_initiative_to_jira_key"
+        for fn in (
+            artifact_utils._rename_error_label,
+            artifact_utils._review_to_rename,
+            artifact_utils.parse_child,
+        ):
+            assert 'desc.name == "rfe"' in inspect.getsource(fn), fn.__name__
 
 
 # ── skill layer (grep pins until PR-5 lifts the bodies) ───────────────────────────────────────
