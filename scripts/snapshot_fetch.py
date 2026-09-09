@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from jira_utils import (
     adf_to_markdown,
     api_call_with_retry,
@@ -53,18 +54,27 @@ from jira_utils import (
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SNAPSHOT_DIR = os.path.join(SCRIPT_DIR, "..", "artifacts", "auto-fix-runs")
 
+_TYPES = type_registry.load()
+
+# Per-type snapshot facts, projected from the type descriptors (types/<type>/type.yaml,
+# design work-item-types-unified.md §10 item 2): the hard-filter labels are
+# conventions.labels.{ignore,split_quarantine} and the snapshot file prefix is
+# snapshot.prefix. Same keys, same order and same values as the literal table this
+# replaces, so the JQL wrapper and the snapshot file names are unchanged byte for byte.
 SNAPSHOT_CONFIG = {
-    "rfe": {
-        "ignore_label": "rfe-creator-ignore",
-        "quarantine_label": "rfe-creator-split-quarantine",
-        "snapshot_prefix": "issue-snapshot-",
-    },
-    "initiative": {
-        "ignore_label": "initiative-ignore",
-        "quarantine_label": "initiative-split-quarantine",
-        "snapshot_prefix": "initiative-snapshot-",
-    },
+    name: {
+        "ignore_label": _TYPES.get(name).get("conventions.labels.ignore"),
+        "quarantine_label": _TYPES.get(name).get("conventions.labels.split_quarantine"),
+        "snapshot_prefix": _TYPES.get(name).get("snapshot.prefix"),
+    }
+    for name in _TYPES.names()
 }
+
+# The rfe snapshot prefix ("issue-snapshot-") doubles as the default `prefix=` of the
+# reader and writer helpers below: submit.py relies on that default for rfe (its config
+# holds "" as a sentinel for it), and a third type must always pass prefix= explicitly.
+# Bound once at import, so the signatures' defaults keep the value they always had.
+_RFE_SNAPSHOT_PREFIX = _TYPES.get("rfe").get("snapshot.prefix")
 
 
 def normalize_for_hash(text):
@@ -142,7 +152,7 @@ def fetch_all_issues(server, user, token, jql):
     return issues
 
 
-def find_previous_snapshot(snapshot_dir=None, prefix="issue-snapshot-"):
+def find_previous_snapshot(snapshot_dir=None, prefix=_RFE_SNAPSHOT_PREFIX):
     """Find the most recent valid promoted snapshot.
 
     Walks backwards through <prefix>*.yaml files sorted by name
@@ -163,7 +173,7 @@ def find_previous_snapshot(snapshot_dir=None, prefix="issue-snapshot-"):
     return None, None
 
 
-def load_snapshot_from_dir(data_dir, prefix="issue-snapshot-"):
+def load_snapshot_from_dir(data_dir, prefix=_RFE_SNAPSHOT_PREFIX):
     """Find the previous snapshot in a local data directory.
 
     Follows the 'latest' symlink to find the most recent run, then
@@ -281,7 +291,7 @@ def write_id_file(path, ids):
 
 
 def update_snapshot_hashes(
-    hashes, snapshot_dir=None, mark_processed=None, prefix="issue-snapshot-"
+    hashes, snapshot_dir=None, mark_processed=None, prefix=_RFE_SNAPSHOT_PREFIX
 ):
     """Update the latest snapshot with post-submit content hashes.
 
@@ -492,7 +502,7 @@ def main():
     fetch_p.add_argument("jql", nargs="?", default=None, help="JQL query string")
     fetch_p.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Issue type (default: rfe)",
     )

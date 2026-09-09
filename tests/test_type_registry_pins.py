@@ -22,7 +22,10 @@ Grandfathered projections (explicit — never "compare literally"):
     'issue-snapshot-' (Q16); snapshot.prefix itself is the non-empty string;
   * validate_batch_input.PARENT_KEY_PATTERN omits INIT- (Q14: known divergence until PR-3);
   * the four rfe rubric-path sites in skill bodies are STALE (design §10 PR-5) and are pinned as
-    such so the PR-5 fix is a visible pin change.
+    such so the PR-5 fix is a visible pin change;
+  * bootstrap_snapshot._run_dir_has_snapshots probes the rfe snapshot.prefix for every --type
+    (PR-2c reads it from the rfe descriptor instead of the literal; the per-type probe is a
+    deliberate follow-up, design §10 PR-10) — pinned as a residue so that change is visible.
 
 Rows of the PR-1 pin matrix that carry no descriptor projection are listed in DEFERRED with a
 reason, and rows whose registry now derives from the descriptor at import are listed in MIGRATED
@@ -160,9 +163,35 @@ DEFERRED = [
 # (rows, registry, "<PR>: <projection>; <what, if anything, is still literal and pinned>")
 MIGRATED = [
     (
+        (47, 48, 49, 50, 53),
+        "snapshot_fetch.SNAPSHOT_CONFIG / default prefix= kwargs / --type choices",
+        "PR-2c: conventions.labels.{ignore,split_quarantine} + snapshot.prefix over names(); the "
+        "rfe snapshot.prefix is bound once at import as the default prefix= of "
+        "find_previous_snapshot / load_snapshot_from_dir / update_snapshot_hashes (same value, "
+        "same signatures); still pinned: the hard-filter wrapper source form (51) and the "
+        "output filename form (59)",
+    ),
+    (
+        (54, 55, 56, 60),
+        "bootstrap_snapshot.BOOTSTRAP_CONFIG / _run_dir_has_snapshots probe / --type choices",
+        "PR-2c: snapshot.report_prefix + reporting.item_key over names(); the probe reads the rfe "
+        "descriptor's snapshot.prefix and stays rfe-only for every type (grandfathered — the "
+        "per-type probe is a deliberate follow-up; tests/test_bootstrap_snapshot.py pins the "
+        "behaviour); still pinned: the wrapper duplicate (57) and the run-report path (58)",
+    ),
+    (
         (62,),
         "jql_query default exclusion wrapper",
         "PR-2a: conventions.labels.{ignore,rubric_pass}",
+    ),
+    (
+        (65,),
+        "fetch_issue._fetch_all rfe-only layout / --type",
+        "PR-2c: dirs(bare).tasks / dirs(bare).originals, identity.id_field, the comments "
+        "companion (and its request) gated on companions.comments, registry.choices() for the "
+        "new --type (default rfe; the no---type invocation is byte-identical); still literal and "
+        "pinned: status=Ready and the priority fallback Major (shared pipeline vocabulary that "
+        "every type's task schema carries, not type facts)",
     ),
     (
         (66,),
@@ -389,8 +418,8 @@ def fm(fields, body="Body\n"):
 
 
 class TestRegistryShape:
-    # rows: 25, 46, 53, 60, 124, 142, 159, 160, 161 + the source form of 162 (62, 66, 70, 87,
-    # 102, 106, 147, 148, 153-156, 162 MIGRATED)
+    # rows: 25, 46, 124, 142, 159, 160, 161 + the source form of 162 (47-50, 53-56, 60, 62, 65,
+    # 66, 70, 87, 102, 106, 147, 148, 153-156, 162 MIGRATED)
 
     def test_shipped_types_in_argparse_order(self):
         assert TYPES == ["rfe", "initiative"]
@@ -402,8 +431,6 @@ class TestRegistryShape:
             # (comprehension over names()) has this property by construction and is not listed.
             ("submit.TYPE_CONFIGS", submit.TYPE_CONFIGS),
             ("split_submit.SPLIT_CONFIG", split_submit.SPLIT_CONFIG),
-            ("snapshot_fetch.SNAPSHOT_CONFIG", snapshot_fetch.SNAPSHOT_CONFIG),
-            ("bootstrap_snapshot.BOOTSTRAP_CONFIG", bootstrap_snapshot.BOOTSTRAP_CONFIG),
             ("pipeline_state.PIPELINE_TYPES", pipeline_state.PIPELINE_TYPES),
             ("compare_review_outputs._TYPE_CONFIG", compare_review_outputs._TYPE_CONFIG),
             ("check_autofix_complete._TYPE_CONFIG", check_autofix_complete._TYPE_CONFIG),
@@ -426,8 +453,6 @@ class TestRegistryShape:
         [
             ("scripts/submit.py", "--type"),  # :365-370
             ("scripts/split_submit.py", "--type"),  # :853-858
-            ("scripts/snapshot_fetch.py", "--type"),  # :490-495
-            ("scripts/bootstrap_snapshot.py", "--type"),  # :417-422
             ("scripts/pipeline_state.py", "--type"),  # :848 cmd_init
             ("scripts/compare_review_outputs.py", "--type"),  # :145
             ("scripts/cleanup_partial_split.py", "--type"),  # :27
@@ -435,7 +460,7 @@ class TestRegistryShape:
         ],
     )
     def test_argparse_type_choices_are_registry_choices(self, rel, flag):
-        # rows: 25, 46, 53, 60, 124, 159, 160, 161 — the literal lists still carried
+        # rows: 25, 46, 124, 159, 160, 161 — the literal lists still carried (53, 60 MIGRATED)
         # (check_revised.py / check_right_sized.py hand-parse --type without choices)
         got = choices(rel, flag)
         assert got, f"{rel}: no add_argument({flag!r}, choices=...) found"
@@ -457,12 +482,16 @@ class TestRegistryShape:
             ("scripts/error_collect.py", "--type"),
             ("scripts/split_collect.py", "--type"),
             ("scripts/collect_children.py", "--type"),
+            ("scripts/snapshot_fetch.py", "--type"),
+            ("scripts/bootstrap_snapshot.py", "--type"),
+            ("scripts/fetch_issue.py", "--type"),  # new in PR-2c (row 65): no literal list ever
         ],
     )
     def test_migrated_argparse_choices_read_the_registry(self, rel, flag):
-        # MIGRATED rows 62, 66, 70, 87, 102, 106, 147, 148, 153-156 — the literal list is gone;
-        # the source form is pinned (as test_frontmatter_schema_choices_are_the_schema_keys pins
-        # "list(SCHEMAS.keys())") so a re-introduced literal list is a visible change.
+        # MIGRATED rows 53, 60, 62, 65, 66, 70, 87, 102, 106, 147, 148, 153-156 — the literal
+        # list is gone; the source form is pinned (as
+        # test_frontmatter_schema_choices_are_the_schema_keys pins "list(SCHEMAS.keys())") so a
+        # re-introduced literal list is a visible change.
         assert choices(rel, flag) == ["_TYPES.choices()"], rel
 
     def test_pipeline_types_and_state_validation_share_the_choices(self):
@@ -924,40 +953,9 @@ class TestSplitSubmitConfig:
 
 
 class TestSnapshotAndBootstrap:
-    # rows: 47-51, 53-61
-
-    def test_snapshot_config(self, ctx):
-        sc = snapshot_fetch.SNAPSHOT_CONFIG[ctx.t]
-        pin(
-            "conventions.labels.ignore",
-            "snapshot_fetch.py:58,:63",
-            ctx.labels["ignore"],
-            sc["ignore_label"],
-        )
-        pin(
-            "conventions.labels.split_quarantine",
-            "snapshot_fetch.py:59,:64",
-            ctx.labels["split_quarantine"],
-            sc["quarantine_label"],
-        )
-        pin(
-            "snapshot.prefix", "snapshot_fetch.py:60,:65", ctx.snap["prefix"], sc["snapshot_prefix"]
-        )
-
-    def test_default_prefix_kwargs_are_the_rfe_prefix(self):
-        # rows: 50 — snapshot_fetch.py:142,:163,:280-282; a third type must always pass prefix
-        rfe = _ctx("rfe")
-        for fn in (
-            snapshot_fetch.find_previous_snapshot,
-            snapshot_fetch.load_snapshot_from_dir,
-            snapshot_fetch.update_snapshot_hashes,
-        ):
-            pin(
-                "snapshot.prefix (rfe default)",
-                f"snapshot_fetch.{fn.__name__}",
-                rfe.snap["prefix"],
-                inspect.signature(fn).parameters["prefix"].default,
-            )
+    # rows: 51, 57, 58, 59, 61 (47-50, 53-56, 60 MIGRATED — SNAPSHOT_CONFIG / BOOTSTRAP_CONFIG
+    # derive from the descriptors since PR-2c; what stays literal is the wrapper and path
+    # composition below, and the grandfathered rfe-only shape of the snapshot probe)
 
     def test_hard_filter_jql_wrapper_in_both_scripts(self, ctx):
         # rows: 51, 57 — snapshot_fetch.py:368-379 and its verbatim duplicate
@@ -984,25 +982,6 @@ class TestSnapshotAndBootstrap:
             assert 'f"AND (labels not in ({excluded}) OR labels is EMPTY)"' in source
         assert "updated_jql = f'{jql} AND updated >= \"{run_jql_ts}\"'" in boot_src
 
-    def test_bootstrap_config_matches_run_report_writer(self, ctx):
-        # rows: 54, 55 — bootstrap_snapshot.py:45-50 reads what generate_run_report.py writes;
-        # the writer's TYPE_CONFIG is registry-derived since PR-2a (MIGRATED rows 71-81), so the
-        # reader is pinned to the descriptor directly (tests/test_report_roundtrip.py keeps the
-        # real-CLI round trip; PR1-10)
-        bc = bootstrap_snapshot.BOOTSTRAP_CONFIG[ctx.t]
-        pin(
-            "snapshot.report_prefix",
-            "bootstrap_snapshot.py:45,:49",
-            ctx.snap["report_prefix"],
-            bc["report_prefix"],
-        )
-        pin(
-            "reporting.item_key",
-            "bootstrap_snapshot.py:46,:50",
-            ctx.rep["item_key"],
-            bc["item_key"],
-        )
-
     def test_run_report_reader_path_is_report_prefix_plus_run(self, ctx, tmp_path):
         # rows: 58 — bootstrap_snapshot.py:76-79 path derivation
         run = "20260818-120000"
@@ -1026,15 +1005,17 @@ class TestSnapshotAndBootstrap:
         )
         assert report is not None
 
-    def test_run_dir_snapshot_probe_is_hardcoded_to_the_rfe_prefix(self, tmp_path):
-        # rows: 56 — bootstrap_snapshot.py:175-178 literal 'issue-snapshot-' (rfe-only; latent
-        # initiative bug — PR-2 reads snapshot.prefix, which makes this pin change visibly)
-        assert 'name.startswith("issue-snapshot-")' in read("scripts/bootstrap_snapshot.py")
+    def test_run_dir_snapshot_probe_is_grandfathered_to_the_rfe_prefix(self, tmp_path):
+        # rows: 56 (MIGRATED value, grandfathered shape) — bootstrap_snapshot.py:176 read the
+        # literal 'issue-snapshot-' for every --type; since PR-2c it reads the rfe descriptor's
+        # snapshot.prefix and is still rfe-only for every type. The per-type probe is a
+        # deliberate follow-up, so the behaviour is pinned here to make that change visible.
+        assert "name.startswith(_RFE_SNAPSHOT_PREFIX)" in read("scripts/bootstrap_snapshot.py")
         pin(
             "snapshot.prefix (rfe)",
             "bootstrap_snapshot.py:176",
             _ctx("rfe").snap["prefix"],
-            "issue-snapshot-",
+            bootstrap_snapshot._RFE_SNAPSHOT_PREFIX,
         )
         for t in TYPES:
             run = f"run-{t}"
@@ -1119,18 +1100,35 @@ class TestJqlAndJiraUtils:
 
 
 class TestSmallRegistries:
-    # rows: 65, 66 (residue), 68, 107, 154, 155, 157-161 (residues) — 66, 67, 69, 70, 105,
+    # rows: 66 (residue), 68, 107, 154, 155, 157-161 (residues) — 65, 66, 67, 69, 70, 105,
     # 148-157, 170 MIGRATED as listed above
 
-    def test_fetch_issue_is_rfe_only(self):
-        # rows: 65 — fetch_issue.py:59-60,:71,:83,:98,:101,:122,:224 (no --type)
+    def test_fetch_issue_fetch_all_is_type_aware(self):
+        # rows: 65 (MIGRATED) — fetch_issue.py:59-60,:98,:122 carried the rfe literals and :224
+        # had no --type; since PR-2c _fetch_all reads the selected type's descriptor (design §10
+        # item 2) and --type offers registry.choices(). The source form is pinned, as for the
+        # other migrated sites, so a re-introduced rfe literal is a visible change; what stays
+        # literal is shared pipeline vocabulary — status=Ready and the Major priority fallback,
+        # which every type's task schema accepts — not a type fact. tests/test_fetch_issue.py
+        # holds the rfe artifacts byte-golden (c1df503) and the per-type layout.
         rfe = _ctx("rfe")
         source = read("scripts/fetch_issue.py")
-        assert f'os.path.join(artifacts_dir, "{rfe.bare["tasks"]}")' in source
-        assert f'os.path.join(artifacts_dir, "{rfe.bare["originals"]}")' in source
-        assert f'f"{rfe.id_field}={{issue_key}}"' in source
-        assert ('f"{issue_key}-comments.md"' in source) is rfe.d["companions"]["comments"]
-        assert "--type" not in source
+        assert "_TYPES = type_registry.load()" in source
+        assert 'dirs = desc.dirs(form="bare")' in source
+        assert 'os.path.join(artifacts_dir, dirs["tasks"])' in source
+        assert 'os.path.join(artifacts_dir, dirs["originals"])' in source
+        assert 'f"{desc.id_field}={issue_key}"' in source
+        assert 'if desc.get("companions.comments"):' in source
+        assert 'f"{issue_key}-comments.md"' in source
+        assert f'os.path.join(artifacts_dir, "{rfe.bare["tasks"]}")' not in source
+        assert f'os.path.join(artifacts_dir, "{rfe.bare["originals"]}")' not in source
+        assert f'f"{rfe.id_field}={{issue_key}}"' not in source
+        assert '"status=Ready",' in source
+        assert 'else "Major"' in source
+        for t in TYPES:
+            task = artifact_utils.SCHEMAS[f"{t}-task"]
+            assert "Ready" in task["status"]["enum"], t
+            assert "Major" in task["priority"]["enum"], t
 
     def test_check_conflicts_write_prefix_predicate(self, ctx):
         # rows: 66 — the dict is MIGRATED and the task scan is artifact_utils.scan_tasks(desc)

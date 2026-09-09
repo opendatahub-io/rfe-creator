@@ -5,12 +5,15 @@ authoritative text lives. Design: `design-proposals/work-item-types-unified.md` 
 §3.2.1 (binding override), §3.3 (gates), §3.4 (provider obligations), §3.5 (discovery), §3.7
 (cross-type chain).
 
-**Status (PR-2b): 21 scripts read the registry at import** — the "Adoption status" table in
+**Status (PR-2c): 24 scripts read the registry at import** — the "Adoption status" table in
 [`types/README.md`](../types/README.md) lists them and what is still pending. Since PR-2b the
 artifact schemas (`artifact_utils.SCHEMAS`), the scan / rename / parse helpers and the poll phase
 table (`check_review_progress.PHASE_CHECKS`) are projections too, so a registered type gets its
 `<type>-task` / `<type>-review` schemas, its `<poll_prefix><phase>` rows and the generics without
-a code change. Every per-type value a pending script still carries is pinned by test to its
+a code change; since PR-2c so are the snapshot tables (`snapshot_fetch.SNAPSHOT_CONFIG`,
+`bootstrap_snapshot.BOOTSTRAP_CONFIG`) and the `fetch_issue.py --fetch-all` layout (`--type`,
+default `rfe`), so a registered type gets its hard-filter labels, snapshot / run-report file
+prefixes and fetch layout the same way. Every per-type value a pending script still carries is pinned by test to its
 descriptor projection; each adoption deletes its pin (design §10). Adopted scripts use descriptor
 values only; the effective binding override is not consulted until PR-3.
 
@@ -58,6 +61,20 @@ Rules that are easy to trip:
   `check_review_progress.PHASE_CHECKS` applies the same rule to `dirs.{tasks,reviews}` and
   `pipeline.poll_prefix`: a drop-in without them polls no phase. Copying `types/rfe/` keeps them
   all.
+- **Snapshot facts are read at import, for every type.** `snapshot_fetch.SNAPSHOT_CONFIG` reads
+  `conventions.labels.{ignore,split_quarantine}` and `snapshot.prefix`, and
+  `bootstrap_snapshot.BOOTSTRAP_CONFIG` reads `snapshot.report_prefix` and `reporting.item_key`,
+  over every registered type when the module is imported — and `submit.py` imports
+  `snapshot_fetch`. Gate 1 already requires `snapshot.prefix` and `snapshot.report_prefix`
+  (schema `$defs/snapshot`, the `else` branch of the `mode` conditional; the prefix is also
+  linted non-empty and collision-free) and `reporting.item_key`, but NOT
+  `conventions.labels.ignore` / `.split_quarantine` (`$defs/labels` is an open map with no
+  required keys), so a drop-in that omits either label passes `validate_types.py` and then fails
+  the import of `snapshot_fetch.py`, `bootstrap_snapshot.py` and `submit.py` with a `KeyError`
+  naming the type and the field. Copying `types/rfe/` keeps them; a third type must also pass
+  `prefix=` explicitly to the snapshot helpers (their default is the rfe `snapshot.prefix`).
+  `fetch_issue.py --fetch-all --type <t>` reads `dirs.{tasks,originals}`, `identity.id_field`
+  and `companions.comments` (all schema-required).
 - **Frozen strings (R7).** `conventions.labels.rubric_pass`, `conventions.removed_context_preamble`
   and the `{key}-strategy.md` attachment convention are consumed downstream; change them only with
   a migration note.

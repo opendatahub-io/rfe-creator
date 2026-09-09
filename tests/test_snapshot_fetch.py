@@ -3,14 +3,18 @@
 ID file writing, and snapshot loading from results directories."""
 
 import hashlib
+import inspect
 import os
+import subprocess
 import sys
+import textwrap
 
 import pytest
 import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import type_registry
 from snapshot_fetch import (
     SNAPSHOT_CONFIG,
     cmd_fetch,
@@ -926,3 +930,168 @@ class TestCmdFetchInitiativeType:
         initiative_snaps = [f for f in snap_files if f.startswith("initiative-snapshot-")]
         assert len(rfe_snaps) == 1
         assert len(initiative_snaps) == 0
+
+
+# ── Registry-derived SNAPSHOT_CONFIG (work-item-types PR-2c) ─────────────────
+
+SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "snapshot_fetch.py")
+# Hermetic: the developer's RFE_CREATOR_EXTRA_TYPES / RFE_CREATOR_BINDING_* never leak in.
+REG = type_registry.load(extra_roots=[], env={})
+
+
+def _dropin_root(tmp_path):
+    """A minimal third type under a drop-in root (registry env seam, dev/test only)."""
+    root = tmp_path / "types"
+    (root / "docs").mkdir(parents=True)
+    (root / "docs" / "type.yaml").write_text(
+        textwrap.dedent(
+            """\
+            schema_version: 1
+            type: docs
+            identity:
+              tracker: jira
+              jira: {project: DOCS, issue_type: Task, key_prefixes: ["DOCS-"]}
+              local_prefix: "DOC-"
+              id_field: doc_id
+            dirs: {tasks: artifacts/doc-tasks, originals: artifacts/doc-originals}
+            conventions:
+              labels: {ignore: docs-ignore, split_quarantine: docs-split-quarantine}
+            snapshot: {prefix: docs-snapshot-, report_prefix: docs-run-}
+            reporting: {item_key: per_doc}
+            """
+        )
+    )
+    return str(root)
+
+
+def _clean_env(**extra):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RFE_CREATOR_")}
+    env.update(extra)
+    return env
+
+
+class TestSnapshotConfigDerivesFromTheRegistry:
+    def test_values_are_the_pre_registry_literals(self):
+        # Behaviour-neutral migration: same keys, same order, same values as the literal table
+        # this replaced — the hard-filter JQL wrapper and the snapshot file names are built
+        # from these, and both are production contracts (results-repo file names).
+        assert SNAPSHOT_CONFIG == {
+            "rfe": {
+                "ignore_label": "rfe-creator-ignore",
+                "quarantine_label": "rfe-creator-split-quarantine",
+                "snapshot_prefix": "issue-snapshot-",
+            },
+            "initiative": {
+                "ignore_label": "initiative-ignore",
+                "quarantine_label": "initiative-split-quarantine",
+                "snapshot_prefix": "initiative-snapshot-",
+            },
+        }
+        assert list(SNAPSHOT_CONFIG) == ["rfe", "initiative"]
+        for config in SNAPSHOT_CONFIG.values():
+            assert list(config) == ["ignore_label", "quarantine_label", "snapshot_prefix"]
+
+    @pytest.mark.parametrize("type_name", REG.names())
+    def test_projection_from_the_descriptor(self, type_name):
+        desc = REG.get(type_name)
+        sc = SNAPSHOT_CONFIG[type_name]
+        assert sc["ignore_label"] == desc.labels["ignore"]
+        assert sc["quarantine_label"] == desc.labels["split_quarantine"]
+        assert sc["snapshot_prefix"] == desc.get("snapshot.prefix")
+
+    def test_default_prefix_kwargs_are_the_rfe_prefix_bound_at_import(self):
+        # submit.py relies on these defaults for rfe (its own snapshot_prefix is "" as a
+        # sentinel for them); a third type must always pass prefix=. The default is the rfe
+        # descriptor's snapshot.prefix, bound once when the module is imported.
+        rfe_prefix = REG.get("rfe").get("snapshot.prefix")
+        assert rfe_prefix == "issue-snapshot-"
+        for fn in (find_previous_snapshot, load_snapshot_from_dir, update_snapshot_hashes):
+            assert inspect.signature(fn).parameters["prefix"].default == rfe_prefix, fn.__name__
+
+    def test_type_choices_are_the_registry_choices(self):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "fetch", "--help"],
+            capture_output=True,
+            text=True,
+            env=_clean_env(),
+        )
+        assert result.returncode == 0
+        assert "--type {rfe,initiative}" in result.stdout
+
+    def test_a_drop_in_type_is_offered_and_configured(self, tmp_path):
+        root = _dropin_root(tmp_path)
+        env = _clean_env(RFE_CREATOR_EXTRA_TYPES=root, RFE_CREATOR_EXTRA_TYPES_ALLOWLIST=root)
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "fetch", "--help"], capture_output=True, text=True, env=env
+        )
+        assert "--type {rfe,docs,initiative}" in result.stdout
+        # The one fetch path that needs no Jira — --reprocess without a JQL reuses the prior
+        # IDs — still indexes SNAPSHOT_CONFIG by type, so it proves the drop-in is configured.
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("DOCS-1\nDOCS-2\n")
+        changed_file = tmp_path / "changed.txt"
+        result = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "fetch",
+                "--type",
+                "docs",
+                "--reprocess",
+                "--ids-file",
+                str(ids_file),
+                "--changed-file",
+                str(changed_file),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "TOTAL=2\nCHANGED=2\nNEW=0\nUNCHANGED=0\n"
+        assert changed_file.read_text() == "DOCS-1\nDOCS-2\n"
+
+
+class TestHardFilterJqlWrapperIsByteStable:
+    """The wrapper sent to Jira, per type, exactly as before the registry derivation."""
+
+    def _captured_jql(self, tmp_path, monkeypatch, type_name, jql):
+        import argparse
+
+        captured = {}
+
+        def mock_fetch_all(server, user, token, wrapped):
+            captured["jql"] = wrapped
+            return {}
+
+        monkeypatch.setattr("snapshot_fetch.require_env", lambda: ("http://x", "u", "t"))
+        monkeypatch.setattr("snapshot_fetch.fetch_all_issues", mock_fetch_all)
+        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot", lambda **kw: (None, None))
+        monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", str(tmp_path / "auto-fix-runs"))
+        cmd_fetch(
+            argparse.Namespace(
+                reprocess=False,
+                jql=jql,
+                random=None,
+                limit=None,
+                data_dir=None,
+                type=type_name,
+                ids_file=str(tmp_path / "ids.txt"),
+                changed_file=str(tmp_path / "changed.txt"),
+            )
+        )
+        return captured["jql"]
+
+    def test_rfe(self, tmp_path, monkeypatch):
+        assert self._captured_jql(tmp_path, monkeypatch, "rfe", "project = RHAIRFE") == (
+            "(project = RHAIRFE) AND statusCategory != Done "
+            "AND (labels not in (rfe-creator-ignore, rfe-creator-split-quarantine) "
+            "OR labels is EMPTY)"
+        )
+
+    def test_initiative(self, tmp_path, monkeypatch):
+        assert self._captured_jql(tmp_path, monkeypatch, "initiative", "project = RHOAIENG") == (
+            "(project = RHOAIENG) AND statusCategory != Done "
+            "AND (labels not in (initiative-ignore, initiative-split-quarantine) "
+            "OR labels is EMPTY)"
+        )
