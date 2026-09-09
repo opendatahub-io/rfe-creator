@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tests for scripts/type_registry.py — the import-clean work-item type registry (PR-1).
 
-design-proposals/work-item-types-unified.md §3.2 / §3.2.1 / §10 item 1. The registry
-is inert in PR-1 (no production script imports it), so these tests are the only
-consumer contract: discovery over one or more roots, the ``names()`` order today's
+design-proposals/work-item-types-unified.md §3.2 / §3.2.1 / §10 item 1. These tests are
+the registry's own contract (the adopting scripts, PR-2a onwards, test only their
+projections): discovery over one or more roots, the ``names()`` order today's
 argparse ``choices`` lists use, dotted access, the two ``dirs`` spellings (Q13), label
 flattening, the effective binding overlay (§3.2.1) and the CLI exit codes.
 
@@ -993,3 +993,117 @@ class TestDottedIndexParsing:
         assert (
             desc.get("pipeline.dimensions.-1.name") == desc.get("pipeline.dimensions")[-1]["name"]
         )
+
+
+# ── detect / owns (PR-2 seed of the design §5 ladder) ────────────────────────────
+
+
+class TestDetect:
+    """``TypeRegistry.detect`` / ``Descriptor.owns``: the deterministic id signal (§5 rung 3).
+
+    Three rungs, each tried across every type before the next: local_id_pattern full-match,
+    tracker key_prefixes prefix, local_prefix prefix (the parity rung of the sniffs PR-2
+    replaces). Descriptor values only; multi-candidate resolution is PR-3.
+    """
+
+    @pytest.mark.parametrize(
+        "item_id, expected",
+        [
+            ("RFE-001", "rfe"),
+            ("RHAIRFE-1", "rfe"),
+            ("INIT-001", "initiative"),
+            ("RHOAIENG-1", "initiative"),
+            ("RHAISTRAT-1", None),  # a peer pipeline's key: no shipped type owns it
+            ("", None),
+            ("rfe-001", None),  # case-sensitive, like every predicate it replaces
+            ("init-001", None),
+            ("rhoaieng-1", None),
+        ],
+    )
+    def test_shipped_ids(self, item_id, expected):
+        desc = _shipped().detect(item_id)
+        assert (desc.name if desc else None) == expected
+
+    def test_none_and_non_strings_detect_nothing(self):
+        reg = _shipped()
+        assert reg.detect(None) is None
+        assert reg.detect(1234) is None
+        assert reg.get("rfe").owns(None) is False
+
+    @pytest.mark.parametrize(
+        "item_id, expected",
+        [
+            ("INIT-x", "initiative"),  # local_prefix rung: what startswith("INIT-") did
+            ("RFE-", "rfe"),
+            ("RHAIRFE-1234x", "rfe"),  # key-prefix rung is a plain prefix test, as before
+            ("RFE-001-review", "rfe"),
+        ],
+    )
+    def test_parity_with_the_prefix_sniffs(self, item_id, expected):
+        """Malformed but prefixed ids keep going where ``startswith(local_prefix)`` sent them."""
+        assert _shipped().detect(item_id).name == expected
+
+    def test_owns_agrees_with_detect_for_every_shipped_type(self):
+        reg = _shipped()
+        for item_id in ("RFE-001", "RHAIRFE-1", "INIT-001", "RHOAIENG-1", "RHAISTRAT-1", ""):
+            owner = reg.detect(item_id)
+            for desc in reg:
+                assert desc.owns(item_id) is (owner is not None and owner.name == desc.name)
+
+    def test_returns_the_registry_descriptor_instance(self):
+        reg = _shipped()
+        assert reg.detect("RFE-001") is reg.get("rfe")
+        assert reg.detect("RHOAIENG-1") is reg.get("initiative")
+
+    def test_local_id_pattern_beats_another_types_key_prefix(self, tmp_path):
+        """Rung order, not names() order, decides: alpha sorts first and holds the ``AB-`` key
+        prefix, yet ``AB-7`` full-matches beta's local pattern and goes to beta."""
+        root = tmp_path / "types"
+        _add_type(root, "alpha", project="AB")
+        _add_type(root, "beta", project="ZZ", local_prefix="AB-")
+        reg = load(root=root, extra_roots=[], env={})
+        assert reg.names() == ["alpha", "beta"]
+        assert reg.detect("AB-7").name == "beta"
+        assert reg.detect("AB-7x").name == "alpha"  # no full match: the key-prefix rung wins
+        assert reg.detect("ZZ-1").name == "beta"
+        assert reg.detect("ALPHA-1").name == "alpha"
+
+    def test_key_prefix_beats_a_local_prefix(self, tmp_path):
+        root = tmp_path / "types"
+        _add_type(root, "one", project="K")
+        _add_type(root, "two", project="T", local_prefix="K-")  # placeholder-style local prefix
+        reg = load(root=root, extra_roots=[], env={})
+        assert reg.detect("K-abc").name == "one"  # rung 2 (one's key) before rung 3 (two's local)
+        assert reg.detect("K-12").name == "two"  # but a full local-pattern match still wins
+
+    def test_alias_prefix_binding_is_a_key_prefix(self, tmp_path):
+        """A github-style binding (design §8.6) exposes alias_prefix as its key prefix."""
+        root = tmp_path / "types"
+        data = _minimal("gh", project="X")
+        data["identity"]["tracker"] = "github"
+        data["identity"]["github"] = {"owner": "o", "repo": "r", "alias_prefix": "GH-"}
+        del data["identity"]["jira"]
+        _add_type(root, "gh", data=data)
+        reg = load(root=root, extra_roots=[], env={})
+        assert reg.detect("GH-42").name == "gh"
+        assert reg.get("gh").owns("GH-42x") is True
+
+    def test_missing_optional_identity_fields_do_not_raise(self, tmp_path):
+        root = tmp_path / "types"
+        data = _minimal("bare", project="B")
+        del data["identity"]["local_id_pattern"]
+        del data["identity"]["local_prefix"]
+        _add_type(root, "bare", data=data)
+        reg = load(root=root, extra_roots=[], env={})
+        assert reg.detect("B-1").name == "bare"
+        assert reg.detect("BARE-1") is None
+
+    def test_detect_ignores_binding_overrides(self, tmp_path):
+        """Descriptor values only: an env project override (§3.2.1) does not move detection."""
+        root = tmp_path / "types"
+        _add_type(root, "rfe", project="RHAIRFE")
+        env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "OTHER"}
+        reg = load(root=root, extra_roots=[], env=env)
+        assert reg.get("rfe").binding()["key_prefixes"][0] == "OTHER-"
+        assert reg.detect("OTHER-1") is None
+        assert reg.detect("RHAIRFE-1").name == "rfe"

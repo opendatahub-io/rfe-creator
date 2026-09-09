@@ -13,11 +13,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import read_frontmatter
 
+_TYPES = type_registry.load()
 _TYPE_CONFIG = {
-    "rfe": {"reviews_dir": "artifacts/rfe-reviews"},
-    "initiative": {"reviews_dir": "artifacts/initiative-reviews"},
+    name: {"reviews_dir": _TYPES.get(name).dirs()["reviews"]} for name in _TYPES.names()
 }
 
 
@@ -34,7 +35,12 @@ def main():
         print("Usage: check_right_sized.py [--type rfe|initiative] ID1 [ID2 ...]", file=sys.stderr)
         sys.exit(1)
 
+    # --type is hand-parsed without choices; an unregistered type fails here with the same
+    # KeyError it always did (the dict's keys ARE the registry names).
     reviews_dir = _TYPE_CONFIG[pipeline_type]["reviews_dir"]
+    # pipeline.resplit: {score_field, below} — "right_sized < 2" for both shipped types.
+    resplit = _TYPES.get(pipeline_type).get("pipeline.resplit")
+    score_field, below = resplit["score_field"], resplit["below"]
     ids = args
     undersized = []
 
@@ -49,8 +55,8 @@ def main():
 
         scores = data.get("scores", {})
         if isinstance(scores, dict):
-            right_sized = scores.get("right_sized")
-            if right_sized is not None and right_sized < 2:
+            right_sized = scores.get(score_field)
+            if right_sized is not None and right_sized < below:
                 undersized.append(rfe_id)
 
     print(f"RESPLIT={' '.join(undersized)}")

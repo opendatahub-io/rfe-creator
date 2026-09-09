@@ -17,19 +17,28 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+import type_registry
 from artifact_utils import read_frontmatter, update_frontmatter
+
+_TYPES = type_registry.load()
+
+
+def _descriptor(item_id):
+    """The type that owns ``item_id``; anything unrecognised is an rfe (the default branch of
+    the prefix sniff this replaces)."""
+    return _TYPES.detect(item_id) or _TYPES.get("rfe")
 
 
 def _is_initiative(item_id):
-    return item_id.startswith("INIT-") or item_id.startswith("RHOAIENG-")
+    return _descriptor(item_id).name == "initiative"
 
 
 def _reviews_dir(item_id):
-    return "artifacts/initiative-reviews" if _is_initiative(item_id) else "artifacts/rfe-reviews"
+    return _descriptor(item_id).dirs()["reviews"]
 
 
 def _schema(item_id):
-    return "initiative-review" if _is_initiative(item_id) else "rfe-review"
+    return f"{_descriptor(item_id).name}-review"
 
 
 def state_path(item_id):

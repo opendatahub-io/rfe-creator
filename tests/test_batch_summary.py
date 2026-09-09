@@ -9,7 +9,10 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import batch_summary  # noqa: E402
+import type_registry  # noqa: E402
 from artifact_utils import write_frontmatter  # noqa: E402
+from generate_run_report import TYPE_CONFIG  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "batch_summary.py")
 
@@ -342,3 +345,23 @@ class TestInitiativeType:
         assert rc == 0
         detail = out.splitlines()[1]
         assert "alignment" not in detail
+
+
+class TestTypeConfigIsRegistryDerived:
+    """The dirs table is a view of generate_run_report.TYPE_CONFIG (itself registry-derived)."""
+
+    def test_dirs_are_the_run_report_config_projection(self):
+        assert list(batch_summary._TYPE_CONFIG) == list(TYPE_CONFIG)
+        for name, cfg in TYPE_CONFIG.items():
+            assert batch_summary._TYPE_CONFIG[name] == {
+                "reviews_dir": cfg["reviews_dir"],
+                "tasks_dir": cfg["tasks_dir"],
+            }
+
+    def test_type_choices_are_the_registry_choices(self, workspace):
+        registry = type_registry.load(extra_roots=[], env={})
+        out, err, rc = _run(["--type", "bogus", "RHAIRFE-100"], cwd=str(workspace))
+        assert rc == 2
+        assert "invalid choice: 'bogus'" in err
+        for name in registry.choices():
+            assert name in err

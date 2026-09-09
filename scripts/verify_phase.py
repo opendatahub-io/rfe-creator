@@ -18,52 +18,47 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import read_frontmatter
 
-_RFE_PHASE_OUTPUT = {
-    "fetch": lambda id: f"artifacts/rfe-tasks/{id}.md",
-    "assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
-    "feasibility": lambda id: f"artifacts/rfe-reviews/{id}-feasibility.md",
-    "review": lambda id: f"artifacts/rfe-reviews/{id}-review.md",
-    "split": lambda id: f"artifacts/rfe-reviews/{id}-split-status.yaml",
-}
+_TYPES = type_registry.load()
 
-_INITIATIVE_PHASE_OUTPUT = {
-    "fetch": lambda id: f"artifacts/initiatives/{id}.md",
-    "assess": lambda id: f"tmp/rfe-assess/single/{id}.result.md",
-    "feasibility": lambda id: f"artifacts/initiative-reviews/{id}-feasibility.md",
-    "review": lambda id: f"artifacts/initiative-reviews/{id}-review.md",
-    "split": lambda id: f"artifacts/initiative-reviews/{id}-split-status.yaml",
-    "alignment": lambda id: f"artifacts/initiative-reviews/{id}-alignment.md",
-}
+# Type-neutral assess staging dir (design §10: kept byte-stable for every type).
+ASSESS_STAGING = "tmp/rfe-assess/single"
+
+
+def _phase_output(desc):
+    """phase -> (id -> expected output path) for one type: ``dirs`` x the pipeline phases,
+    plus one ``<reviews>/<id>-<name>.md`` row per ``pipeline.dimensions`` entry."""
+    dirs = desc.dirs()
+    table = {
+        "fetch": lambda id: f"{dirs['tasks']}/{id}.md",
+        "assess": lambda id: f"{ASSESS_STAGING}/{id}.result.md",
+    }
+    for dimension in desc.get("pipeline.dimensions", []):
+        name = dimension["name"]
+        table[name] = lambda id, name=name: f"{dirs['reviews']}/{id}-{name}.md"
+    table["review"] = lambda id: f"{dirs['reviews']}/{id}-review.md"
+    table["split"] = lambda id: f"{dirs['reviews']}/{id}-split-status.yaml"
+    return table
+
+
+_PHASE_OUTPUT = {name: _phase_output(_TYPES.get(name)) for name in _TYPES.names()}
+# Per-type aliases kept for their existing importers (tests/test_verify_phase.py).
+_RFE_PHASE_OUTPUT = _PHASE_OUTPUT["rfe"]
+_INITIATIVE_PHASE_OUTPUT = _PHASE_OUTPUT["initiative"]
 
 _TYPE_CONFIG = {
-    "rfe": {
-        "phases": _RFE_PHASE_OUTPUT,
-        "reviews_dir": "artifacts/rfe-reviews",
-        "id_field": "rfe_id",
-        "review_schema": "rfe-review",
-        "score_fields": [
-            "scores.what=0",
-            "scores.why=0",
-            "scores.open_to_how=0",
-            "scores.not_a_task=0",
-            "scores.right_sized=0",
-        ],
-    },
-    "initiative": {
-        "phases": _INITIATIVE_PHASE_OUTPUT,
-        "reviews_dir": "artifacts/initiative-reviews",
-        "id_field": "initiative_id",
-        "review_schema": "initiative-review",
-        "score_fields": [
-            "scores.what=0",
-            "scores.why=0",
-            "scores.scope=0",
-            "scores.open_to_how=0",
-            "scores.right_sized=0",
-        ],
-    },
+    name: {
+        "phases": _PHASE_OUTPUT[name],
+        "reviews_dir": _TYPES.get(name).dirs()["reviews"],
+        "id_field": _TYPES.get(name).id_field,
+        "review_schema": f"{name}-review",
+        # The varying tail of the error-stub command below (the fixed fields are pipeline
+        # vocabulary, not type facts).
+        "score_fields": [f"scores.{field}=0" for field in _TYPES.get(name).score_fields],
+    }
+    for name in _TYPES.names()
 }
 
 
@@ -137,7 +132,7 @@ def verify(phase, ids_file, pipeline_type="rfe"):
 
 def main():
     parser = argparse.ArgumentParser(description="Post-barrier verification for agent phases")
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     parser.add_argument("--phase", required=True, help="Phase to verify")
     parser.add_argument("--ids-file", required=True, help="File containing IDs to check")
     args = parser.parse_args()

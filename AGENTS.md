@@ -134,7 +134,7 @@ Skills that only work with local artifacts (`/rfe.create`) do not require Jira a
 
 ## Work Item Types
 
-Each work item type (RFE, Initiative) is described by a data-only descriptor at `types/<type>/type.yaml`, validated against `types/_schema/type.schema.json`. `types/README.md` is the field reference and `docs/type-provider-guide.md` the provider guide (adding a type, the gates, the drop-in seam). The registry is inert for now: production scripts still carry their own per-type tables, and tests pin those tables to the descriptors so the two cannot drift. When a per-type value changes, update the descriptor and the table in the same PR.
+Each work item type (RFE, Initiative) is described by a data-only descriptor at `types/<type>/type.yaml`, validated against `types/_schema/type.schema.json`. `types/README.md` is the field reference and `docs/type-provider-guide.md` the provider guide (adding a type, the gates, the drop-in seam). Scripts adopt the registry one PR at a time (the "Adoption status" table in `types/README.md` lists which read it): an adopted script derives its per-type table from the descriptors at import, and a pending script's table is pinned by test to the descriptors so the two cannot drift. When a per-type value changes, update the descriptor — and, for a pending script, its table — in the same PR.
 
 ```bash
 python3 scripts/type_registry.py list              # Registered type names

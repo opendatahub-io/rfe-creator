@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Tests for generate_diff helpers: path safety, frontmatter stripping, size cap."""
 
+import copy
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import generate_review_pdf
+import type_registry
 from generate_review_pdf import (
     MAX_DIFF_FILE_SIZE,
+    PASS_THRESHOLD,
+    REPORT_CONFIG,
     _ensure_trailing_newline,
     _open_nofollow,
     _safe_artifact_path,
@@ -338,3 +343,129 @@ class TestSplitOutcome:
     def test_clean(self):
         assert _split_outcome(None) is None
         assert _split_outcome("") is None
+
+
+# A descriptor that ships outside types/ (never enumerated by default): the third type the
+# registry-derived config must project without a code change.
+FIXTURE_TYPES = os.path.join(os.path.dirname(__file__), "fixtures", "types")
+
+
+class TestReportConfigIsRegistryDerived:
+    """REPORT_CONFIG is a projection of types/<name>/type.yaml, not a hand-kept dict."""
+
+    def test_keys_are_the_registry_types_in_choices_order(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        assert list(REPORT_CONFIG) == registry.choices()
+
+    def test_pass_threshold_is_one_module_constant_for_every_type(self):
+        assert PASS_THRESHOLD == 7
+        assert {cfg["pass_threshold"] for cfg in REPORT_CONFIG.values()} == {PASS_THRESHOLD}
+
+    def test_shipped_entries_are_the_descriptor_projection(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        for name, cfg in REPORT_CONFIG.items():
+            desc = registry.get(name)
+            dirs = desc.dirs("bare")
+            entity = desc.get("display.entity")
+            assert (cfg["reviews_dir"], cfg["tasks_dir"], cfg["originals_dir"]) == (
+                dirs["reviews"],
+                dirs["tasks"],
+                dirs["originals"],
+            )
+            assert cfg["id_field"] == desc.id_field
+            assert cfg["jira_prefix"] == desc.write_prefix
+            assert cfg["local_prefix"] == desc.local_prefix
+            assert cfg["entity_name"] == entity
+            assert cfg["entity_name_plural"] == desc.get("display.entity_plural")
+            # Interpolated raw into the <h1>: the entity, not a bare ampersand.
+            assert cfg["report_title"] == f"{entity} Review &amp; Remediation Report"
+            assert cfg["default_output"] == f"{desc.get('pipeline.poll_prefix')}review-report.html"
+            assert cfg["criterion_keys"] == desc.score_fields
+            assert cfg["criterion_labels"] == desc.get("reporting.criterion_labels")
+            assert list(cfg["criterion_labels"]) == list(desc.get("reporting.criterion_labels"))
+            assert cfg["criterion_short_labels"] == desc.get("reporting.criterion_short_labels")
+            assert cfg["before_score_name_map"] == desc.get("reporting.before_score_name_map")
+            assert list(cfg["before_score_name_map"]) == list(
+                desc.get("reporting.before_score_name_map")
+            )
+            assert cfg["extra_fields"] == desc.get("reporting.pdf.extra_fields")
+
+    def test_a_drop_in_descriptor_projects_without_a_code_change(self):
+        registry = type_registry.load(extra_roots=[FIXTURE_TYPES], env={})
+        cfg = generate_review_pdf._report_config(registry.get("epic"))
+        assert set(cfg) == set(REPORT_CONFIG["rfe"])  # same shape, so main() is untouched
+        assert cfg["entity_name"] == "Epic"
+        assert cfg["entity_name_plural"] == "Epics"
+        assert cfg["report_title"] == "Epic Review &amp; Remediation Report"
+        assert cfg["default_output"] == "review-report.html"  # poll_prefix ""
+        assert cfg["pass_threshold"] == PASS_THRESHOLD
+        assert cfg["criterion_keys"] == ["score"]
+        assert cfg["criterion_labels"] == {"score": "Score"}
+        # No criterion_short_labels in the descriptor: the long labels apply.
+        assert cfg["criterion_short_labels"] == {"score": "Score"}
+        assert cfg["before_score_name_map"] == {}
+        assert cfg["extra_fields"] == []  # no reporting.pdf block
+        assert (cfg["jira_prefix"], cfg["local_prefix"]) == ("RHAI-", "RHAISTRAT-")
+
+    def test_short_labels_override_only_the_keys_they_name(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        data = copy.deepcopy(registry.get("rfe").data)
+        data["reporting"]["criterion_short_labels"] = {"right_sized": "Scope"}
+        cfg = generate_review_pdf._report_config(type_registry.Descriptor("rfe", data))
+        assert cfg["criterion_short_labels"] == {
+            "what": "WHAT",
+            "why": "WHY",
+            "open_to_how": "HOW",
+            "not_a_task": "Not-a-task",
+            "right_sized": "Scope",
+        }
+        # Display order stays the long-label order.
+        assert list(cfg["criterion_short_labels"]) == list(cfg["criterion_labels"])
+
+    def test_projection_does_not_alias_descriptor_data(self):
+        registry = type_registry.load(extra_roots=[], env={})
+        desc = registry.get("initiative")
+        cfg = generate_review_pdf._report_config(desc)
+        cfg["criterion_labels"]["mutated"] = "X"
+        cfg["before_score_name_map"]["mutated"] = "x"
+        cfg["extra_fields"].append("mutated")
+        assert "mutated" not in desc.get("reporting.criterion_labels")
+        assert "mutated" not in desc.get("reporting.before_score_name_map")
+        assert "mutated" not in desc.get("reporting.pdf.extra_fields")
+
+
+def test_report_config_escapes_descriptor_display_strings():
+    """display.entity / entity_plural are interpolated into HTML; escape at derivation."""
+    import generate_review_pdf as grp
+
+    class _Desc:
+        id_field = "x_id"
+        write_prefix = "X-"
+        local_prefix = "LX-"
+
+        def dirs(self, form="artifacts"):
+            return {"reviews": "x-reviews", "tasks": "x-tasks", "originals": "x-originals"}
+
+        def get(self, key, default=None):
+            return {
+                "display.entity": "<Widget> & Co",
+                "display.entity_plural": "Widgets<script>",
+                "reporting.criterion_labels": {"what": "WHAT"},
+                "reporting.criterion_short_labels": {},
+                "reporting.before_score_name_map": {},
+                "reporting.pdf.extra_fields": [],
+                "pipeline.poll_prefix": "x-",
+                "schema.review.score_fields": ["what"],
+            }.get(key, default)
+
+        @property
+        def score_fields(self):
+            return ["what"]
+
+    cfg = grp._report_config(_Desc())
+    assert cfg["entity_name"] == "&lt;Widget&gt; &amp; Co"
+    assert cfg["entity_name_plural"] == "Widgets&lt;script&gt;"
+    assert cfg["report_title"].startswith("&lt;Widget&gt; &amp; Co Review &amp; Remediation Report")
+    # Shipped values are unchanged by escaping.
+    for name in ("rfe", "initiative"):
+        assert grp.REPORT_CONFIG[name]["entity_name"] in ("RFE", "Initiative")

@@ -1,10 +1,12 @@
 # types/initiative/type.yaml — the initiative work-item type descriptor.
 # Contract: types/_schema/type.schema.json; design-proposals/work-item-types-unified.md §3.2 and the worked
-# example §8.2. PR-1 status: INERT — no script imports the registry yet; tests pin every value below
-# against the live type-keyed registries, so the descriptor is source of truth BY TEST before BY IMPORT
-# (design §10). Every value is the live literal on main (c1df503) with the consuming file:line in a
-# trailing comment; nothing here is authored. Where §8.2 and main disagree, main wins and the comment
-# says so (Q1, Q3, Q9, Q10, Q11, Q14 of the PR-1 checklist).
+# example §8.2. Status (PR-2a): 18 scripts read this descriptor at import (types/README.md "Adoption
+# status"); the values a pending script still carries are pinned equal to it by test, so the descriptor
+# is source of truth BY IMPORT for adopted scripts and BY TEST for the rest (design §10). Every value is
+# the live literal on main (c1df503) with the consuming file:line AT THAT COMMIT in a trailing comment
+# (adopted scripts now derive it — the comment records where the literal lived); nothing here is
+# authored. Where §8.2 and main disagree, main wins and the comment says so (Q1, Q3, Q9, Q10, Q11, Q14
+# of the PR-1 checklist).
 schema_version: 1
 type: initiative
 display: { entity: Initiative, entity_plural: Initiatives }   # split_submit.py:133-134 entity_name/_plural; generate_review_pdf.py:66-67
@@ -37,8 +39,8 @@ conventions:
   type_label: Initiative                                # submit.py:96
   label_prefix: initiative                              # submit.py:107; split_submit.py:132 (no -creator suffix, e22120c)
   labels:                                               # every reserved key is spelled out; all equal "<label_prefix>-<suffix>" today (pinned)
-    rubric_pass: initiative-autofix-rubric-pass         # submit.py:108; jql_query.py:83 (literal); split_submit.py:664 (composed) — PUBLISHED CONTRACT (R7)
-    ignore: initiative-ignore                           # snapshot_fetch.py:63; jql_query.py:82 (literal)
+    rubric_pass: initiative-autofix-rubric-pass         # submit.py:108; jql_query.py default_exclusions() (registry-derived since PR-2a); split_submit.py:664 (composed) — PUBLISHED CONTRACT (R7)
+    ignore: initiative-ignore                           # snapshot_fetch.py:63; jql_query.py default_exclusions() (registry-derived since PR-2a)
     split_quarantine: initiative-split-quarantine       # snapshot_fetch.py:64; submit.py:283 (composed)
     split_child_marker: "initiative-split-child-{parent}-{child_id}-{fingerprint}"   # split_submit.py:253 — TEMPLATE (Q12): {parent}/{child_id} are .lower()ed before rendering; {fingerprint} = sha256(cleaned)[:12] (:225-230); pinned against _child_marker_label()
     needs_attention: initiative-needs-attention         # submit.py:281,:336,:727; split_submit.py:656
@@ -62,7 +64,7 @@ conventions:
 schema:
   task:
     extra_fields: {}                                    # initiative-task has no field beyond the shared base — no size (artifact_utils.py:190-227; pinned by test_initiative_task_no_size_field)
-    priority:                                           # RESERVED (design §3.2 task.priority) — no consumer. Today the enum lives in artifact_utils.py:209 (initiative-task); validate_batch_input.py:34 reads SCHEMAS["rfe-task"] for both types; the pin test asserts equality
+    priority:                                           # validate_batch_input.py ALLOWED_PRIORITIES reads the rfe descriptor's enum for both types (registry-derived since PR-2a); artifact_utils.py:209 (initiative-task) still carries the literal, pinned equal by test
       enum: [Blocker, Critical, Major, Normal, Minor, Undefined]
       map_to_tracker: {}                                # identity map: the task vocabulary IS the Jira vocabulary (sent by name jira_utils.py:178)
   review:
@@ -100,7 +102,7 @@ pipeline:
     ref: "6602a12e"                                     # Q9: documentary at PR-1 — bootstrap-assess-rfe.sh:54-64 pins NO ref; the initiative rubric exists only at assess-rfe PR #10's head 6602a12e (skills/assess-initiative), not on the vendored e27d7ac; ref-pinning bootstrap is PR-2. Quoted: a digits-only ref would parse as a number
     path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
     export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
-  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py:53 `right_sized < 2` is type-blind today; §8.2's `below: 1` is a PR-2 behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split
+  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split
 
 batch: { extra_fields: [parent_key] }                   # validate_batch_input.py:43 INITIATIVE_KNOWN_FIELDS - RFE_KNOWN_FIELDS
 snapshot:

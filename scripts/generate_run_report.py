@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import (
     _is_companion_file,
     find_review_file,
@@ -21,41 +22,41 @@ from artifact_utils import (
 
 DEFAULT_ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
-TYPE_CONFIG = {
-    "rfe": {
-        "score_fields": ["what", "why", "open_to_how", "not_a_task", "right_sized"],
-        "reviews_dir": "rfe-reviews",
-        "tasks_dir": "rfe-tasks",
-        "item_key": "per_rfe",
-        "output_prefix": "",
-        "extra_entry_fields": ["needs_attention"],
-        "scan_tasks": scan_task_files,
-        "id_field": "rfe_id",
-        # parent_key values that mean "split from"; see split_children_map.
-        "child_parent_prefixes": ("RFE-", "RHAIRFE-"),
-        "tracker_prefix": "RHAIRFE-",
-        "local_prefix": "RFE-",
-    },
-    "initiative": {
-        "score_fields": [
-            "what",
-            "why",
-            "scope",
-            "open_to_how",
-            "right_sized",
-        ],
-        "reviews_dir": "initiative-reviews",
-        "tasks_dir": "initiatives",
-        "item_key": "per_initiative",
-        "output_prefix": "initiative-run-",
-        "extra_entry_fields": ["alignment", "feasibility", "needs_attention"],
-        "scan_tasks": scan_initiative_task_files,
-        "id_field": "initiative_id",
-        "child_parent_prefixes": ("INIT-", "RHOAIENG-"),
-        "tracker_prefix": "RHOAIENG-",
-        "local_prefix": "INIT-",
-    },
-}
+# The work-item type registry (types/<name>/type.yaml), read once at import; every
+# per-type value below is a projection of a descriptor (design work-item-types-unified.md
+# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
+# overrides land with resolve() in a later PR.
+_TYPES = type_registry.load()
+
+# The forked task scanners, selected by type name. The artifact_utils pair collapses into
+# one generic keyed on dirs.tasks + identity.id_field in a later PR; until then a type
+# without an entry here has no scanner.
+_SCAN_TASKS = {"rfe": scan_task_files, "initiative": scan_initiative_task_files}
+
+
+def _type_config(desc):
+    """Project one descriptor onto the TYPE_CONFIG entry build_report and submit.py read."""
+    dirs = desc.dirs("bare")
+    return {
+        "score_fields": desc.score_fields,
+        "reviews_dir": dirs["reviews"],
+        "tasks_dir": dirs["tasks"],
+        "item_key": desc.get("reporting.item_key"),
+        # rfe's empty prefix is grandfathered (the report file is named by the run id alone).
+        "output_prefix": desc.get("snapshot.report_prefix", ""),
+        "extra_entry_fields": list(desc.get("reporting.run_report.extra_entry_fields", [])),
+        "scan_tasks": _SCAN_TASKS.get(desc.name),
+        "id_field": desc.id_field,
+        # parent_key values that mean "split from"; see split_children_map. The local
+        # prefix plus the tracker key prefixes — NOT conventions.parent_key_patterns, which
+        # admits the RHAISTRAT strategy rollup this predicate has to exclude.
+        "child_parent_prefixes": (desc.local_prefix, *desc.key_prefixes),
+        "tracker_prefix": desc.write_prefix,
+        "local_prefix": desc.local_prefix,
+    }
+
+
+TYPE_CONFIG = {name: _type_config(_TYPES.get(name)) for name in _TYPES.names()}
 
 SCORE_FIELDS = TYPE_CONFIG["rfe"]["score_fields"]
 
@@ -394,7 +395,7 @@ def main():
     parser.add_argument("--ids-file", help="Read IDs from a file (one per line)")
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Entry type (default: rfe)",
     )

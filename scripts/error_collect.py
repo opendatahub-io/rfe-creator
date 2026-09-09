@@ -15,7 +15,10 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from artifact_utils import read_frontmatter
+
+_TYPES = type_registry.load()
 
 STATE_FILE = "tmp/pipeline-state.yaml"
 RETRY_ERRORS_FILE = "tmp/pipeline-retry-errors.yaml"
@@ -47,16 +50,12 @@ def _write_ids(path, ids):
 
 
 _TYPE_CONFIG = {
-    "rfe": {
-        "reviews_dir": "artifacts/rfe-reviews",
-        "originals_dir": "artifacts/rfe-originals",
-        "tasks_dir": "artifacts/rfe-tasks",
-    },
-    "initiative": {
-        "reviews_dir": "artifacts/initiative-reviews",
-        "originals_dir": "artifacts/initiative-originals",
-        "tasks_dir": "artifacts/initiatives",
-    },
+    name: {
+        "reviews_dir": _TYPES.get(name).dirs()["reviews"],
+        "originals_dir": _TYPES.get(name).dirs()["originals"],
+        "tasks_dir": _TYPES.get(name).dirs()["tasks"],
+    }
+    for name in _TYPES.names()
 }
 
 
@@ -64,7 +63,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--type", choices=["rfe", "initiative"], default="rfe")
+    parser.add_argument("--type", choices=_TYPES.choices(), default="rfe")
     args = parser.parse_args()
 
     pipeline_type = args.type

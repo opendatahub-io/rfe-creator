@@ -29,18 +29,34 @@ import sys
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from artifact_utils import SCHEMAS
+import type_registry
 
-ALLOWED_PRIORITIES = SCHEMAS["rfe-task"]["priority"]["enum"]
+_TYPES = type_registry.load()
 
+# The batch priority vocabulary is the rfe descriptor's schema.task.priority.enum for BOTH
+# entry types — the grandfathered behaviour (this validator always read the rfe task schema);
+# tests/test_validate_batch_input.py pins it equal to artifact_utils.SCHEMAS until the schemas
+# themselves derive from the registry.
+ALLOWED_PRIORITIES = list(_TYPES.get("rfe").get("schema.task.priority.enum"))
+
+# Deliberately NOT derived from the registry (PR-1 checklist Q14, known divergence): the
+# initiative descriptor's conventions.parent_key_patterns is the task schema's wider list, which
+# also accepts INIT-\d+; the batch validator keeps this narrower literal until PR-3 introduces
+# the batch mapping form (design work-item-types-unified.md §10 item 3).
 PARENT_KEY_PATTERN = re.compile(r"^(RHAISTRAT-\d+|RHOAIENG-\d+)$")
 
 # Keep in sync with the batch YAML format documented in
 # .claude/skills/rfe.speedrun/SKILL.md (Mode A). Since the skill runs this
 # validator with --strict, a field missing here becomes a blocking warning
 # for anyone who adds a new batch field without updating both places.
-RFE_KNOWN_FIELDS = {"prompt", "priority", "labels", "clarifying_context"}
-INITIATIVE_KNOWN_FIELDS = {"prompt", "priority", "labels", "clarifying_context", "parent_key"}
+# The base set is shared by every type; each type adds its descriptor's batch.extra_fields.
+BASE_KNOWN_FIELDS = frozenset({"prompt", "priority", "labels", "clarifying_context"})
+KNOWN_FIELDS = {
+    name: set(BASE_KNOWN_FIELDS) | set(_TYPES.get(name).get("batch.extra_fields", []))
+    for name in _TYPES.names()
+}
+RFE_KNOWN_FIELDS = KNOWN_FIELDS["rfe"]
+INITIATIVE_KNOWN_FIELDS = KNOWN_FIELDS["initiative"]
 
 
 def validate_entries(entries, entry_type="rfe"):
@@ -48,7 +64,7 @@ def validate_entries(entries, entry_type="rfe"):
     if not entries:
         return ["batch input must contain at least one entry"], []
 
-    known_fields = INITIATIVE_KNOWN_FIELDS if entry_type == "initiative" else RFE_KNOWN_FIELDS
+    known_fields = KNOWN_FIELDS.get(entry_type, RFE_KNOWN_FIELDS)
     errors = []
     warnings = []
     seen_prompts = {}
@@ -107,7 +123,7 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Entry type to validate (default: rfe)",
     )

@@ -5,9 +5,11 @@ authoritative text lives. Design: `design-proposals/work-item-types-unified.md` 
 §3.2.1 (binding override), §3.3 (gates), §3.4 (provider obligations), §3.5 (discovery), §3.7
 (cross-type chain).
 
-**Status (PR-1): the registry is inert.** No production script imports it; every value in the
-shipped descriptors is pinned by test to the per-type table a script still carries. Scripts adopt
-the registry one PR at a time (design §10).
+**Status (PR-2a): 18 scripts read the registry at import** — the "Adoption status" table in
+[`types/README.md`](../types/README.md) lists them and what is still pending. Every per-type
+value a pending script still carries is pinned by test to its descriptor projection; each
+adoption deletes its pin (design §10). Adopted scripts use descriptor values only; the effective
+binding override is not consulted until PR-3.
 
 ## The surface, in one table
 
@@ -16,7 +18,7 @@ the registry one PR at a time (design §10).
 | Field reference (every key, with its consuming `file:line`) | `types/_schema/type.schema.json` `description` strings; `types/rfe/type.yaml` and `types/initiative/type.yaml` |
 | Extension points vs shared machinery, reserved vocabulary, R7 frozen strings, binding override and trust boundary, gate list | [`types/README.md`](../types/README.md) |
 | Copy-from skeleton | `types/rfe/` (`cp -r types/rfe types/<name>`) |
-| Registry API and CLI | `scripts/type_registry.py` (`list`, `show`, `get`, `binding`) |
+| Registry API and CLI | `scripts/type_registry.py` (`list`, `show`, `get`, `binding`); in code `load()`, `names()`/`choices()`/`get()`, `detect(item_id)` |
 | Validator (gates 1–3) | `scripts/validate_types.py` (`make lint` runs gate 1) |
 | Anti-regression prefix lint and its ratchet baseline | `scripts/lint_prefix_predicates.py`, `tests/data/prefix_predicate_baseline.json` (only ever shrinks) |
 | Recorded gaps (R1): what the v1 vocabulary cannot say | `NOT EXPRESSIBLE AT V1` comments in `tests/fixtures/types/epic/type.yaml`; `not_expressible_at_v1` in `tests/fixtures/types/strategy-inputs.yaml` |

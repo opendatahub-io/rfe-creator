@@ -9,12 +9,91 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "validate_batch_input.py")
 
+import artifact_utils  # noqa: E402
+import type_registry  # noqa: E402
+import validate_batch_input  # noqa: E402
 from validate_batch_input import validate_entries  # noqa: E402
+
+REG = type_registry.load(extra_roots=[], env={})
 
 
 def _write(path, content):
     with open(path, "w") as f:
         f.write(content)
+
+
+class TestRegistryDerivedConstants:
+    def test_known_fields_are_the_pre_registry_literals(self):
+        # Behaviour-neutral migration: the sets every batch author relied on are unchanged.
+        assert validate_batch_input.RFE_KNOWN_FIELDS == {
+            "prompt",
+            "priority",
+            "labels",
+            "clarifying_context",
+        }
+        assert validate_batch_input.INITIATIVE_KNOWN_FIELDS == {
+            "prompt",
+            "priority",
+            "labels",
+            "clarifying_context",
+            "parent_key",
+        }
+        assert list(validate_batch_input.KNOWN_FIELDS) == ["rfe", "initiative"]
+
+    def test_known_fields_are_base_plus_the_descriptors_batch_extra_fields(self):
+        for name in REG.names():
+            extra = REG.get(name).get("batch.extra_fields", [])
+            assert validate_batch_input.KNOWN_FIELDS[name] == (
+                set(validate_batch_input.BASE_KNOWN_FIELDS) | set(extra)
+            )
+
+    def test_allowed_priorities_equal_the_task_schemas_until_they_derive_too(self):
+        # The validator now reads the rfe descriptor; artifact_utils.SCHEMAS still holds the
+        # literal enum for both task schemas. They must stay equal (same error message text).
+        enum = validate_batch_input.ALLOWED_PRIORITIES
+        assert enum == ["Blocker", "Critical", "Major", "Normal", "Minor", "Undefined"]
+        assert enum == artifact_utils.SCHEMAS["rfe-task"]["priority"]["enum"]
+        assert enum == artifact_utils.SCHEMAS["initiative-task"]["priority"]["enum"]
+        assert enum == REG.get("rfe").get("schema.task.priority.enum")
+
+    def test_parent_key_pattern_stays_the_literal_until_pr3(self):
+        # PR-1 checklist Q14: narrower than the initiative descriptor's parent_key_patterns.
+        assert validate_batch_input.PARENT_KEY_PATTERN.pattern == (
+            r"^(RHAISTRAT-\d+|RHOAIENG-\d+)$"
+        )
+        assert validate_batch_input.PARENT_KEY_PATTERN.match("INIT-001") is None
+
+    def test_unknown_entry_type_falls_back_to_the_rfe_fields(self):
+        errors, warnings = validate_entries(
+            [{"prompt": "x", "parent_key": "RHAISTRAT-100"}], entry_type="nope"
+        )
+        assert errors == []
+        assert warnings == ["entry 0: unknown field 'parent_key'"]
+
+    def test_type_choices_are_the_registry_choices(self):
+        result = subprocess.run(["python3", SCRIPT, "--help"], capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "--type {rfe,initiative}" in result.stdout
+
+    def test_a_drop_in_type_brings_its_own_batch_fields(self, tmp_path):
+        root = tmp_path / "types"
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "type.yaml").write_text(
+            "schema_version: 1\ntype: docs\nbatch: {extra_fields: [audience]}\n"
+        )
+        env = {
+            **os.environ,
+            "RFE_CREATOR_EXTRA_TYPES": str(root),
+            "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": str(root),
+        }
+        path = str(tmp_path / "batch.yaml")
+        _write(path, "- prompt: Write the guide\n  audience: admins\n  parent_key: RHAISTRAT-1\n")
+        result = subprocess.run(
+            ["python3", SCRIPT, path, "--type", "docs"], capture_output=True, text=True, env=env
+        )
+        assert result.returncode == 0, result.stderr
+        assert "WARNING: entry 0: unknown field 'parent_key'" in result.stdout
+        assert "audience" not in result.stdout
 
 
 class TestValidateEntriesFunction:

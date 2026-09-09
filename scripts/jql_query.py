@@ -18,7 +18,29 @@ import urllib.parse
 
 # Add parent directory so we can import jira_utils
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
 from jira_utils import api_call_with_retry, require_env
+
+_TYPES = type_registry.load()
+
+
+def default_exclusions(project):
+    """Return the default exclusion clause appended to every query for ``project``.
+
+    Excludes done items and the ``ignore`` / ``rubric_pass`` labels of the type's descriptor
+    (``conventions.labels``), never ``split_quarantine`` (design §3.6 invariant 4).
+    """
+    labels = _TYPES.get(project).labels
+    return (
+        " AND statusCategory != Done"
+        f" AND (labels not in ({labels['ignore']},"
+        f" {labels['rubric_pass']}) OR labels is EMPTY)"
+    )
+
+
+def wrap_jql(jql, project):
+    """Wrap a caller JQL in the default exclusions for ``project``."""
+    return f"({jql}){default_exclusions(project)}"
 
 
 def search_issues(server, user, token, jql, limit=None):
@@ -65,7 +87,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of keys to return")
     parser.add_argument(
         "--project",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Project type for label filtering (default: rfe)",
     )
@@ -76,18 +98,7 @@ def main():
         print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN must be set", file=sys.stderr)
         sys.exit(1)
 
-    if args.project == "initiative":
-        jql = (
-            f"({args.jql}) AND statusCategory != Done"
-            " AND (labels not in (initiative-ignore,"
-            " initiative-autofix-rubric-pass) OR labels is EMPTY)"
-        )
-    else:
-        jql = (
-            f"({args.jql}) AND statusCategory != Done"
-            " AND (labels not in (rfe-creator-ignore,"
-            " rfe-creator-autofix-rubric-pass) OR labels is EMPTY)"
-        )
+    jql = wrap_jql(args.jql, args.project)
     print(f"JQL={jql}", file=sys.stderr)
     search_issues(server, user, token, jql, args.limit)
 

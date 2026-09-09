@@ -24,8 +24,18 @@ import os
 import re
 import sys
 
-DEFAULT_PREFIX = "RFE"
-DEFAULT_DIR = "artifacts/rfe-tasks"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry
+
+_TYPES = type_registry.load()
+_RFE = _TYPES.get("rfe")
+
+# The rfe defaults come from the rfe descriptor (design work-item-types-unified.md §10 item 2);
+# other types pass --prefix/--dir explicitly (initiative-create/SKILL.md:50). The prefix is held
+# dash-less on purpose: identity.local_prefix is "RFE-" and the allocator composes
+# f"{prefix}-{n:03d}" itself, so the CLI value stays "RFE" as documented above.
+DEFAULT_PREFIX = _RFE.local_prefix.rstrip("-")
+DEFAULT_DIR = _RFE.dirs()["tasks"]
 
 
 def get_highest_number(tasks_dir, prefix):
