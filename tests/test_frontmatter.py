@@ -77,3 +77,53 @@ class TestSchemaCommand:
         positions = [result.stderr.find(f"'{name}'") for name in SCHEMAS]
         assert all(p >= 0 for p in positions), result.stderr
         assert positions == sorted(positions), result.stderr
+
+
+class _FakeDesc:
+    """Minimal Descriptor stand-in: dotted get(), dirs(), and the id properties."""
+
+    def __init__(self, name, data, dirs=None):
+        self.name = name
+        self._data = data
+        self._dirs = dirs or {
+            "tasks": "artifacts/x-tasks",
+            "reviews": "artifacts/x-reviews",
+            "originals": "artifacts/x-originals",
+        }
+
+    def get(self, dotted, default=None):
+        return self._data.get(dotted, default)
+
+    def dirs(self, form="artifacts"):
+        if form == "bare":
+            return {k: v.split("/", 1)[1] for k, v in self._dirs.items()}
+        return dict(self._dirs)
+
+    @property
+    def local_id_pattern(self):
+        return self._data["identity.local_id_pattern"]
+
+    @property
+    def key_prefixes(self):
+        return list(self._data.get("identity.jira.key_prefixes", []))
+
+    @property
+    def id_field(self):
+        return self._data.get("identity.id_field", "x_id")
+
+
+def test_schema_by_dir_skips_types_without_a_directory():
+    """A drop-in that contributes schemas but declares no reviews dir must not break the table."""
+    partial = _FakeDesc("docs", {"dirs.tasks": "artifacts/docs"}, dirs={"tasks": "artifacts/docs"})
+    full = _FakeDesc(
+        "rfe",
+        {"dirs.tasks": "artifacts/rfe-tasks", "dirs.reviews": "artifacts/rfe-reviews"},
+        dirs={"tasks": "artifacts/rfe-tasks", "reviews": "artifacts/rfe-reviews"},
+    )
+    schemas = {"docs-task": {}, "docs-review": {}, "rfe-task": {}, "rfe-review": {}}
+    table = frontmatter._schema_by_dir([full, partial], schemas)
+    assert table == [
+        ("rfe-reviews/", "rfe-review"),
+        ("rfe-tasks/", "rfe-task"),
+        ("docs/", "docs-task"),
+    ]

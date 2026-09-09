@@ -1380,3 +1380,52 @@ class TestStratInputs:
                 if pattern.search(line) and "descriptor" in line.lower():
                     offenders.append(f"{path.name}:{lineno}: {line.strip()}")
         assert offenders == []
+
+
+class _FakeDesc:
+    """Minimal Descriptor stand-in: dotted get(), dirs(), and the id properties."""
+
+    def __init__(self, name, data, dirs=None):
+        self.name = name
+        self._data = data
+        self._dirs = dirs or {
+            "tasks": "artifacts/x-tasks",
+            "reviews": "artifacts/x-reviews",
+            "originals": "artifacts/x-originals",
+        }
+
+    def get(self, dotted, default=None):
+        return self._data.get(dotted, default)
+
+    def dirs(self, form="artifacts"):
+        if form == "bare":
+            return {k: v.split("/", 1)[1] for k, v in self._dirs.items()}
+        return dict(self._dirs)
+
+    @property
+    def local_id_pattern(self):
+        return self._data["identity.local_id_pattern"]
+
+    @property
+    def key_prefixes(self):
+        return list(self._data.get("identity.jira.key_prefixes", []))
+
+    @property
+    def id_field(self):
+        return self._data.get("identity.id_field", "x_id")
+
+
+def test_gate1_rejects_dimension_names_that_collide_with_engine_phases(tmp_path):
+    desc = _FakeDesc(
+        "x",
+        {
+            "pipeline.dimensions": [
+                {"name": "assess"},
+                {"name": "feasibility"},
+                {"name": "feasibility"},
+            ]
+        },
+    )
+    msgs = validate_types.path_messages(desc, tmp_path)
+    assert any("collides with an engine phase" in m for m in msgs)
+    assert any("declared twice" in m for m in msgs)

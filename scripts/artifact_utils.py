@@ -123,7 +123,9 @@ def _id_pattern(desc):
     ``^(RFE-\\d+|RHAIRFE-\\d+)$``. Prefixes are used verbatim (not re.escape'd), exactly as
     the hand-written literals were: upper-case letters plus the trailing dash, none of which
     is a regex metacharacter."""
-    alternatives = [desc.local_id_pattern.strip("^$")]
+    # Drop only the outer anchors: strip("^$") would also eat a pattern's own trailing
+    # characters (e.g. a literal \$ before the closing anchor) and produce an invalid regex.
+    alternatives = [desc.local_id_pattern.removeprefix("^").removesuffix("$")]
     alternatives += [prefix + r"\d+" for prefix in desc.key_prefixes]
     return "^(" + "|".join(alternatives) + ")$"
 

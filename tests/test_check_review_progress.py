@@ -7,6 +7,8 @@ import re
 import sys
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from check_review_progress import (  # noqa: E402
@@ -1184,3 +1186,64 @@ class TestDerivedFromRegistry:
         assert got["revise_1"] == "pending"  # revised_or_split, not exists
         assert got["review_2"] == "completed"
         assert got["revise_2"] == "completed"
+
+
+class _FakeDesc:
+    """Minimal Descriptor stand-in: dotted get(), dirs(), and the id properties."""
+
+    def __init__(self, name, data, dirs=None):
+        self.name = name
+        self._data = data
+        self._dirs = dirs or {
+            "tasks": "artifacts/x-tasks",
+            "reviews": "artifacts/x-reviews",
+            "originals": "artifacts/x-originals",
+        }
+
+    def get(self, dotted, default=None):
+        return self._data.get(dotted, default)
+
+    def dirs(self, form="artifacts"):
+        if form == "bare":
+            return {k: v.split("/", 1)[1] for k, v in self._dirs.items()}
+        return dict(self._dirs)
+
+    @property
+    def local_id_pattern(self):
+        return self._data["identity.local_id_pattern"]
+
+    @property
+    def key_prefixes(self):
+        return list(self._data.get("identity.jira.key_prefixes", []))
+
+    @property
+    def id_field(self):
+        return self._data.get("identity.id_field", "x_id")
+
+
+@pytest.mark.parametrize("bad", ["review", "assess", "split", "fetch"])
+def test_dimension_named_like_an_engine_phase_is_rejected(bad):
+    desc = _FakeDesc("x", {"pipeline.dimensions": [{"name": bad, "prompt": "p.md"}]})
+    import check_review_progress as crp
+
+    with pytest.raises(ValueError, match="collides with an engine phase"):
+        crp._phase_rows(desc)
+
+
+def test_duplicate_dimension_names_are_rejected():
+    desc = _FakeDesc(
+        "x", {"pipeline.dimensions": [{"name": "feasibility"}, {"name": "feasibility"}]}
+    )
+    import check_review_progress as crp
+
+    with pytest.raises(ValueError, match="collides"):
+        crp._phase_rows(desc)
+
+
+def test_distinct_dimension_names_build_rows():
+    desc = _FakeDesc("x", {"pipeline.dimensions": [{"name": "feasibility"}, {"name": "alignment"}]})
+    import check_review_progress as crp
+
+    rows = crp._phase_rows(desc)
+    assert rows["feasibility"]("ID-1") == "artifacts/x-reviews/ID-1-feasibility.md"
+    assert set(rows) >= {"fetch", "assess", "feasibility", "alignment", "review", "revise", "split"}

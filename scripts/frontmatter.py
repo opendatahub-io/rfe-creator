@@ -48,17 +48,27 @@ from artifact_utils import (
 
 _TYPES = type_registry.load()
 
+
 # Path component -> schema name, from every type's ``dirs``: registry order, each type's
 # reviews dir tested before its tasks dir (rfe-reviews/, rfe-tasks/, initiative-reviews/,
 # initiatives/ — the order the hand-written table had). A substring test, so both
 # ``artifacts/rfe-tasks/X.md`` and a bare ``rfe-tasks/X.md`` resolve. Only types that
 # contribute schemas take part (a partial drop-in descriptor has no SCHEMAS entries).
-_SCHEMA_BY_DIR = [
-    (f"{desc.dirs('bare')[dir_key]}/", f"{desc.name}-{kind}")
-    for desc in _TYPES
-    for dir_key, kind in (("reviews", "review"), ("tasks", "task"))
-    if f"{desc.name}-{kind}" in SCHEMAS
-]
+def _schema_by_dir(types, schemas):
+    """Build the path-component -> schema-name table (see the comment above)."""
+    table = []
+    for desc in types:
+        for dir_key, kind in (("reviews", "review"), ("tasks", "task")):
+            # A drop-in may contribute schemas without declaring every directory; skip
+            # the missing key instead of failing the import of every frontmatter write.
+            bare = desc.get(f"dirs.{dir_key}", None)
+            if bare is None or f"{desc.name}-{kind}" not in schemas:
+                continue
+            table.append((f"{desc.dirs('bare')[dir_key]}/", f"{desc.name}-{kind}"))
+    return table
+
+
+_SCHEMA_BY_DIR = _schema_by_dir(_TYPES, SCHEMAS)
 
 
 def _coerce_value(value_str, field_spec):

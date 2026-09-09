@@ -267,6 +267,15 @@ def path_messages(desc, repo_root):
 
     dimensions = _opt(desc, "pipeline.dimensions") or []
     if isinstance(dimensions, list):
+        engine_phases = {"fetch", "create", "assess", "review", "revise", "split"}
+        seen_names = set()
+        for dim in dimensions:
+            dname = dim.get("name") if isinstance(dim, dict) else None
+            if dname in engine_phases:
+                messages.append(f"pipeline.dimensions name {dname!r} collides with an engine phase")
+            elif dname in seen_names:
+                messages.append(f"pipeline.dimensions name {dname!r} is declared twice")
+            seen_names.add(dname)
         for i, dim in enumerate(dimensions):
             if isinstance(dim, dict):
                 missing(f"pipeline.dimensions[{i}].prompt", dim.get("prompt"), want_file=True)

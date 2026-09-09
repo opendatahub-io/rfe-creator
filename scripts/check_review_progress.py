@@ -50,6 +50,9 @@ _LEGACY_ROW_ORDER = {
 # script every pipeline barrier runs.
 _PHASE_FACTS = ("dirs.tasks", "dirs.reviews", "pipeline.poll_prefix")
 
+# Phase bases the engine owns; a pipeline.dimensions entry may not reuse them.
+ENGINE_PHASES = frozenset({"fetch", "create", "assess", "review", "revise", "split"})
+
 
 def _polls(desc):
     """True when ``desc`` carries every field its phase rows are derived from."""
@@ -67,8 +70,17 @@ def _phase_rows(desc):
         # existence alone would release the barrier mid-write.
         rows["create"] = lambda id: f"{dirs['tasks']}/{id}.md"
     rows["assess"] = lambda id: f"{ASSESS_STAGING}/{id}.result.md"
+    seen = set()
     for dimension in desc.get("pipeline.dimensions", []):
         name = dimension["name"]
+        # A dimension named like an engine phase would silently replace that phase's
+        # row and make the barrier watch the wrong file; refuse at table build.
+        if name in ENGINE_PHASES or name in seen:
+            raise ValueError(
+                f"{desc.name}: pipeline.dimensions name {name!r} collides with an engine phase "
+                f"or another dimension (reserved: {', '.join(sorted(ENGINE_PHASES))})"
+            )
+        seen.add(name)
         rows[name] = lambda id, name=name: f"{dirs['reviews']}/{id}-{name}.md"
     rows["review"] = lambda id: f"{dirs['reviews']}/{id}-review.md"
     rows["revise"] = lambda id: f"{dirs['reviews']}/{id}-review.md"
