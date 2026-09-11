@@ -26,16 +26,16 @@ import sys
 # to a file or pipe (Python defaults to full buffering in that case).
 sys.stdout.reconfigure(line_buffering=True)
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import type_registry  # noqa: E402
 from artifact_utils import (  # noqa: E402
     ValidationError,
     find_removed_context_yaml,
     read_frontmatter_validated,
     rebuild_index,
-    rename_initiative_to_jira_key,
-    rename_to_jira_key,
+    rename_to_tracker_key,
     render_removed_context_comment,
-    scan_initiative_task_files,
-    scan_task_files,
+    scan_tasks,
     update_frontmatter,
 )
 from generate_run_report import TYPE_CONFIG as REPORT_TYPE_CONFIG  # noqa: E402
@@ -58,74 +58,54 @@ from snapshot_fetch import compute_content_hash, update_snapshot_hashes  # noqa:
 
 # ─── Type Configurations ─────────────────────────────────────────────────────
 
-TYPE_CONFIGS = {
-    "rfe": {
-        "project": "RHAIRFE",
-        "issue_type": "Feature Request",
-        "type_label": "RFE",
-        "id_field": "rfe_id",
-        "local_prefix": "RFE-",
-        "jira_prefix": "RHAIRFE-",
-        "tasks_dir": "rfe-tasks",
-        "reviews_dir": "rfe-reviews",
-        "originals_dir": "rfe-originals",
-        "task_schema": "rfe-task",
-        "review_schema": "rfe-review",
-        "snapshot_prefix": "",
-        "split_type_arg": None,
-        "label_prefix": "rfe-creator",
-        "rubric_pass_label": "rfe-creator-autofix-rubric-pass",
-        "feasibility_labels": {
-            "feasible": "rfe-creator-feasibility-pass",
-            "infeasible": "rfe-creator-feasibility-fail",
-            "indeterminate": "rfe-creator-feasibility-unknown",
-        },
-        "alignment_labels": None,
-        "removed_context_preamble": (
-            "*[RFE Creator]* The following technical implementation "
-            "details were removed from the RFE description during review. "
-            "This content is better suited for a RHAISTRAT and is "
-            "preserved here for reference:"
-        ),
-        "comment_prefix": "[RFE Creator]",
-        "has_index": True,
-    },
-    "initiative": {
-        "project": "RHOAIENG",
-        "issue_type": "Initiative",
-        "type_label": "Initiative",
-        "id_field": "initiative_id",
-        "local_prefix": "INIT-",
-        "jira_prefix": "RHOAIENG-",
-        "tasks_dir": "initiatives",
-        "reviews_dir": "initiative-reviews",
-        "originals_dir": "initiative-originals",
-        "task_schema": "initiative-task",
-        "review_schema": "initiative-review",
-        "snapshot_prefix": "initiative-snapshot-",
-        "split_type_arg": "initiative",
-        "label_prefix": "initiative",
-        "rubric_pass_label": "initiative-autofix-rubric-pass",
-        "feasibility_labels": {
-            "feasible": "initiative-feasibility-pass",
-            "infeasible": "initiative-feasibility-fail",
-            "indeterminate": "initiative-feasibility-unknown",
-        },
-        "alignment_labels": {
-            "strong": "initiative-alignment-strong",
-            "partial": "initiative-alignment-partial",
-            "weak": "initiative-alignment-weak",
-        },
-        "removed_context_preamble": (
-            "*[Initiative Creator]* The following technical implementation "
-            "details were removed from the Initiative description during review. "
-            "This content may be useful as strategy context and is "
-            "preserved here for reference:"
-        ),
-        "comment_prefix": "[Initiative Creator]",
-        "has_index": False,
-    },
-}
+# The work-item type registry (types/<name>/type.yaml), read once at import. Every
+# per-type value below is a projection of a descriptor (design
+# work-item-types-unified.md §10 item 2) — DESCRIPTOR values only, never the effective
+# binding: an environment override must not reach the Jira write path before resolve()
+# (a later PR) prints and checks it.
+_TYPES = type_registry.load()
+
+
+def _type_config(desc):
+    """Project one descriptor onto the per-type table main() reads.
+
+    Same keys, same key order and same values as the literal table this replaces, so
+    every label, comment, plan line and Jira payload composed from it is unchanged byte
+    for byte. Two entries are conventions rather than descriptor fields, both
+    grandfathered for rfe: ``snapshot_prefix`` is "" for rfe — a sentinel for
+    snapshot_fetch's default prefix (only a truthy value is forwarded as ``prefix=``) —
+    and ``split_type_arg`` is the argv convention for spawning split_submit.py (no
+    ``--type`` for rfe, the type name otherwise). The labels composed elsewhere in this
+    file (auto-created, auto-revised, needs-attention, split-quarantine) keep composing
+    from ``label_prefix`` exactly as before.
+    """
+    dirs = desc.dirs("bare")
+    alignment = desc.get("conventions.labels.alignment", None)
+    return {
+        "project": desc.get("identity.jira.project"),
+        "issue_type": desc.get("identity.jira.issue_type"),
+        "type_label": desc.get("conventions.type_label"),
+        "id_field": desc.id_field,
+        "local_prefix": desc.local_prefix,
+        "jira_prefix": desc.write_prefix,
+        "tasks_dir": dirs["tasks"],
+        "reviews_dir": dirs["reviews"],
+        "originals_dir": dirs["originals"],
+        "task_schema": f"{desc.name}-task",
+        "review_schema": f"{desc.name}-review",
+        "snapshot_prefix": "" if desc.name == "rfe" else desc.get("snapshot.prefix"),
+        "split_type_arg": None if desc.name == "rfe" else desc.name,
+        "label_prefix": desc.get("conventions.label_prefix"),
+        "rubric_pass_label": desc.get("conventions.labels.rubric_pass"),
+        "feasibility_labels": dict(desc.get("conventions.labels.feasibility")),
+        "alignment_labels": None if alignment is None else dict(alignment),
+        "removed_context_preamble": desc.get("conventions.removed_context_preamble"),
+        "comment_prefix": desc.get("conventions.comment_prefix"),
+        "has_index": desc.get("index.enabled"),
+    }
+
+
+TYPE_CONFIGS = {name: _type_config(_TYPES.get(name)) for name in _TYPES.names()}
 
 # Module-level alias for backward compat (used by test_submit.py direct imports)
 FEASIBILITY_LABELS = TYPE_CONFIGS["rfe"]["feasibility_labels"]
@@ -149,19 +129,6 @@ def feasibility_label_changes(verdict, *, is_reject, original_labels, feasibilit
     new_label = feasibility_labels[verdict]
     stale = [lbl for lbl in feasibility_labels.values() if lbl != new_label and lbl in original]
     return new_label, stale
-
-
-def _scan_tasks(artifacts_dir, cfg):
-    if cfg["id_field"] == "initiative_id":
-        return scan_initiative_task_files(artifacts_dir)
-    return scan_task_files(artifacts_dir)
-
-
-def _rename_to_jira(artifacts_dir, item_id, jira_key, cfg):
-    if cfg["id_field"] == "initiative_id":
-        rename_initiative_to_jira_key(artifacts_dir, item_id, jira_key)
-    else:
-        rename_to_jira_key(artifacts_dir, item_id, jira_key)
 
 
 def _find_review(artifacts_dir, item_id, cfg):
@@ -189,8 +156,10 @@ def _generate_reports(args):
         "--report-stage",
         "final",
     ]
-    if args.type == "initiative":
-        yaml_cmd.extend(["--type", "initiative"])
+    # Both report scripts default to rfe; the rfe invocation carries no --type (grandfathered
+    # argv, kept byte-identical) and every other type is named explicitly.
+    if args.type != "rfe":
+        yaml_cmd.extend(["--type", args.type])
     result = subprocess.run(yaml_cmd, capture_output=True, text=True)
     if result.returncode == 0:
         print(f"  YAML report: {result.stdout.strip()}")
@@ -207,8 +176,8 @@ def _generate_reports(args):
         "--output",
         html_output,
     ]
-    if args.type == "initiative":
-        html_cmd.extend(["--type", "initiative"])
+    if args.type != "rfe":
+        html_cmd.extend(["--type", args.type])
     result = subprocess.run(html_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Warning: HTML report generation failed: {result.stderr}", file=sys.stderr)
@@ -364,7 +333,7 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["rfe", "initiative"],
+        choices=_TYPES.choices(),
         default="rfe",
         help="Item type to submit (default: rfe)",
     )
@@ -391,12 +360,21 @@ def main():
     args = parser.parse_args()
 
     cfg = TYPE_CONFIGS[args.type]
+    desc = _TYPES.get(args.type)
     id_field = cfg["id_field"]
     jira_prefix = cfg["jira_prefix"]
     type_label = cfg["type_label"]
+    # The one transition this script performs, declared per tracker binding (design §3.4):
+    # the target status of --auto-approve and the already-there short-circuit. Optional in
+    # the schema (a type that never approves omits it), so it is only required by the flag.
+    approved_status = desc.get("identity.jira.state_map.approved", None)
 
     if args.generate_report and not args.report_timestamp:
         parser.error("--report-timestamp is required when --generate-report is set")
+    if args.auto_approve and not approved_status:
+        parser.error(
+            f"--auto-approve: type '{args.type}' declares no identity.jira.state_map.approved"
+        )
 
     server, user, token = require_env()
 
@@ -406,7 +384,7 @@ def main():
         sys.exit(1)
 
     # Scan task files
-    tasks = _scan_tasks(args.artifacts_dir, cfg)
+    tasks = scan_tasks(args.artifacts_dir, desc)
     if not tasks:
         print(f"Error: No {type_label} task files found.", file=sys.stderr)
         sys.exit(1)
@@ -656,7 +634,7 @@ def main():
     if split_parents and not args.dry_run:
         try:
             split_child_hashes = {}
-            post_split_tasks = _scan_tasks(args.artifacts_dir, cfg)
+            post_split_tasks = scan_tasks(args.artifacts_dir, desc)
             for path, data in post_split_tasks:
                 if data.get("parent_key") and data.get("status") == "Submitted":
                     item_id = data.get(id_field, "")
@@ -687,7 +665,7 @@ def main():
             )
 
     # --- Phase 2: Submit regular items ---
-    tasks = _scan_tasks(args.artifacts_dir, cfg)
+    tasks = scan_tasks(args.artifacts_dir, desc)
 
     submittable = [
         (path, data)
@@ -969,7 +947,7 @@ def main():
 
     approve_comment = (
         f"*{cfg['comment_prefix']}* This {type_label} has been automatically "
-        "transitioned to Approved status based on passing rubric scoring and "
+        f"transitioned to {approved_status} status based on passing rubric scoring and "
         "technical feasibility checks. Approval does not constitute a commitment "
         "to customers until this item is prioritized into a product release "
         "by product management."
@@ -978,14 +956,14 @@ def main():
     def _maybe_approve(item_id, jira_key, entry):
         if not args.auto_approve or not entry.get("auto_approve"):
             return
-        if entry.get("jira_status") == "Approved":
-            print(f"  {item_id}: Already Approved, skipping transition")
+        if entry.get("jira_status") == approved_status:
+            print(f"  {item_id}: Already {approved_status}, skipping transition")
             return
         if args.dry_run:
-            print(f"  {item_id}: Would transition to Approved")
+            print(f"  {item_id}: Would transition to {approved_status}")
             return
-        if transition_issue(server, user, token, jira_key, "Approved"):
-            print(f"  {item_id}: Transitioned to Approved")
+        if transition_issue(server, user, token, jira_key, approved_status):
+            print(f"  {item_id}: Transitioned to {approved_status}")
             comment_adf = markdown_to_adf(approve_comment)
             add_comment(server, user, token, jira_key, comment_adf)
             print(f"  {item_id}: Posted auto-approve comment")
@@ -1139,7 +1117,7 @@ def main():
             if not entry["is_existing"] and not args.dry_run:
                 new_key = results.get(item_id)
                 if new_key and not new_key.endswith("DRY"):
-                    _rename_to_jira(args.artifacts_dir, item_id, new_key, cfg)
+                    rename_to_tracker_key(args.artifacts_dir, item_id, new_key, desc)
                     print(f"  {item_id}: Renamed to {new_key}")
 
             mark_processed_ids.append(item_id)
