@@ -1849,3 +1849,380 @@ class TestLocalParentKey:
         for issue in issues:
             assert jira.get(issue["key"])["fields"].get("parent") is None
         assert "is not in Jira" in r.stdout
+
+
+# ── PR-3c-iii: pre-update binding verification and the overridden-project suite ──────────────
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+FETCH_SCRIPT = os.path.join(REPO_ROOT, "scripts", "fetch_issue.py")
+
+
+def _env_for(jira, **extra):
+    """A subprocess environment against the emulator: the developer's RFE_CREATOR_* seam and
+    the headless markers stay out, ``extra`` (an override, a marker) goes in."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("RFE_CREATOR_") and k not in ("CI", "GITHUB_ACTIONS")
+    }
+    env.update(JIRA_SERVER=jira.url, JIRA_USER="admin", JIRA_TOKEN="admin")
+    env.update(extra)
+    return env
+
+
+def _run_submit_with(env, artifacts_dir, *flags):
+    cmd = [sys.executable, SCRIPT, "--artifacts-dir", artifacts_dir, *flags]
+    return subprocess.run(cmd, capture_output=True, text=True, env=env)
+
+
+def _description_text(issue):
+    desc = issue["fields"]["description"]
+    if isinstance(desc, dict):
+        texts = []
+        for node in desc.get("content", []):
+            for child in node.get("content", []):
+                if child.get("type") == "text":
+                    texts.append(child["text"])
+        return " ".join(texts)
+    return desc or ""
+
+
+def _histories(jira, key):
+    return jira.get(key).get("changelog", {}).get("histories", [])
+
+
+class TestPreUpdateBindingVerification:
+    """Before an existing issue is written, the fetch submit.py performs for conflict detection
+    also requests project and issuetype and the pair is verified against the resolved binding:
+    an issue behind an owned key whose (project, issue type) is another pair is a plan SKIP —
+    no PUT, no label change, not marked processed — reported like every other skip."""
+
+    def _existing(self, art_dir, review=None, original_labels=""):
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\npriority: Major\nstatus: Ready\n"
+            f"type: rfe\ntracker_ref: RHAIRFE-1234\n{original_labels}---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            review or _review("RHAIRFE-1234", auto_revised="true"),
+        )
+
+    def test_an_epic_behind_an_rfe_key_is_skipped_not_updated(self, art_dir, jira):
+        jira.create("RHAIRFE-1234", "Test RFE", "Original.", issue_type="Epic")
+        self._existing(art_dir)
+        snap_dir = os.path.join(art_dir, "auto-fix-runs")
+        os.makedirs(snap_dir, exist_ok=True)
+        snap_path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
+        with open(snap_path, "w") as f:
+            yaml.dump(
+                {
+                    "query_timestamp": "2026-04-01T00:00:00Z",
+                    "timestamp": "2026-04-01T00:00:01Z",
+                    "issues": {"RHAIRFE-1234": {"hash": "hash-a", "processed": False}},
+                },
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+
+        r = _run_submit_with(_env_for(jira), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert "Traceback" not in r.stderr
+        assert (
+            "Reason: binding mismatch — RHAIRFE-1234 is (RHAIRFE, Epic) in Jira but type rfe "
+            "binds (RHAIRFE, Feature Request)"
+        ) in r.stdout
+        assert "RHAIRFE-1234: Skipping — binding mismatch" in r.stdout
+        assert "Updated" not in r.stdout
+        assert "Original" in _description_text(jira.get("RHAIRFE-1234"))
+        assert _histories(jira, "RHAIRFE-1234") == []
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Ready"
+        with open(snap_path) as f:
+            data = yaml.safe_load(f)
+        assert data["issues"]["RHAIRFE-1234"] == {"hash": "hash-a", "processed": False}
+
+    def test_the_reject_paths_label_removal_is_verified_too(self, art_dir, jira):
+        jira.create(
+            "RHAIRFE-1234",
+            "Test RFE",
+            "Original.",
+            labels=["rfe-creator-autofix-rubric-pass"],
+            issue_type="Epic",
+        )
+        self._existing(
+            art_dir,
+            review=REJECT_REVIEW_FM.format(rfe_id="RHAIRFE-1234"),
+            original_labels="original_labels:\n- rfe-creator-autofix-rubric-pass\n",
+        )
+        r = _run_submit_with(_env_for(jira), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert "binding mismatch" in r.stdout and "Removed labels" not in r.stdout
+        assert "rfe-creator-autofix-rubric-pass" in jira.get("RHAIRFE-1234")["fields"]["labels"]
+        assert _histories(jira, "RHAIRFE-1234") == []
+
+    def test_a_matching_pair_updates_exactly_as_before(self, art_dir, jira):
+        jira.create("RHAIRFE-1234", "Test RFE", "Original.")
+        self._existing(art_dir)
+        r = _run_submit_with(_env_for(jira), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert (
+            "TYPE RESOLVED" not in r.stderr and "Traceback" not in r.stderr
+        )  # legacy default: silent
+        assert "RHAIRFE-1234: Updated" in r.stdout
+        assert "Revised" in _description_text(jira.get("RHAIRFE-1234"))
+
+
+class TestTheRemoteKeyIsTheTrackerRef:
+    """One remote key per task (design §5): the frontmatter tracker_ref when present, else the
+    id. rfe_id RHAIRFE-1 with tracker_ref RHAIRFE-2 is fetched, verified and written as
+    RHAIRFE-2 — check_conflicts.py names the same key — while the local paths keep RHAIRFE-1."""
+
+    def test_fetched_and_written_as_the_tracker_ref(self, art_dir, jira):
+        jira.create("RHAIRFE-2", "Test RFE", "Original.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1.md", "Original.")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1.md",
+            "---\nrfe_id: RHAIRFE-1\ntitle: Test RFE\npriority: Major\nstatus: Ready\n"
+            "type: rfe\ntracker_ref: RHAIRFE-2\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1-review.md",
+            _review("RHAIRFE-1", auto_revised="true"),
+        )
+        r = _run_submit_with(_env_for(jira), art_dir, "--auto-approve")
+        assert r.returncode == 0, r.stderr
+        assert "Traceback" not in r.stderr
+        assert "RHAIRFE-1: Updated" in r.stdout
+        assert "RHAIRFE-1: Transitioned to Approved" in r.stdout
+        issue = jira.get("RHAIRFE-2")
+        assert "Revised" in _description_text(issue)
+        assert "rfe-creator-auto-revised" in issue["fields"]["labels"]
+        assert issue["fields"]["status"]["name"] == "Approved"
+        assert [i["key"] for i in jira.search("project = RHAIRFE")] == ["RHAIRFE-2"]
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RHAIRFE-1.md")
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1.md")["status"] == "Submitted"
+
+
+class TestOverriddenProjectBinding:
+    """RFE_CREATOR_BINDING_RFE_PROJECT=KONFLUX (design §3.2.1): the rfe type writes to the
+    KONFLUX project — the effective binding's project, issue type and write prefix — after
+    resolve printed (or, on the legacy default rung, did not print) and assert_registered_binding
+    passed. The emulator creates the KONFLUX project from the first imported key."""
+
+    OVERRIDE = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+
+    def _seed(self, jira, key="KONFLUX-1", body="Original."):
+        jira.create(key, "Test RFE", body)  # a Feature Request; the project comes from the key
+
+    def test_a_fetched_task_is_updated_in_the_overridden_project(self, art_dir, jira):
+        self._seed(jira)
+        env = _env_for(jira, **self.OVERRIDE)
+        fetched = subprocess.run(
+            [sys.executable, FETCH_SCRIPT, "KONFLUX-1", "--fetch-all", art_dir],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=REPO_ROOT,  # fetch_issue.py runs scripts/frontmatter.py relative to its cwd
+        )
+        assert fetched.returncode == 0, fetched.stderr
+        task_path = f"{art_dir}/rfe-tasks/KONFLUX-1.md"
+        fm = _read_frontmatter(task_path)
+        assert (fm["rfe_id"], fm["type"], fm["tracker_ref"]) == ("KONFLUX-1", "rfe", "KONFLUX-1")
+        with open(task_path, encoding="utf-8") as f:
+            text = f.read()
+        _write(task_path, text.replace("Original.", "Revised."))
+        _write(
+            f"{art_dir}/rfe-reviews/KONFLUX-1-review.md",
+            _review("KONFLUX-1", auto_revised="true"),
+        )
+
+        r = _run_submit_with(env, art_dir)
+        assert r.returncode == 0, r.stderr
+        assert (
+            "TYPE RESOLVED" not in r.stderr and "Traceback" not in r.stderr
+        )  # legacy default: silent
+        assert "KONFLUX-1: Updated" in r.stdout
+        issue = jira.get("KONFLUX-1")
+        assert "Revised" in _description_text(issue)
+        assert "rfe-creator-auto-revised" in issue["fields"]["labels"]
+        assert "rfe-creator-autofix-rubric-pass" in issue["fields"]["labels"]
+        assert _read_frontmatter(task_path)["status"] == "Submitted"
+        assert jira.search("project = RHAIRFE") == []
+
+    def test_a_local_draft_is_created_in_the_overridden_project(self, art_dir, jira):
+        self._seed(jira)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+
+        r = _run_submit_with(_env_for(jira, **self.OVERRIDE), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert (
+            "TYPE RESOLVED" not in r.stderr and "Traceback" not in r.stderr
+        )  # legacy default: silent
+        created = [
+            i
+            for i in jira.search("project = KONFLUX", fields="key,summary")
+            if i["key"] != "KONFLUX-1"
+        ]
+        assert len(created) == 1
+        key = created[0]["key"]
+        assert key.startswith("KONFLUX-")
+        assert f"RFE-001: Created {key}" in r.stdout
+        issue = jira.get(key)
+        assert issue["fields"]["issuetype"]["name"] == "Feature Request"
+        assert issue["fields"]["project"]["key"] == "KONFLUX"
+        assert issue["fields"]["summary"] == "Test RFE"
+        assert "rfe-creator-auto-created" in issue["fields"]["labels"]
+        assert jira.search("project = RHAIRFE") == []
+        # Renamed to the KONFLUX key, with the self-describing fields.
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        fm = _read_frontmatter(f"{art_dir}/rfe-tasks/{key}.md")
+        assert (fm["rfe_id"], fm["local_id"], fm["tracker_ref"]) == (key, "RFE-001", key)
+        assert os.path.exists(f"{art_dir}/rfe-reviews/{key}-review.md")
+
+    def test_a_dry_run_plans_the_create_under_the_overridden_project(self, art_dir, jira):
+        self._seed(jira)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+
+        r = _run_submit_with(_env_for(jira, **self.OVERRIDE), art_dir, "--dry-run")
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == ""
+        assert "RFE-001: Would create KONFLUX Feature Request: Test RFE" in r.stdout
+        assert "RHAIRFE" not in r.stdout
+        # The plan is binding-derived through and through; nothing was created anywhere.
+        assert [i["key"] for i in jira.search("project = KONFLUX")] == ["KONFLUX-1"]
+        assert jira.search("project = RHAIRFE") == []
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        # With --type the D3 line names the override.
+        r = _run_submit_with(_env_for(jira, **self.OVERRIDE), art_dir, "--dry-run", "--type", "rfe")
+        assert r.returncode == 0, r.stderr
+        assert r.stderr == "TYPE RESOLVED: rfe (--type; binding override project=KONFLUX)\n"
+
+    def test_an_rfe_override_selecting_the_initiative_pair_is_refused_before_any_write(
+        self, art_dir, jira
+    ):
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+        env = _env_for(
+            jira,
+            RFE_CREATOR_BINDING_RFE_PROJECT="RHOAIENG",
+            RFE_CREATOR_BINDING_RFE_ISSUE_TYPE="Initiative",
+        )
+        r = _run_submit_with(env, art_dir)
+        assert r.returncode == 1
+        assert r.stdout == ""
+        assert r.stderr.startswith(
+            "Error: rfe: effective binding ('jira', 'RHOAIENG', 'Initiative') (source: env) is "
+            "the binding registered for type 'initiative'; a tracker binding must be owned by "
+            "exactly one type"
+        )
+        assert r.stderr.count("\n") == 1 and "Traceback" not in r.stderr
+        assert jira.search("project = RHOAIENG") == []
+        assert jira.search("project = RHAIRFE") == []
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+
+    def test_a_tracker_ref_of_another_type_is_a_hard_error_before_any_write(self, art_dir, jira):
+        jira.create(
+            "RHAIRFE-1234", "Test RFE", "Original.", labels=["rfe-creator-autofix-rubric-pass"]
+        )
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "Original.")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\npriority: Major\nstatus: Ready\n"
+            "type: rfe\ntracker_ref: RHOAIENG-7\n"
+            "original_labels:\n- rfe-creator-autofix-rubric-pass\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            _review("RHAIRFE-1234", auto_revised="true"),
+        )
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+
+        r = _run_submit_with(_env_for(jira), art_dir)
+        assert r.returncode == 1
+        assert r.stdout == ""
+        assert r.stderr == (
+            "Error: RHAIRFE-1234 carries tracker_ref 'RHOAIENG-7', a key type initiative owns, "
+            "not the resolved type rfe (key prefixes: RHAIRFE-); an artifact bound to another "
+            "type is never updated or created here — fix the artifact before re-running; "
+            "nothing submitted\n"
+        )
+        # Nothing was updated and nothing was created.
+        assert "Original" in _description_text(jira.get("RHAIRFE-1234"))
+        assert _histories(jira, "RHAIRFE-1234") == []
+        assert [i["key"] for i in jira.search("project = RHAIRFE")] == ["RHAIRFE-1234"]
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Ready"
+
+    def test_the_shorthand_creates_nothing(self, art_dir, jira):
+        # JIRA_PROJECT=KONFLUX reaches the writers' binding through resolve but not the artifact
+        # layer (SCHEMAS, the rename guard), so a run under it would create the issue in KONFLUX
+        # and then fail the rename, orphaning it on every retry. Refused up front instead: one
+        # line naming the typed variables, exit 1, nothing created anywhere, the draft untouched.
+        self._seed(jira)
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(f"{art_dir}/rfe-reviews/RFE-001-review.md", _review("RFE-001"))
+        r = _run_submit_with(_env_for(jira, JIRA_PROJECT="KONFLUX"), art_dir)
+        assert r.returncode == 1
+        assert r.stdout == ""
+        assert r.stderr == (
+            "Error: JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured by the artifact "
+            "layer; set RFE_CREATOR_BINDING_RFE_PROJECT / _ISSUE_TYPE instead\n"
+        )
+        assert [i["key"] for i in jira.search("project = KONFLUX")] == ["KONFLUX-1"]
+        assert jira.search("project = RHAIRFE") == []
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RFE-001.md")["status"] == "Ready"
+
+    def test_a_pre_override_item_is_updated_in_place(self, art_dir, jira):
+        # RHAIRFE-7, a Feature Request created before the override, carries the descriptor read
+        # prefix: its (RHAIRFE, Feature Request) pair is accepted and it is updated in place —
+        # while a KONFLUX Epic in the same run is still skipped.
+        self._seed(jira)
+        jira.create("RHAIRFE-7", "Test RFE", "Original.")
+        jira.create("KONFLUX-2", "An epic", "Original.", issue_type="Epic")
+        for key in ("RHAIRFE-7", "KONFLUX-2"):
+            _write(f"{art_dir}/rfe-originals/{key}.md", "Original.")
+            _write(
+                f"{art_dir}/rfe-tasks/{key}.md",
+                f"---\nrfe_id: {key}\ntitle: Test RFE\npriority: Major\nstatus: Ready\n"
+                f"type: rfe\ntracker_ref: {key}\n---\nRevised.",
+            )
+            _write(f"{art_dir}/rfe-reviews/{key}-review.md", _review(key, auto_revised="true"))
+        r = _run_submit_with(_env_for(jira, **self.OVERRIDE), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert "Traceback" not in r.stderr
+        assert "RHAIRFE-7: Updated" in r.stdout
+        assert "Revised" in _description_text(jira.get("RHAIRFE-7"))
+        assert "rfe-creator-auto-revised" in jira.get("RHAIRFE-7")["fields"]["labels"]
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-7.md")["status"] == "Submitted"
+        assert (
+            "Reason: binding mismatch — KONFLUX-2 is (KONFLUX, Epic) in Jira but type rfe binds "
+            "(KONFLUX, Feature Request)"
+        ) in r.stdout
+        assert "Original" in _description_text(jira.get("KONFLUX-2"))
+        assert _histories(jira, "KONFLUX-2") == []
+
+    def test_a_foreign_issue_behind_an_overridden_key_is_skipped(self, art_dir, jira):
+        # The pre-update verification compares with the EFFECTIVE pair: KONFLUX-2 is an Epic.
+        self._seed(jira)
+        jira.create("KONFLUX-2", "An epic", "Original.", issue_type="Epic")
+        _write(f"{art_dir}/rfe-originals/KONFLUX-2.md", "Original.")
+        _write(
+            f"{art_dir}/rfe-tasks/KONFLUX-2.md",
+            "---\nrfe_id: KONFLUX-2\ntitle: An epic\npriority: Major\nstatus: Ready\n"
+            "type: rfe\ntracker_ref: KONFLUX-2\n---\nRevised.",
+        )
+        _write(f"{art_dir}/rfe-reviews/KONFLUX-2-review.md", _review("KONFLUX-2"))
+        r = _run_submit_with(_env_for(jira, **self.OVERRIDE), art_dir)
+        assert r.returncode == 0, r.stderr
+        assert (
+            "Reason: binding mismatch — KONFLUX-2 is (KONFLUX, Epic) in Jira but type rfe binds "
+            "(KONFLUX, Feature Request)"
+        ) in r.stdout
+        assert "Original" in _description_text(jira.get("KONFLUX-2"))
+        assert _histories(jira, "KONFLUX-2") == []

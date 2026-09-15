@@ -24,7 +24,9 @@ Exit codes:
        (project, issue type) is not the resolved type's binding — nothing
        is written and stderr names the type to re-run with, if any — or a
        RFE_CREATOR_BINDING_* override that binds the resolved type to
-       another registered type's pair (refused before the fetch)
+       another registered type's pair, or the bare JIRA_PROJECT /
+       JIRA_ISSUE_TYPE shorthand, which the artifact layer does not honour
+       (both refused before the fetch)
     2  Missing JIRA credentials (caller should try MCP fallback)
 """
 
@@ -92,24 +94,26 @@ def _fetched_pair(fields):
 def verify_binding(issue_key, fields, type_name, binding, env=None):
     """Post-fetch verification (design §5 self-describing artifacts, PR-3c D9).
 
-    The fetched ``(project.key, issuetype.name)`` pair must equal the resolved type's
-    EFFECTIVE binding ``(project, issue_type)`` — ``binding`` is what ``type_registry.resolve``
-    returned, so a ``RFE_CREATOR_BINDING_<TYPE>_*`` override is honoured. Returns ``None`` on a
-    match and otherwise the one-line refusal to print: it names the key, the fetched pair, the
-    expected pair and the resolved type, and — when exactly one OTHER registered type's effective
-    binding owns the fetched pair — the ``re-run with --type <t>`` hint (best-effort: a type
-    whose ``RFE_CREATOR_BINDING_*`` variables fail the grammar cannot be offered and is skipped;
-    ``main`` refuses such an environment before the fetch, a direct caller merely loses the
-    hint). The resolved type itself is never offered: under the bare ``JIRA_PROJECT`` /
-    ``JIRA_ISSUE_TYPE`` shorthand its own descriptor binding may own the fetched pair, but the
-    shorthand follows the resolved type, so re-running with it would fail the same way. A
-    response without a ``project`` or ``issuetype`` witness cannot be verified and is refused
-    the same way (fail closed), naming the missing field.
+    The fetched ``(project.key, issuetype.name)`` pair must be one of the pairs the resolved
+    type accepts for ``issue_key`` (``Descriptor.accepted_pairs``): its EFFECTIVE binding
+    ``(project, issue_type)`` — ``binding`` is what ``type_registry.resolve`` returned, so a
+    ``RFE_CREATOR_BINDING_<TYPE>_*`` override is honoured — plus, for a key carrying one of the
+    type's descriptor prefixes, the descriptor pair (an item created before the override is
+    still the type's own). Returns ``None`` on a match and otherwise the one-line refusal to
+    print: it names the key, the fetched pair, the accepted pair(s) and the resolved type, and —
+    when exactly one OTHER registered type's effective binding owns the fetched pair — the
+    ``re-run with --type <t>`` hint (best-effort: a type whose ``RFE_CREATOR_BINDING_*``
+    variables fail the grammar cannot be offered and is skipped; ``main`` refuses such an
+    environment before the fetch, a direct caller merely loses the hint). The resolved type
+    itself is never offered: its descriptor pair is already accepted for a key that carries a
+    descriptor prefix, and for any other key re-running with the same type would fail the same
+    way. A response without a ``project`` or ``issuetype`` witness cannot be verified and is
+    refused the same way (fail closed), naming the missing field.
     """
     if env is None:
         env = os.environ
-    expected = (binding.get("project"), binding.get("issue_type"))
-    expected_text = f"({expected[0]}, {expected[1]})"
+    accepted = _TYPES.get(type_name).accepted_pairs(binding, issue_key)
+    expected_text = type_registry.render_pairs(accepted)
     project_key, issue_type, missing = _fetched_pair(fields)
     if missing:
         return (
@@ -117,7 +121,7 @@ def verify_binding(issue_key, fields, type_name, binding, env=None):
             f"{expected_text}: the fetched issue has no {' or '.join(missing)} field; "
             f"nothing written"
         )
-    if (project_key, issue_type) == expected:
+    if (project_key, issue_type) in accepted:
         return None
     message = (
         f"Error: {issue_key} is ({project_key}, {issue_type}) in Jira but the resolved type "
@@ -161,7 +165,9 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", b
     """
     desc = _TYPES.get(type_name)
     if binding is None:
-        binding = desc.binding(os.environ, shorthand=True)
+        # The typed RFE_CREATOR_BINDING_* overlay only: the bare JIRA_PROJECT / JIRA_ISSUE_TYPE
+        # shorthand is not honoured by the artifact layer this writes into (main refuses it).
+        binding = desc.binding(os.environ)
     dirs = desc.dirs(form="bare")
     tasks_dir = os.path.join(artifacts_dir, dirs["tasks"])
     originals_dir = os.path.join(artifacts_dir, dirs["originals"])
@@ -347,6 +353,10 @@ def main():
             type_registry.assert_registered_binding(
                 resolution.desc, env=os.environ, registry=_TYPES, shorthand=True
             )
+            # The bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is a resolve-CLI verdict only:
+            # the artifact layer this writes into reads binding() without it. Refused before
+            # the fetch.
+            type_registry.assert_not_shorthand(resolution.type_name, resolution.binding)
         except type_registry.RegistryError as exc:
             print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
             sys.exit(1)

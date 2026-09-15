@@ -521,10 +521,23 @@ class TestPostFetchVerification:
         )
         env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
         assert fetch_issue.verify_binding("KONFLUX-1", fields, "rfe", rfe.binding(env), env) is None
+        # An RHAIRFE- key carries the descriptor read prefix: its descriptor pair is accepted
+        # under the override (an item created before it), its Epic is not — and the refusal
+        # names both accepted pairs. A KONFLUX- Epic is refused against the effective pair alone.
         home = _issue_for("RHAIRFE-1")["fields"]
-        assert fetch_issue.verify_binding("RHAIRFE-1", home, "rfe", rfe.binding(env), env) == (
-            "Error: RHAIRFE-1 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
-            "binds (KONFLUX, Feature Request); nothing written"
+        assert fetch_issue.verify_binding("RHAIRFE-1", home, "rfe", rfe.binding(env), env) is None
+        home_epic = home | {"issuetype": {"name": "Epic"}}
+        assert fetch_issue.verify_binding("RHAIRFE-1", home_epic, "rfe", rfe.binding(env), env) == (
+            "Error: RHAIRFE-1 is (RHAIRFE, Epic) in Jira but the resolved type rfe binds "
+            "(KONFLUX, Feature Request) or, for a pre-override key, (RHAIRFE, Feature Request); "
+            "nothing written"
+        )
+        konflux_epic = fields | {"issuetype": {"name": "Epic"}}
+        assert fetch_issue.verify_binding(
+            "KONFLUX-1", konflux_epic, "rfe", rfe.binding(env), env
+        ) == (
+            "Error: KONFLUX-1 is (KONFLUX, Epic) in Jira but the resolved type rfe binds "
+            "(KONFLUX, Feature Request); nothing written"
         )
         # An issue-type override is honoured the same way, and the artifact path is open to it
         # (the key grammar is unchanged): see the emulator suite below.
@@ -532,52 +545,70 @@ class TestPostFetchVerification:
         epic = _issue_for("RHAIRFE-1")["fields"] | {"issuetype": {"name": "Epic"}}
         assert fetch_issue.verify_binding("RHAIRFE-1", epic, "rfe", rfe.binding(env), env) is None
 
-    def test_the_resolved_type_is_never_the_hint(self, tmp_path, monkeypatch, fake_jira, capsys):
-        # Under the bare JIRA_PROJECT shorthand rfe resolves to (RHOAIENG, Feature Request); a
-        # fetched (RHAIRFE, Feature Request) is rfe's own DESCRIPTOR pair, but the shorthand
-        # follows the resolved type, so re-running with --type rfe would fail the same way. The
-        # owners scan therefore skips the resolved type: the refusal carries no hint at all
-        # rather than "re-run with --type rfe".
-        env = {"JIRA_PROJECT": "RHOAIENG"}
+    def test_the_resolved_type_is_never_the_hint(self):
+        # Under a KONFLUX override a KONFLUX-1 key showing (RHAIRFE, Feature Request) — rfe's
+        # own DESCRIPTOR pair, but the key carries no descriptor prefix, so the pair is not
+        # accepted for it — is refused; the owners scan skips the resolved type, so the refusal
+        # carries no hint at all rather than "re-run with --type rfe" (which would fail the
+        # same way).
+        env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
         rfe = REG.get("rfe")
-        binding = rfe.binding(env, shorthand=True)
-        assert (binding["project"], binding["issue_type"]) == ("RHOAIENG", "Feature Request")
-        fields = _issue_for("RHAIRFE-1595")["fields"]
-        message = fetch_issue.verify_binding("RHAIRFE-1595", fields, "rfe", binding, env)
+        fields = _issue_for("RHAIRFE-1")["fields"]
+        message = fetch_issue.verify_binding("KONFLUX-1", fields, "rfe", rfe.binding(env), env)
         assert message == (
-            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
-            "binds (RHOAIENG, Feature Request); nothing written"
+            "Error: KONFLUX-1 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
+            "binds (KONFLUX, Feature Request); nothing written"
         )
         assert "re-run with --type" not in message
-        # Through main: resolve applies the shorthand to the legacy default (no D3 line), the
-        # ownership check passes (initiative binds Initiative, not Feature Request) and the
-        # post-fetch refusal is exactly the line above.
+
+    def test_the_shorthand_is_refused_before_the_fetch(
+        self, tmp_path, monkeypatch, fake_jira, capsys
+    ):
+        # The bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand reaches resolve (a CLI verdict) but
+        # not the artifact layer --fetch-all writes into: main refuses it before the fetch — no
+        # request, no directory, exit 1 — naming the typed variables to set instead.
+        line = (
+            "Error: JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured by the artifact "
+            "layer; set RFE_CREATOR_BINDING_RFE_PROJECT / _ISSUE_TYPE instead\n"
+        )
         monkeypatch.setenv("JIRA_PROJECT", "RHOAIENG")
         code, out = _main(monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path / "a"))
         assert (code, out) == (1, "")
-        assert capsys.readouterr().err == message + "\n"
+        assert capsys.readouterr().err == line
+        assert fake_jira["issue"] == []
         assert not (tmp_path / "a").exists()
-        # Another type that owns the fetched pair is still offered under the same shorthand.
-        rc, _ = _fetch_all("RHOAIENG-12345", tmp_path / "b")
-        assert rc == 1
-        assert capsys.readouterr().err == (
-            "Error: RHOAIENG-12345 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
-            "binds (RHOAIENG, Feature Request); nothing written - re-run with --type initiative\n"
+        # With an explicit --type the D3 line (which names the shorthand override) precedes it.
+        code, out = _main(
+            monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path / "b"), "--type", "rfe"
         )
-        assert not (tmp_path / "b").exists()
+        assert (code, out) == (1, "")
+        assert capsys.readouterr().err == (
+            "TYPE RESOLVED: rfe (--type; binding override project=RHOAIENG)\n" + line
+        )
+        assert fake_jira["issue"] == []
+        # A direct caller of _fetch_all never reads the shorthand: the typed overlay only, so
+        # the rfe issue is verified against the descriptor pair and written.
+        rc, out = _fetch_all("RHAIRFE-1595", tmp_path / "c")
+        assert rc == 0 and out.startswith("OK: wrote ")
 
     def test_direct_callers_verify_against_the_types_own_effective_binding(
         self, tmp_path, fake_jira, monkeypatch, capsys
     ):
         # _fetch_all without a binding (the positional callers) resolves the type's effective
-        # binding itself — the same pair main() would pass.
+        # binding itself — the same pair main() would pass: under an Epic override a key that
+        # carries no rfe prefix is verified against (RHAIRFE, Epic) alone (and the other type
+        # that owns the fetched pair is offered), while an RHAIRFE Feature Request — a
+        # pre-override item — is still admitted.
         monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_ISSUE_TYPE", "Epic")
-        rc, _ = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        rc, _ = _fetch_all("RHOAIENG-12345", tmp_path / "artifacts")
         assert rc == 1
         assert capsys.readouterr().err == (
-            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
-            "binds (RHAIRFE, Epic); nothing written\n"
+            "Error: RHOAIENG-12345 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
+            "binds (RHAIRFE, Epic); nothing written - re-run with --type initiative\n"
         )
+        assert not (tmp_path / "artifacts").exists()
+        rc, out = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        assert rc == 0 and out.startswith("OK: wrote ")
 
     def test_a_malformed_override_for_another_type_drops_the_hint_not_the_refusal(
         self, tmp_path, monkeypatch, fake_jira, capsys
@@ -938,22 +969,50 @@ class TestFetchAllAgainstTheEmulator:
         )
         assert not artifacts.exists()
         # The verification compares with the EFFECTIVE binding: with rfe bound to KONFLUX the
-        # same issue passes it and the write starts. It then stops at frontmatter.py, whose id
-        # grammar is still the descriptor's (the overridden-project artifact suite is PR-3c-iii;
-        # flip this tail to returncode 0 and a written task there).
-        result = self._run(
-            {**env, "RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"},
-            "KONFLUX-1",
-            "--fetch-all",
-            str(artifacts),
+        # same issue passes it and the write completes — frontmatter.py's id grammar is the
+        # effective one too (PR-3c-iii: artifact_utils.SCHEMAS reads binding()["key_prefixes"],
+        # write prefix first), so the overridden project's key lands in the rfe layout with the
+        # rfe stamp. No --type: the legacy default decided, so the D3 line stays silent even
+        # under the override (the production autofixer's invocation shape).
+        override = {**env, "RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+        result = self._run(override, "KONFLUX-1", "--fetch-all", str(artifacts))
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        task = artifacts / "rfe-tasks" / "KONFLUX-1.md"
+        original = artifacts / "rfe-originals" / "KONFLUX-1.md"
+        comments = artifacts / "rfe-tasks" / "KONFLUX-1-comments.md"
+        assert result.stdout == f"OK: wrote {task}, {original}, {comments}\n"
+        assert _tree(artifacts).keys() == {
+            "rfe-tasks/KONFLUX-1.md",
+            "rfe-originals/KONFLUX-1.md",
+            "rfe-tasks/KONFLUX-1-comments.md",
+        }
+        # This process runs with no override, so its SCHEMAS carry the descriptor grammar: read
+        # the file unvalidated here and validate it under the override below, as submit.py will.
+        data, body = read_frontmatter(str(task))
+        assert data["rfe_id"] == "KONFLUX-1"
+        assert data["title"] == "Export models"
+        assert data["status"] == "Ready"
+        assert (data["type"], data["tracker_ref"]) == ("rfe", "KONFLUX-1")
+        assert list(data)[5:7] == ["type", "tracker_ref"]
+        assert body == "Body text.\n"
+        assert original.read_text(encoding="utf-8") == "Body text.\n"
+        assert (
+            comments.read_text(encoding="utf-8") == "# Comments: KONFLUX-1\n\nNo comments found.\n"
         )
-        assert "Error: KONFLUX-1 is" not in result.stderr
-        assert "cannot verify" not in result.stderr
-        assert result.returncode == 1 and "Error setting frontmatter" in result.stderr
-        # The failed write leaves no body-only task file (and no original) for the fetch
-        # barrier to accept.
-        assert not (artifacts / "rfe-tasks" / "KONFLUX-1.md").exists()
-        assert not (artifacts / "rfe-originals" / "KONFLUX-1.md").exists()
+        check = subprocess.run(
+            [sys.executable, "scripts/frontmatter.py", "read", str(task)],
+            capture_output=True,
+            text=True,
+            env=override,
+            cwd=REPO_ROOT,
+        )
+        assert check.returncode == 0, check.stderr
+        assert json.loads(check.stdout)["tracker_ref"] == "KONFLUX-1"
+        # With --type explicit the D3 line names the override (Resolution.line(), §3.2.1 c).
+        result = self._run(override, "KONFLUX-1", "--fetch-all", str(artifacts), "--type", "rfe")
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == "TYPE RESOLVED: rfe (--type; binding override project=KONFLUX)\n"
 
     def test_malformed_override_for_the_other_type_is_one_line_never_a_traceback(
         self, tmp_path, jira, env
@@ -1004,6 +1063,43 @@ class TestFetchAllAgainstTheEmulator:
             "exactly one type"
         )
         assert result.stderr.count("\n") == 1 and "Traceback" not in result.stderr
+        assert not artifacts.exists()
+
+    def test_a_pre_override_item_is_fetched_under_a_project_override(self, tmp_path, jira, env):
+        # RFE_CREATOR_BINDING_RFE_PROJECT=KONFLUX: an RHAIRFE Feature Request (an item created
+        # before the override) is still admitted into the rfe layout; a KONFLUX Epic is not.
+        override = {**env, "RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+        jira.create("RHAIRFE-3", "Export models", "Body text.")
+        jira.create("KONFLUX-2", "An epic", "Epic body.", issue_type="Epic")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(override, "RHAIRFE-3", "--fetch-all", str(artifacts))
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        task = artifacts / "rfe-tasks" / "RHAIRFE-3.md"
+        data, _ = read_frontmatter_validated(str(task), "rfe-task")
+        assert (data["rfe_id"], data["type"], data["tracker_ref"]) == (
+            "RHAIRFE-3",
+            "rfe",
+            "RHAIRFE-3",
+        )
+        result = self._run(override, "KONFLUX-2", "--fetch-all", str(artifacts))
+        assert result.returncode == 1
+        assert result.stderr == (
+            "Error: KONFLUX-2 is (KONFLUX, Epic) in Jira but the resolved type rfe binds "
+            "(KONFLUX, Feature Request); nothing written\n"
+        )
+        assert not (artifacts / "rfe-tasks" / "KONFLUX-2.md").exists()
+
+    def test_the_shorthand_is_refused_end_to_end(self, tmp_path, jira, env):
+        jira.create("RHAIRFE-3", "Export models", "Body text.")
+        artifacts = tmp_path / "artifacts"
+        shorthand = {**env, "JIRA_PROJECT": "KONFLUX"}
+        result = self._run(shorthand, "RHAIRFE-3", "--fetch-all", str(artifacts))
+        assert (result.returncode, result.stdout) == (1, "")
+        assert result.stderr == (
+            "Error: JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured by the artifact "
+            "layer; set RFE_CREATOR_BINDING_RFE_PROJECT / _ISSUE_TYPE instead\n"
+        )
         assert not artifacts.exists()
 
     def test_overridden_issue_type_is_accepted_end_to_end(self, tmp_path, jira, env):

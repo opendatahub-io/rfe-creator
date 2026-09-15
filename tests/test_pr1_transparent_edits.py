@@ -13,6 +13,12 @@ carries a test proving the observable output is unchanged:
      named exactly below, and every pre-migration artifact stays byte-identical
      through the API writers and `frontmatter.py set` unless the caller sets
      the fields (legacy fixture set, TestLegacyArtifactsStayByteIdentical).
+     PR-3c (3/3) makes the tracker part of the id grammar in SCHEMAS the
+     EFFECTIVE `key_prefixes` (design §3.2.1; `Descriptor.binding()`), and the
+     writers' `is_existing` / rename guards the effective binding's: with no
+     override set — how this file, tests/test_schemas_golden.py and production
+     run — every effective value is the descriptor value, so nothing here moves
+     (tests/test_artifact_utils.py holds the overridden-project behaviour).
   2. `issuetype` joins the fetch field lists — request-only widening; the
      snapshot entries snapshot_fetch persists are unchanged, so no snapshot
      item is re-marked CHANGED (Q23). The fetched task artifact changes only by

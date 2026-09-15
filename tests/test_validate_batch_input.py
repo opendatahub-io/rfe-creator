@@ -741,3 +741,39 @@ class TestLegacyListNeutrality:
             + "VALID=false\n"
         )
         assert result.stderr == ("TYPE RESOLVED: rfe (--type)\n" if args else "")
+
+
+class TestParentKeyPatternIsTheEffectiveJoin:
+    """PARENT_KEY_PATTERN is ``Descriptor.parent_key_pattern_effective`` — the task schema's
+    join: under a project override the effective write prefix is an alternative, so an entry
+    whose parent was fetched under the override validates; with no override (and under a
+    malformed one, which falls back) it is the descriptor join and the protocol is unchanged."""
+
+    BATCH = "type: initiative\nitems:\n- prompt: Improve onboarding\n  parent_key: KONFLUX-1\n"
+
+    def _run(self, path, **env):
+        return subprocess.run(
+            ["python3", SCRIPT, path], capture_output=True, text=True, env=_clean_env(**env)
+        )
+
+    def test_an_overridden_parent_validates_under_the_override_only(self, tmp_path):
+        path = str(tmp_path / "batch.yaml")
+        _write(path, self.BATCH)
+        plain = self._run(path)
+        assert plain.returncode == 1
+        assert "ERROR: entry 0: 'parent_key' must match one of RHAISTRAT-" in plain.stdout
+        overridden = self._run(path, RFE_CREATOR_BINDING_INITIATIVE_PROJECT="KONFLUX")
+        assert overridden.returncode == 0, overridden.stderr
+        assert overridden.stdout == "ERROR_COUNT=0\nWARNING_COUNT=0\nVALID=true\n"
+        assert overridden.stderr == "TYPE RESOLVED: initiative (batch type)\n"
+        # Another type's override does not reach this type's pattern.
+        other = self._run(path, RFE_CREATOR_BINDING_RFE_PROJECT="KONFLUX")
+        assert other.returncode == 1 and other.stdout == plain.stdout
+
+    def test_a_malformed_override_falls_back_to_the_descriptor_join(self, tmp_path):
+        path = str(tmp_path / "batch.yaml")
+        _write(path, self.BATCH)
+        plain = self._run(path)
+        malformed = self._run(path, RFE_CREATOR_BINDING_INITIATIVE_PROJECT="lower")
+        assert (malformed.returncode, malformed.stdout) == (plain.returncode, plain.stdout)
+        assert "Traceback" not in malformed.stderr

@@ -15,6 +15,19 @@ Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
     JIRA_USER    Jira username/email
     JIRA_TOKEN   Jira API token
+
+The type is decided by the design §5 ladder (type_registry.resolve: --type, else the
+grandfathered rfe default) and the Jira project, issue type and write prefix come from that
+type's EFFECTIVE binding (design §3.2.1: the descriptor overlaid by
+RFE_CREATOR_BINDING_<TYPE>_{PROJECT,ISSUE_TYPE,LOCAL_PREFIX}; the bare JIRA_PROJECT /
+JIRA_ISSUE_TYPE shorthand is refused — the artifact layer does not read it), proven to be the
+type's own before any file or Jira access (type_registry.assert_registered_binding,
+assert_not_shorthand). With no override every effective value is the descriptor value. Exit 1
+before any write when the type cannot be resolved, the binding is not the resolved type's own
+or came from the shorthand, or a task's frontmatter tracker_ref is a key the resolved type does
+not own; a fetched issue whose (project, issue type) is neither the binding nor — for a key
+carrying a descriptor read prefix, an item created before the override — the descriptor pair
+is skipped, never written. The remote key of a task is its tracker_ref, else its id.
 """
 
 import argparse
@@ -46,6 +59,7 @@ from jira_utils import (  # noqa: E402
     add_labels,
     check_description_conflict,
     create_issue,
+    get_issue,
     get_myself,
     markdown_to_adf,
     remove_labels,
@@ -62,8 +76,9 @@ from snapshot_fetch import compute_content_hash, update_snapshot_hashes  # noqa:
 # The work-item type registry (types/<name>/type.yaml), read once at import. Every
 # per-type value below is a projection of a descriptor (design
 # work-item-types-unified.md §10 item 2) — DESCRIPTOR values only, never the effective
-# binding: an environment override must not reach the Jira write path before resolve()
-# (a later PR) prints and checks it.
+# binding: an environment override reaches the Jira write path only through main(), after
+# resolve() printed it and assert_registered_binding() proved it is the resolved type's own
+# (_effective_config overlays project, issue_type and jira_prefix on the resolved type's entry).
 _TYPES = type_registry.load()
 
 
@@ -110,6 +125,125 @@ TYPE_CONFIGS = {name: _type_config(_TYPES.get(name)) for name in _TYPES.names()}
 
 # Module-level alias for backward compat (used by test_submit.py direct imports)
 FEASIBILITY_LABELS = TYPE_CONFIGS["rfe"]["feasibility_labels"]
+
+
+# ─── Effective binding (design §3.2.1, PR-3c) ─────────────────────────────────
+
+# The two witnesses the pre-update verification reads off a fetched issue: the same pair
+# fetch_issue.py verifies after a fetch (D9: the project comes from the issue, never from
+# the key stem). Request-only: nothing written derives from them.
+BINDING_WITNESS_FIELDS = ("project", "issuetype")
+
+
+def _effective_config(type_name, binding):
+    """The resolved type's TYPE_CONFIGS entry with its tracker facts taken from ``binding`` —
+    the effective binding ``type_registry.resolve`` returned for it: ``project``,
+    ``issue_type`` and ``jira_prefix`` (the write prefix, ``key_prefixes[0]``: ``<PROJECT>-``
+    under a project override, the descriptor prefix otherwise). Every other key is the
+    descriptor projection unchanged, and so is the module-level table: with no override every
+    effective value equals the descriptor value, so every plan line, label and Jira payload
+    composed from the returned entry is byte-identical to one composed from TYPE_CONFIGS."""
+    cfg = dict(TYPE_CONFIGS[type_name])
+    cfg["project"] = binding.get("project")
+    cfg["issue_type"] = binding.get("issue_type")
+    prefixes = [p for p in binding.get("key_prefixes") or [] if p]
+    if prefixes:
+        cfg["jira_prefix"] = prefixes[0]
+    return cfg
+
+
+def _dry_run_key(jira_prefix):
+    """The key a dry run assigns a would-be-created item: binding-derived, ``<PROJECT>-DRY``
+    in the write prefix's form (design §3.2.1 d) — ``KONFLUX-DRY`` under a project override.
+    Never rendered; it only keeps the rename step off (``endswith("DRY")``)."""
+    return f"{jira_prefix}DRY"
+
+
+class TrackerRefError(ValueError):
+    """A task's frontmatter ``tracker_ref`` is a key the resolved type's binding does not own."""
+
+
+def _tracker_ref(data):
+    """The task's frontmatter ``tracker_ref`` as a non-empty string, else None. Absent, null
+    and blank all read as "no reference" — the pre-migration shape (PR-3c-i, D7: fields are
+    appended to new artifacts only, never back-filled)."""
+    ref = data.get("tracker_ref") if isinstance(data, dict) else None
+    if isinstance(ref, str) and ref.strip():
+        return ref.strip()
+    return None
+
+
+def _owned_key(key, binding):
+    """True when ``key`` starts with one of the effective binding's ``key_prefixes``: the write
+    prefix (``<PROJECT>-`` under a project override) or a descriptor prefix kept as a read
+    prefix — "a tracker key owned by the type" (design §3.2.1). Deliberately the key-prefix
+    rung alone: ``Descriptor.owns_effective`` answers the wider "is this id the type's" (a local
+    draft id is), which is not the question ``is_existing`` asks."""
+    if not isinstance(key, str) or not key:
+        return False
+    return any(key.startswith(p) for p in binding.get("key_prefixes") or [] if p)
+
+
+def _is_existing(data, id_field, type_name, binding, registry=None, env=None):
+    """The design §5 ``is_existing`` rule for one task: does it name an issue already in Jira?
+
+    ``tracker_ref`` is read from the frontmatter, never re-derived from the id (PR-3c-i): when
+    present it decides — a reference the resolved type's effective binding owns
+    (``_owned_key``) is an existing issue; one it does NOT own is a ``TrackerRefError`` naming
+    the id, the reference, the resolved type and the type that owns it (a ``type: rfe``
+    artifact carrying ``tracker_ref: RHOAIENG-123`` is never an update and never a create:
+    main() raises this before the first Jira write). Absent (a pre-migration artifact), the
+    fallback is membership of the id in the effective ``key_prefixes`` union — with no
+    override exactly the single-prefix ``startswith`` this replaces.
+    """
+    ref = _tracker_ref(data)
+    if ref is None:
+        return _owned_key(data.get(id_field), binding)
+    if _owned_key(ref, binding):
+        return True
+    registry = _TYPES if registry is None else registry
+    found = registry.candidates(ref, os.environ if env is None else env)
+    owners = [] if found.provisional else [n for n in found.names if n != type_name]
+    owned_by = f"type {'/'.join(owners)} owns" if owners else "no registered type owns"
+    prefixes = ", ".join(p for p in binding.get("key_prefixes") or [] if p) or "(none)"
+    raise TrackerRefError(
+        f"{data.get(id_field)} carries tracker_ref {ref!r}, a key {owned_by}, not the resolved "
+        f"type {type_name} (key prefixes: {prefixes}); an artifact bound to another type is "
+        f"never updated or created here — fix the artifact before re-running; nothing submitted"
+    )
+
+
+def _binding_skip_reason(item_id, fields, type_name, binding, jira_key=None):
+    """Pre-update verification (design §5, PR-3c): None when the fetched issue's
+    ``(project.key, issuetype.name)`` is one of the pairs the resolved type accepts for
+    ``jira_key`` — ``Descriptor.accepted_pairs``: the effective ``(project, issue_type)``, plus
+    the descriptor pair when the key carries a descriptor read prefix (an item created before
+    the override, still this type's to update) — else the plan's skip reason. ``jira_key`` is
+    the task's remote key (its tracker_ref, else ``item_id``). The same check fetch_issue.py
+    applies after a fetch, rendered as a skip: a response without a witness cannot be verified
+    and is skipped too (fail closed), naming the missing field."""
+    if jira_key is None:
+        jira_key = item_id
+    project = fields.get("project") if isinstance(fields, dict) else None
+    issuetype = fields.get("issuetype") if isinstance(fields, dict) else None
+    project_key = project.get("key") if isinstance(project, dict) else None
+    issue_type = issuetype.get("name") if isinstance(issuetype, dict) else None
+    accepted = _TYPES.get(type_name).accepted_pairs(binding, jira_key)
+    expected = type_registry.render_pairs(accepted)
+    missing = [
+        name for name, value in (("project", project_key), ("issuetype", issue_type)) if not value
+    ]
+    if missing:
+        return (
+            f"binding unverifiable — the fetched issue has no {' or '.join(missing)} field; "
+            f"type {type_name} binds {expected}"
+        )
+    if (project_key, issue_type) in accepted:
+        return None
+    return (
+        f"binding mismatch — {jira_key} is ({project_key}, {issue_type}) in Jira but type "
+        f"{type_name} binds {expected}"
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,8 +318,8 @@ def _feasibility_verdict(review_data):
     return review_data.get("feasibility")
 
 
-def _generate_reports(args):
-    """Regenerate the run report YAML and its HTML companion."""
+def _generate_reports(args, type_name):
+    """Regenerate the run report YAML and its HTML companion for the resolved ``type_name``."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     ts = args.report_timestamp
     run_id = _parse_run_id(ts)
@@ -205,15 +339,15 @@ def _generate_reports(args):
     ]
     # Both report scripts default to rfe; the rfe invocation carries no --type (grandfathered
     # argv, kept byte-identical) and every other type is named explicitly.
-    if args.type != "rfe":
-        yaml_cmd.extend(["--type", args.type])
+    if type_name != "rfe":
+        yaml_cmd.extend(["--type", type_name])
     result = subprocess.run(yaml_cmd, capture_output=True, text=True)
     if result.returncode == 0:
         print(f"  YAML report: {result.stdout.strip()}")
     else:
         print(f"Warning: YAML report generation failed: {result.stderr}", file=sys.stderr)
 
-    html_output = report_companion_path(args.artifacts_dir, run_id, args.type, "-report.html")
+    html_output = report_companion_path(args.artifacts_dir, run_id, type_name, "-report.html")
     html_cmd = [
         sys.executable,
         os.path.join(script_dir, "generate_review_pdf.py"),
@@ -223,8 +357,8 @@ def _generate_reports(args):
         "--output",
         html_output,
     ]
-    if args.type != "rfe":
-        html_cmd.extend(["--type", args.type])
+    if type_name != "rfe":
+        html_cmd.extend(["--type", type_name])
     result = subprocess.run(html_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Warning: HTML report generation failed: {result.stderr}", file=sys.stderr)
@@ -314,7 +448,7 @@ def _record_split_failure(
         )
 
 
-def _finish(args, type_label, submit_errors):
+def _finish(args, type_name, type_label, submit_errors):
     """Summarise failures, regenerate the reports, then exit. Never returns.
 
     Every terminating path routes through here. A path that skipped it took the run report with
@@ -326,7 +460,7 @@ def _finish(args, type_label, submit_errors):
             print(f"  {eid}: {emsg}", file=sys.stderr)
 
     if args.generate_report:
-        _generate_reports(args)
+        _generate_reports(args, type_name)
 
     sys.exit(1 if submit_errors else 0)
 
@@ -378,10 +512,13 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    # default=None: an absent flag reaches type_registry.resolve as "no signal" and lands on the
+    # grandfathered legacy default rung (rfe) silently; an explicit --type is rung 1 and prints
+    # the D3 line. The rendered default is unchanged.
     parser.add_argument(
         "--type",
         choices=_TYPES.choices(),
-        default="rfe",
+        default=None,
         help="Item type to submit (default: rfe)",
     )
     parser.add_argument(
@@ -406,8 +543,35 @@ def main():
     )
     args = parser.parse_args()
 
-    cfg = TYPE_CONFIGS[args.type]
-    desc = _TYPES.get(args.type)
+    # Design §5 ladder: --type (rung 1) else the grandfathered legacy default (rfe). The ids
+    # are this type's own task files, scanned below, so there is no id signal and the result
+    # is never ambiguous. The binding on the resolution is the EFFECTIVE one (§3.2.1): what
+    # the plan, the creates and the pre-update verification use.
+    try:
+        resolution = type_registry.resolve(_TYPES, explicit_type=args.type, env=os.environ)
+        # D3: the resolve line only when a non-default rung decided, and never on stdout —
+        # the production autofixer passes no --type and stays silent.
+        if resolution.rung != type_registry.LEGACY_DEFAULT_RUNG:
+            print(resolution.line(), file=sys.stderr)
+        # §3.2.1 g (runtime twin of gate-1 rule 1): the effective binding must be the
+        # resolved type's OWN. An override that binds it to another registered type's pair
+        # is refused here, before any file or Jira access. No override: silent.
+        type_registry.assert_registered_binding(
+            resolution.desc, env=os.environ, registry=_TYPES, shorthand=True
+        )
+        # The bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is a resolve-CLI verdict only: the
+        # artifact layer (artifact_utils' id grammar, rename guard and lookups) reads binding()
+        # without it, so a shorthand-sourced project would create the issue and then fail the
+        # rename. Refused here, before any file or Jira access.
+        type_registry.assert_not_shorthand(resolution.type_name, resolution.binding)
+    except type_registry.RegistryError as exc:
+        print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+        sys.exit(1)
+
+    type_name = resolution.type_name
+    desc = resolution.desc
+    binding = resolution.binding
+    cfg = _effective_config(type_name, binding)
     id_field = cfg["id_field"]
     jira_prefix = cfg["jira_prefix"]
     type_label = cfg["type_label"]
@@ -420,7 +584,7 @@ def main():
         parser.error("--report-timestamp is required when --generate-report is set")
     if args.auto_approve and not approved_status:
         parser.error(
-            f"--auto-approve: type '{args.type}' declares no identity.jira.state_map.approved"
+            f"--auto-approve: type '{type_name}' declares no identity.jira.state_map.approved"
         )
 
     server, user, token = require_env()
@@ -436,13 +600,35 @@ def main():
         print(f"Error: No {type_label} task files found.", file=sys.stderr)
         sys.exit(1)
 
+    # is_existing (design §5), one rule for every site below: the task's frontmatter
+    # tracker_ref when present, else key-prefix-union membership on the effective binding.
+    tasks_by_id = {data[id_field]: data for _, data in tasks}
+
+    def _existing(data):
+        return _is_existing(data, id_field, type_name, binding)
+
+    def _existing_key(key):
+        """The rule for a key that may have no task file of its own (the ancestor walk)."""
+        data = tasks_by_id.get(key)
+        return _existing(data) if data is not None else _owned_key(key, binding)
+
+    # A tracker_ref the resolved type does not own is a hard error for the whole run, raised
+    # here — before Phase 1, so before the first Jira write — rather than wherever the rule
+    # is first consulted for that task.
+    for _, data in tasks:
+        try:
+            _existing(data)
+        except TrackerRefError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     # --- Phase 1: Submit splits via split_submit.py ---
     child_parent_keys = {data.get("parent_key") for _, data in tasks if data.get("parent_key")}
     split_parent_data = {
         data[id_field]: data
         for _, data in tasks
         if data.get("status") == "Archived"
-        and data[id_field].startswith(jira_prefix)
+        and _existing(data)
         and data[id_field] in child_parent_keys
     }
     # A parent whose review the wave stall guard marked (split_not_attempted: / *_stalled)
@@ -471,7 +657,7 @@ def main():
         seen = set()
         pk = _parent_of.get(item_id)
         while pk and pk not in seen:
-            if pk.startswith(jira_prefix):
+            if _existing_key(pk):
                 return True
             seen.add(pk)
             pk = _parent_of.get(pk)
@@ -521,7 +707,7 @@ def main():
                     sorted(split_parents),
                     "split_not_attempted: Jira preflight failed",
                 )
-                _finish(args, type_label, submit_errors)
+                _finish(args, type_name, type_label, submit_errors)
 
         # Circuit breaker for failures the exit-code classifier cannot see
         # (signal deaths, unexpected codes): consecutive-ness is the
@@ -545,7 +731,11 @@ def main():
             if args.dry_run:
                 cmd.append("--dry-run")
             print(f"--- {parent_key} ---")
-            result = subprocess.run(cmd)
+            # D3, one line per run: this process resolved the type (and printed the line for
+            # an explicit --type); the child skips its own line when the marker is set.
+            result = subprocess.run(
+                cmd, env={**os.environ, type_registry.RESOLVED_BY_PARENT_ENV: "1"}
+            )
             if result.returncode in (0, 2, 3, 4, 5):
                 # Any CLASSIFIED outcome resets the streak: the breaker's
                 # discriminator is "the classifier missed twice in a row",
@@ -696,7 +886,7 @@ def main():
             # The report is still written — the parents that succeeded
             # earlier in this loop are real in Jira and this is the only
             # place they are recorded.
-            _finish(args, type_label, submit_errors)
+            _finish(args, type_name, type_label, submit_errors)
 
     # Record split-child hashes in the snapshot
     if split_parents and not args.dry_run:
@@ -706,7 +896,7 @@ def main():
             for path, data in post_split_tasks:
                 if data.get("parent_key") and data.get("status") == "Submitted":
                     item_id = data.get(id_field, "")
-                    if item_id.startswith(jira_prefix):
+                    if _existing(data):
                         with open(path, encoding="utf-8") as f:
                             raw = f.read()
                         cleaned = strip_metadata(raw)
@@ -755,7 +945,7 @@ def main():
                 print(f"Done. {len(split_parents)} split(s) processed.")
             # A split-only batch reaches here on the happy path too, so returning early meant a
             # run whose every input was a split never produced a report at all.
-            _finish(args, type_label, submit_errors)
+            _finish(args, type_name, type_label, submit_errors)
         print(f"Error: No submittable {type_label}s found.", file=sys.stderr)
         sys.exit(1)
 
@@ -792,7 +982,12 @@ def main():
     for task_path, task_data in submittable:
         item_id = task_data[id_field]
         title = task_data["title"]
-        is_existing = item_id.startswith(jira_prefix)
+        is_existing = _existing(task_data)
+        # The ONE remote key of the task (design §5): its frontmatter tracker_ref when present
+        # — the reference is_existing just accepted — else the id itself. Every Jira call below
+        # (the witness / conflict fetch, the update, labels, transitions, comments) names it;
+        # the local paths (task, original, review) keep the artifact id.
+        jira_key = _tracker_ref(task_data) or item_id
         priority = task_data["priority"]
         size = task_data.get("size", "M")
 
@@ -830,6 +1025,7 @@ def main():
                     "remove_labels": [],
                     "skip_reason": "no readable review — left unprocessed for the next run",
                     "task_path": task_path,
+                    "jira_key": jira_key,
                     "attn_reason": None,
                     "original_labels": task_data.get("original_labels") or [],
                     "auto_approve": False,
@@ -847,6 +1043,36 @@ def main():
         attn_reason = None
         if review_data and review_data.get("needs_attention", False):
             attn_reason = review_data.get("needs_attention_reason")
+
+        def _binding_skip(reason, jira_status=None):
+            """The plan entry of an existing issue the pre-update verification refused: no
+            write, and — like an unreviewed item — not disposed of, so it is not marked
+            processed and the next run sees it again."""
+            return {
+                id_field: item_id,
+                "title": title,
+                "is_existing": is_existing,
+                "priority": priority,
+                "size": size,
+                "action": "SKIP",
+                "labels": [],
+                "remove_labels": [],
+                "skip_reason": reason,
+                "task_path": task_path,
+                "jira_key": jira_key,
+                "attn_reason": None,
+                "original_labels": original_labels,
+                "auto_approve": False,
+                "jira_status": jira_status,
+                "leave_unprocessed": True,
+            }
+
+        def _fetch_witnesses():
+            """The two binding witnesses of ``item_id``, fetched on their own: the smallest
+            fetch for a write path that performs no other (the reject path's label removal,
+            an update with no original to compare with)."""
+            issue = get_issue(server, user, token, jira_key, fields=list(BINDING_WITNESS_FIELDS))
+            return issue.get("fields") or {}
 
         # Both types gate on the same rule: only an explicitly feasible item
         # auto-approves. An `indeterminate` verdict means the assessment was
@@ -875,6 +1101,21 @@ def main():
                 feasibility_labels=cfg["feasibility_labels"],
             )
             remove.extend(feas_remove)
+            if remove and is_existing and not args.dry_run:
+                # Removing labels is a write to an existing issue: verify its (project,
+                # issue type) against the resolved binding first (design §5 / PR-3c). A
+                # fetch that fails is warned about and the write proceeds, as the conflict
+                # check below has always done; a fetched pair that does not match is a skip.
+                mismatch = None
+                try:
+                    mismatch = _binding_skip_reason(
+                        item_id, _fetch_witnesses(), type_name, binding, jira_key
+                    )
+                except Exception as e:
+                    print(f"Warning: binding check failed for {item_id}: {e}", file=sys.stderr)
+                if mismatch:
+                    plan.append(_binding_skip(mismatch))
+                    continue
             plan.append(
                 {
                     id_field: item_id,
@@ -887,6 +1128,7 @@ def main():
                     "remove_labels": remove,
                     "skip_reason": None if remove else "rejected",
                     "task_path": task_path,
+                    "jira_key": jira_key,
                     "attn_reason": None,
                     "original_labels": original_labels,
                     "auto_approve": False,
@@ -895,16 +1137,40 @@ def main():
             )
             continue
 
-        # For existing items, check for Jira conflicts
+        # For existing items, verify the binding and check for Jira conflicts. One fetch
+        # serves both: the conflict check's request also carries the two binding witnesses
+        # (project, issuetype), and an item with no original to compare with — the conflict
+        # check makes no request then — gets the smallest fetch that carries them.
         jira_status = None
         if is_existing and not args.dry_run:
             original_path = os.path.join(args.artifacts_dir, cfg["originals_dir"], f"{item_id}.md")
             try:
                 has_conflict, issue_fields = check_description_conflict(
-                    server, user, token, item_id, original_path, extra_fields=["status"]
+                    server,
+                    user,
+                    token,
+                    jira_key,
+                    original_path,
+                    extra_fields=["status", *BINDING_WITNESS_FIELDS],
                 )
                 if issue_fields:
                     jira_status = issue_fields.get("status", {}).get("name")
+                if issue_fields is None:
+                    # No original to compare with: the conflict check made no request, so the
+                    # two witnesses are fetched on their own. A transport failure here is not a
+                    # verdict — the update below reports it once, as it always did — so it
+                    # leaves issue_fields None and the binding check is skipped silently.
+                    try:
+                        issue_fields = _fetch_witnesses()
+                    except Exception:
+                        issue_fields = None
+                if issue_fields is not None:
+                    mismatch = _binding_skip_reason(
+                        item_id, issue_fields, type_name, binding, jira_key
+                    )
+                    if mismatch:
+                        plan.append(_binding_skip(mismatch, jira_status))
+                        continue
                 if has_conflict:
                     plan.append(
                         {
@@ -918,6 +1184,7 @@ def main():
                             "remove_labels": [],
                             "skip_reason": "Jira conflict — description modified since fetch",
                             "task_path": task_path,
+                            "jira_key": jira_key,
                             "attn_reason": None,
                             "original_labels": original_labels,
                             "auto_approve": False,
@@ -961,6 +1228,7 @@ def main():
                             "remove_labels": feas_remove,
                             "skip_reason": None if has_work else "no changes",
                             "task_path": task_path,
+                            "jira_key": jira_key,
                             "attn_reason": attn_reason,
                             "original_labels": original_labels,
                             "auto_approve": auto_approve,
@@ -992,6 +1260,7 @@ def main():
                 "remove_labels": feas_remove,
                 "skip_reason": None,
                 "task_path": task_path,
+                "jira_key": jira_key,
                 "attn_reason": attn_reason,
                 "original_labels": original_labels,
                 "auto_approve": auto_approve,
@@ -1045,6 +1314,7 @@ def main():
     mark_processed_ids = []
     for entry in plan:
         item_id = entry[id_field]
+        jira_key = entry.get("jira_key") or item_id
         if entry["skip_reason"]:
             # A conflict or an unreviewed item is not disposed of — marking it
             # processed would exclude it from every future fetch (invariant 7:
@@ -1061,7 +1331,7 @@ def main():
                 if args.dry_run:
                     print(f"  {item_id}: Would remove labels: {', '.join(remove)}")
                 else:
-                    remove_labels(server, user, token, item_id, remove)
+                    remove_labels(server, user, token, jira_key, remove)
                     print(f"  {item_id}: Removed labels: {', '.join(remove)}")
                 mark_processed_ids.append(item_id)
                 continue
@@ -1075,7 +1345,7 @@ def main():
                         print(f"  {item_id}: Would add labels: {', '.join(labels)}")
                 else:
                     if remove or labels:
-                        swap_labels(server, user, token, item_id, labels, remove)
+                        swap_labels(server, user, token, jira_key, labels, remove)
                         if remove:
                             print(f"  {item_id}: Removed labels: {', '.join(remove)}")
                         if labels:
@@ -1083,11 +1353,11 @@ def main():
                     update_frontmatter(
                         entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
                     )
-                results[item_id] = item_id
+                results[item_id] = jira_key
                 _post_needs_attention_comment(
                     server, user, token, entry, results, args.dry_run, cfg
                 )
-                _maybe_approve(item_id, item_id, entry)
+                _maybe_approve(item_id, jira_key, entry)
                 mark_processed_ids.append(item_id)
                 continue
 
@@ -1107,10 +1377,10 @@ def main():
                     if remove:
                         print(f"           Would remove: {', '.join(remove)}")
                 else:
-                    update_issue(server, user, token, item_id, title, description_adf)
+                    update_issue(server, user, token, jira_key, title, description_adf)
                     print(f"  {item_id}: Updated")
                     if remove or labels:
-                        swap_labels(server, user, token, item_id, labels, remove)
+                        swap_labels(server, user, token, jira_key, labels, remove)
                         if remove:
                             print(f"           Removed: {', '.join(remove)}")
                         if labels:
@@ -1119,13 +1389,13 @@ def main():
                     update_frontmatter(
                         entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
                     )
-                results[item_id] = item_id
+                results[item_id] = jira_key
             else:
                 if args.dry_run:
                     print(
                         f"  {item_id}: Would create {cfg['project']} {cfg['issue_type']}: {title}"
                     )
-                    results[item_id] = f"{jira_prefix}DRY"
+                    results[item_id] = _dry_run_key(jira_prefix)
                 else:
                     create_kwargs = {}
                     # Read parent_key from frontmatter for new items. Only a
@@ -1235,7 +1505,7 @@ def main():
     else:
         print(f"\nDone. {len(results)} {type_label.lower()}(s) processed.")
 
-    _finish(args, type_label, submit_errors)
+    _finish(args, type_name, type_label, submit_errors)
 
 
 if __name__ == "__main__":

@@ -1232,6 +1232,87 @@ class TestDetect:
         assert reg.detect("RHAIRFE-1").name == "rfe"
 
 
+class TestOwnsEffective:
+    """``Descriptor.owns_effective``: ``owns`` over the EFFECTIVE binding (§3.2.1; PR-3c, the
+    ownership test of the writers and the artifact helpers). The three definite rungs only —
+    never the provisional tracker grammar — with the read parity ``candidates()`` applies;
+    ``owns`` and ``detect`` stay descriptor-only for the per-id routers."""
+
+    ENV = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+    IDS = ("RFE-001", "RHAIRFE-1", "INIT-001", "RHOAIENG-1", "RHAISTRAT-1", "KONFLUX-1", "RFE-x")
+
+    def test_no_override_equals_owns_for_every_shipped_id(self):
+        reg = _shipped()
+        for item_id in (*self.IDS, "", None, 1234):
+            for desc in reg:
+                assert desc.owns_effective(item_id, env={}) is desc.owns(item_id), (
+                    desc.name,
+                    item_id,
+                )
+
+    def test_overridden_project_key_is_owned_only_under_the_override(self):
+        reg = _shipped()
+        rfe, init = reg.get("rfe"), reg.get("initiative")
+        assert rfe.owns_effective("KONFLUX-1", env={}) is False
+        assert rfe.owns_effective("KONFLUX-1", env=self.ENV) is True
+        assert rfe.owns_effective("KONFLUX-1234x", env=self.ENV) is True  # a prefix test, as owns
+        assert init.owns_effective("KONFLUX-1", env=self.ENV) is False  # the overridden type only
+        # Descriptor-only readers do not move (test_detect_ignores_binding_overrides).
+        assert rfe.owns("KONFLUX-1") is False
+        assert reg.detect("KONFLUX-1") is None
+
+    def test_descriptor_prefixes_stay_read_forms(self):
+        rfe = _shipped().get("rfe")
+        for item_id in ("RHAIRFE-1", "RFE-001", "RFE-x"):
+            assert rfe.owns_effective(item_id, env={}) is True, item_id
+            assert rfe.owns_effective(item_id, env=self.ENV) is True, item_id
+
+    def test_never_the_provisional_rung(self):
+        reg = _shipped()
+        found = reg.candidates("RHAISTRAT-1", env=self.ENV)
+        assert found.provisional and found.names == ["rfe", "initiative"]
+        assert not any(d.owns_effective("RHAISTRAT-1", env=self.ENV) for d in reg)
+        assert not any(d.owns_effective("AB1-9", env={}) for d in reg)
+
+    def test_env_defaults_to_the_registry_environment(self):
+        reg = load(root=TYPES_ROOT, extra_roots=[], env=self.ENV)
+        assert reg.get("rfe").owns_effective("KONFLUX-1") is True
+        assert reg.get("initiative").owns_effective("KONFLUX-1") is False
+        assert _shipped().get("rfe").owns_effective("KONFLUX-1") is False
+        # An explicit env wins over the registry's.
+        assert reg.get("rfe").owns_effective("KONFLUX-1", env={}) is False
+
+    def test_local_prefix_override_keeps_read_parity(self):
+        env = {"RFE_CREATOR_BINDING_RFE_LOCAL_PREFIX": "DRAFT-"}
+        rfe = _shipped().get("rfe")
+        assert rfe.owns_effective("DRAFT-001", env=env) is True  # the re-rendered pattern (D13)
+        assert rfe.owns_effective("DRAFT-x", env=env) is True  # the effective local prefix
+        assert (
+            rfe.owns_effective("RFE-001", env=env) is True
+        )  # the descriptor's own stay read forms
+        assert rfe.owns_effective("RFE-x", env=env) is True
+        assert rfe.owns_effective("DRAFT-001", env={}) is False
+
+    def test_workspace_source_is_applied_when_passed(self):
+        rfe = _shipped().get("rfe")
+        assert rfe.owns_effective("KONFLUX-1", env={}, workspace=WORKSPACE) is True
+        assert rfe.owns_effective("KONFLUX-1", env={}) is False
+
+    def test_shorthand_is_never_applied(self):
+        # JIRA_PROJECT is a resolve-time source for the resolved type only (binding(shorthand=)).
+        rfe = _shipped().get("rfe")
+        assert rfe.owns_effective("KONFLUX-1", env={"JIRA_PROJECT": "KONFLUX"}) is False
+
+    def test_agrees_with_candidates_definite_rungs_for_every_shipped_id(self):
+        reg = _shipped()
+        for env in ({}, self.ENV):
+            for item_id in self.IDS:
+                found = reg.candidates(item_id, env=env)
+                definite = [] if found.provisional else found.names
+                owners = [d.name for d in reg if d.owns_effective(item_id, env=env)]
+                assert owners == definite, (env, item_id)
+
+
 # ── the one headless predicate (PR-3 D4) ─────────────────────────────────────────
 
 
@@ -2845,3 +2926,158 @@ class TestResolveBatchItems:
         assert res.binding is None and res.type_name == "rfe"
         with pytest.raises(ResolveError, match="workspace file"):
             resolve(_shipped(), explicit_type="rfe", env={"CI": "1"}, workspace=workspace)
+
+
+class TestParentKeyPatternEffective:
+    """``Descriptor.parent_key_pattern_effective``: the ``parent_key`` join over the effective
+    binding — the descriptor join byte for byte without a project override, the effective write
+    prefix prepended under one, so the children of a parent fetched under the override validate
+    (the task schema in artifact_utils and validate_batch_input read this form)."""
+
+    def test_no_project_override_is_the_descriptor_join_byte_for_byte(self):
+        reg = _shipped()
+        for name in SHIPPED:
+            desc = reg.get(name)
+            assert desc.parent_key_pattern_effective({}) == desc.parent_key_pattern
+            # An issue-type override is not a project override: nothing to prepend.
+            issue_type_var = f"RFE_CREATOR_BINDING_{name.upper()}_ISSUE_TYPE"
+            assert (
+                desc.parent_key_pattern_effective({issue_type_var: "Epic"})
+                == desc.parent_key_pattern
+            )
+
+    def test_a_project_override_prepends_the_effective_write_prefix(self):
+        rfe = _shipped().get("rfe")
+        pattern = rfe.parent_key_pattern_effective({"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"})
+        assert pattern == r"^(KONFLUX-\d+|RFE-\d+|RHAIRFE-\d+)$"
+        for key in ("KONFLUX-1", "RFE-001", "RHAIRFE-7"):
+            assert re.fullmatch(pattern, key), key
+        for key in ("RHOAIENG-1", "KONFLUX-", "konflux-1"):
+            assert re.fullmatch(pattern, key) is None, key
+        init = _shipped().get("initiative")
+        assert (
+            init.parent_key_pattern_effective({"RFE_CREATOR_BINDING_INITIATIVE_PROJECT": "KONFLUX"})
+            == r"^(KONFLUX-\d+|RHAISTRAT-\d+|RHOAIENG-\d+|INIT-\d+)$"
+        )
+
+    def test_an_override_naming_a_declared_alternative_adds_nothing(self):
+        rfe = _shipped().get("rfe")
+        env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "RHAIRFE"}
+        assert rfe.binding(env)["overrides"] == ["project"]
+        assert rfe.parent_key_pattern_effective(env) == rfe.parent_key_pattern
+
+    def test_none_without_patterns_and_the_registry_env_by_default(self):
+        assert Descriptor("bare", {"type": "bare"}).parent_key_pattern_effective({}) is None
+        empty = {"type": "e", "conventions": {"parent_key_patterns": []}}
+        assert Descriptor("e", empty).parent_key_pattern_effective({}) is None
+        reg = load(
+            root=TYPES_ROOT, extra_roots=[], env={"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+        )
+        assert reg.get("rfe").parent_key_pattern_effective().startswith(r"^(KONFLUX-\d+|")
+        assert reg.get("initiative").parent_key_pattern_effective() == (
+            reg.get("initiative").parent_key_pattern
+        )
+
+    def test_a_malformed_override_raises_like_binding(self):
+        with pytest.raises(RegistryError, match="RFE_CREATOR_BINDING_RFE_PROJECT='lower'"):
+            _shipped().get("rfe").parent_key_pattern_effective(
+                {"RFE_CREATOR_BINDING_RFE_PROJECT": "lower"}
+            )
+
+
+class TestAcceptedPairs:
+    """``Descriptor.accepted_pairs``: the pairs a fetched issue behind a key may show — the
+    effective pair always, plus the descriptor pair for a key carrying a descriptor prefix (an
+    item created before the override); ``render_pairs`` is the writers' ``binds ...`` text."""
+
+    RFE_PAIR = ("RHAIRFE", "Feature Request")
+
+    def test_no_override_is_the_one_descriptor_pair(self):
+        rfe = _shipped().get("rfe")
+        binding = rfe.binding({})
+        for key in ("RHAIRFE-7", "KONFLUX-1", "RFE-001", "", None):
+            assert rfe.accepted_pairs(binding, key) == [self.RFE_PAIR], key
+
+    def test_a_descriptor_prefixed_key_also_accepts_the_descriptor_pair_under_an_override(self):
+        rfe = _shipped().get("rfe")
+        binding = rfe.binding({"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"})
+        assert rfe.accepted_pairs(binding, "RHAIRFE-7") == [
+            ("KONFLUX", "Feature Request"),
+            self.RFE_PAIR,
+        ]
+        # The overridden write prefix and a local id carry no descriptor prefix: the effective
+        # pair alone — a KONFLUX-1 Epic is refused whatever the descriptor says.
+        assert rfe.accepted_pairs(binding, "KONFLUX-1") == [("KONFLUX", "Feature Request")]
+        assert rfe.accepted_pairs(binding, "RFE-001") == [("KONFLUX", "Feature Request")]
+
+    def test_an_issue_type_override_accepts_the_pre_override_pair_for_its_own_keys(self):
+        rfe = _shipped().get("rfe")
+        binding = rfe.binding({"RFE_CREATOR_BINDING_RFE_ISSUE_TYPE": "Epic"})
+        assert rfe.accepted_pairs(binding, "RHAIRFE-7") == [("RHAIRFE", "Epic"), self.RFE_PAIR]
+        assert rfe.accepted_pairs(binding, "FOO-1") == [("RHAIRFE", "Epic")]
+
+    def test_render_pairs(self):
+        import type_registry
+
+        assert type_registry.render_pairs([self.RFE_PAIR]) == "(RHAIRFE, Feature Request)"
+        assert type_registry.render_pairs([("KONFLUX", "Feature Request"), self.RFE_PAIR]) == (
+            "(KONFLUX, Feature Request) or, for a pre-override key, (RHAIRFE, Feature Request)"
+        )
+
+
+class TestAssertNotShorthand:
+    """The writers refuse a binding the bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand contributed
+    to: the artifact layer reads binding() without it. The shorthand stays a resolve-CLI verdict."""
+
+    LINE = (
+        "JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured by the artifact layer; set "
+        "RFE_CREATOR_BINDING_RFE_PROJECT / _ISSUE_TYPE instead"
+    )
+
+    def test_descriptor_and_env_sourced_bindings_pass_through(self):
+        import type_registry
+
+        rfe = _shipped().get("rfe")
+        for env in ({}, {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}):
+            binding = rfe.binding(env, shorthand=True)
+            assert type_registry.assert_not_shorthand("rfe", binding) is binding
+        # A shorthand in the environment that the binding was computed WITHOUT is no source.
+        binding = rfe.binding({"JIRA_PROJECT": "KONFLUX"})
+        assert binding["source"] == "descriptor"
+        assert type_registry.assert_not_shorthand("rfe", binding) is binding
+
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"JIRA_PROJECT": "KONFLUX"},
+            {"JIRA_ISSUE_TYPE": "Story"},
+            {"JIRA_PROJECT": "KONFLUX", "RFE_CREATOR_BINDING_RFE_ISSUE_TYPE": "Story"},
+            {"JIRA_PROJECT": "RHAIRFE"},  # equal to the descriptor value: still shorthand-sourced
+        ],
+        ids=["project", "issue_type", "env+shorthand", "descriptor-value"],
+    )
+    def test_a_shorthand_contribution_is_refused_naming_the_typed_variables(self, env):
+        import type_registry
+
+        binding = _shipped().get("rfe").binding(env, shorthand=True)
+        assert "shorthand" in binding["source"].split("+")
+        with pytest.raises(RegistryError) as exc:
+            type_registry.assert_not_shorthand("rfe", binding)
+        assert exc.value.args[0] == self.LINE
+
+    def test_the_type_token_is_binding_env_vars(self):
+        import type_registry
+
+        binding = _shipped().get("initiative").binding({"JIRA_PROJECT": "KONFLUX"}, shorthand=True)
+        with pytest.raises(RegistryError, match="set RFE_CREATOR_BINDING_INITIATIVE_PROJECT / "):
+            type_registry.assert_not_shorthand("initiative", binding)
+
+    def test_resolve_keeps_the_shorthand_for_the_cli_verdict(self):
+        import type_registry
+
+        reg = load(root=TYPES_ROOT, extra_roots=[], env={"JIRA_PROJECT": "KONFLUX"})
+        result = type_registry.resolve(reg, explicit_type="rfe")
+        assert result.binding["source"] == "shorthand"
+        assert result.line() == "TYPE RESOLVED: rfe (--type; binding override project=KONFLUX)"
+        with pytest.raises(RegistryError, match="not honoured by the artifact layer"):
+            type_registry.assert_not_shorthand(result.type_name, result.binding)

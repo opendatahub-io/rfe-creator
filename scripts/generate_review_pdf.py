@@ -18,8 +18,10 @@ from artifact_utils import find_task_file_including_archived, read_frontmatter
 
 # The work-item type registry (types/<name>/type.yaml), read once at import; every
 # per-type value below is a projection of a descriptor (design work-item-types-unified.md
-# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
-# overrides land with resolve() in a later PR.
+# §10 item 2). Deliberately the DESCRIPTOR values: the REPORT_CONFIG table carries layout
+# and id-grammar facts, which are not overridable (design §3.2.1), so it never reads the
+# effective binding; the task lookup (find_task_file_including_archived's descriptor form,
+# artifact_utils) follows the effective binding on its own.
 _TYPES = type_registry.load()
 
 # The "passing" total: a property of the 0-2 x 5 scoring machinery, not of a type.

@@ -64,7 +64,12 @@ MAX_LEAF_CHILDREN = 6
 # 2 and 3 predate this and stay: leaf-cap refusal and Jira conflict.
 EXIT_PER_PARENT = 4  # this parent failed; others are unaffected — continue
 EXIT_SYSTEMIC = 5  # Jira itself is unusable (auth, outage) — abort the loop
-EXIT_USAGE = 64  # argparse would exit 2, which reads as the leaf cap
+# argparse would exit 2, which reads as the leaf cap. Also the code of the other
+# configuration refusals decided from argv and the environment alone, before any
+# artifact or Jira access: a type whose effective tracker binding is malformed, not
+# its own or sourced from the JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand
+# (type_registry.resolve / assert_registered_binding / assert_not_shorthand, PR-3c).
+EXIT_USAGE = 64
 
 
 class _Parser(argparse.ArgumentParser):
@@ -108,13 +113,24 @@ def _classify_exit(exc):
 
 # The work-item type registry (types/<name>/type.yaml), read once at import; every
 # per-type value below is a projection of a descriptor (design work-item-types-unified.md
-# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
-# overrides land with resolve() in a later PR.
+# §10 item 2). The module-level tables carry the DESCRIPTOR values so the import cannot
+# fail on the environment; main() re-projects the resolved type over its EFFECTIVE binding
+# (design §3.2.1: ``RFE_CREATOR_BINDING_<TYPE>_*`` and the ``JIRA_PROJECT`` /
+# ``JIRA_ISSUE_TYPE`` shorthand) once ``type_registry.resolve`` has chosen the type and
+# ``assert_registered_binding`` has proven the binding is that type's own (PR-3c). With no
+# override set every effective value equals the descriptor value.
 _TYPES = type_registry.load()
 
 
-def _split_config(desc):
+def _split_config(desc, binding=None):
     """Project one descriptor onto the SPLIT_CONFIG entry the phases read.
+
+    ``binding`` is the EFFECTIVE tracker binding (``desc.binding(env)`` or the one on a
+    ``type_registry.Resolution``) the children are created under: ``project`` and
+    ``issue_type`` are taken from it — and with them the marker-label JQL and the dry-run
+    sentinel ``<PROJECT>-DRY`` (design §3.2.1 d). ``None`` projects the descriptor's own
+    ``identity.jira`` values (the import-time table). ``type`` names the descriptor: the
+    ``_TRACKER`` facts are keyed by it (PR-3 D12), never by the binding pair.
 
     The four callables keep the ``(artifacts_dir, ...)`` signatures the per-type wrappers
     had: scan_tasks / rename_to_tracker_key / parse_child are bound to ``desc``, and
@@ -123,9 +139,15 @@ def _split_config(desc):
     """
     dirs = desc.dirs("bare")
     alignment = desc.get("conventions.labels.alignment", None)
+    if binding is None:
+        project = desc.get("identity.jira.project")
+        issue_type = desc.get("identity.jira.issue_type")
+    else:
+        project, issue_type = binding["project"], binding["issue_type"]
     return {
-        "project": desc.get("identity.jira.project"),
-        "issue_type": desc.get("identity.jira.issue_type"),
+        "type": desc.name,
+        "project": project,
+        "issue_type": issue_type,
         "comment_marker": desc.get("conventions.comment_prefix"),
         "label_prefix": desc.get("conventions.label_prefix"),
         "entity_name": desc.get("display.entity"),
@@ -148,38 +170,30 @@ SPLIT_CONFIG = {name: _split_config(_TYPES.get(name)) for name in _TYPES.names()
 
 # The Jira-side facts of the split transaction that SPLIT_CONFIG never carried (its key
 # set is a contract shared with the tests): the link type between a parent and its
-# children, and how the parent is closed once they exist. Keyed by the (project,
-# issue_type) binding pair every SPLIT_CONFIG entry carries, so a phase recovers them from
-# its ``config`` alone. validate_types.py keeps the pair unique per registered type, but
-# the registry does not run that gate at load, so the invariant is enforced here where it
-# is relied on: a second type with the same pair would otherwise silently replace the
-# first's facts. Read with a None default: both are optional in the schema and a
-# registered type that never splits must not break the import (main() refuses to split a
-# parent of such a type before any scan or Jira call).
+# children, and how the parent is closed once they exist. Keyed by TYPE NAME (PR-3 D12),
+# the ``type`` every SPLIT_CONFIG entry carries, so a phase recovers them from its
+# ``config`` alone whatever project the binding is overridden to. Uniqueness of the
+# (project, issue_type) pair is not this table's concern: validate_types.py lints the
+# descriptors and ``type_registry.assert_registered_binding`` is the runtime guard main()
+# runs over the EFFECTIVE binding before any access. Read with a None default: both are
+# optional in the schema and a registered type that never splits must not break the
+# import (main() refuses to split a parent of such a type before any scan or Jira call).
 def _tracker_facts(types):
-    facts, owner = {}, {}
-    for desc in types:
-        pair = (desc.get("identity.jira.project"), desc.get("identity.jira.issue_type"))
-        if pair in owner:
-            raise type_registry.RegistryError(
-                f"split_submit: types {owner[pair]!r} and {desc.name!r} share the "
-                f"(project, issue_type) binding {pair}; the split link type and the "
-                "close-superseded state are recovered by that pair, so it must be unique"
-            )
-        owner[pair] = desc.name
-        facts[pair] = {
+    return {
+        desc.name: {
             "split_link_type": desc.get("identity.jira.split_link_type", None),
             "close_superseded": desc.get("identity.jira.state_map.close_superseded", None),
         }
-    return facts
+        for desc in types
+    }
 
 
 _TRACKER = _tracker_facts(_TYPES)
 
 
-def _tracker(config):
-    """The ``_TRACKER`` entry of the type ``config`` projects."""
-    return _TRACKER[(config["project"], config["issue_type"])]
+def _tracker_for(config):
+    """The ``_TRACKER`` entry of the type ``config`` projects (by its ``type`` name)."""
+    return _TRACKER[config["type"]]
 
 
 def _missing_split_facts(config):
@@ -188,7 +202,7 @@ def _missing_split_facts(config):
     Empty for both shipped types. A type may legitimately omit them (it never splits);
     the refusal belongs to the moment a parent of that type is submitted for a split.
     """
-    facts = _tracker(config)
+    facts = _tracker_for(config)
     close = facts["close_superseded"] or {}
     missing = []
     if not facts["split_link_type"]:
@@ -198,6 +212,45 @@ def _missing_split_facts(config):
         if not close.get(key):
             missing.append(f"identity.jira.state_map.close_superseded.{key}")
     return missing
+
+
+# The two witnesses the pre-split verification reads off the fetched parent: the same pair
+# submit.py verifies before an update and fetch_issue.py after a fetch (D9: the project comes
+# from the issue, never from the key stem). Request-only: nothing written derives from them.
+BINDING_WITNESS_FIELDS = ("project", "issuetype")
+
+
+def _parent_binding_refusal(parent_key, fields, desc, binding):
+    """The one-line reason the parent must not be split as this type, or None (PR-3c, the
+    writers). The fetched ``(project.key, issuetype.name)`` must be one of the pairs the type
+    accepts for ``parent_key`` — ``Descriptor.accepted_pairs``: the effective ``(project,
+    issue_type)``, plus the descriptor pair when the key carries a descriptor read prefix (a
+    parent fetched before the override) — and a response without a witness cannot be verified
+    and is refused too (fail closed). The rule submit.py and check_conflicts.py apply before
+    an update: a parent of another type is not this run's to comment on, label, link or close.
+    """
+    fields = fields if isinstance(fields, dict) else {}
+    project = fields.get("project")
+    issuetype = fields.get("issuetype")
+    project_key = project.get("key") if isinstance(project, dict) else None
+    issue_type = issuetype.get("name") if isinstance(issuetype, dict) else None
+    accepted = desc.accepted_pairs(binding, parent_key)
+    expected = type_registry.render_pairs(accepted)
+    missing = [
+        name for name, value in (("project", project_key), ("issuetype", issue_type)) if not value
+    ]
+    if missing:
+        return (
+            f"cannot verify {parent_key} against the resolved type {desc.name} binding "
+            f"{expected}: the fetched issue has no {' or '.join(missing)} field; refusing to "
+            f"split — nothing written"
+        )
+    if (project_key, issue_type) in accepted:
+        return None
+    return (
+        f"{parent_key} is ({project_key}, {issue_type}) in Jira but the resolved type "
+        f"{desc.name} binds {expected}; refusing to split — nothing written"
+    )
 
 
 def _feasibility_labels(label_prefix):
@@ -239,7 +292,7 @@ def _inspect_child(server, user, token, child_key, artifact_path, parent_key, co
     from jira_utils import adf_to_markdown, normalize_for_compare
 
     _, _, _, cleaned = config["parse_child_fn"](artifact_path)
-    split_link_type = _tracker(config)["split_link_type"]
+    split_link_type = _tracker_for(config)["split_link_type"]
     issue = get_issue(server, user, token, child_key, ["description", "summary", "issuelinks"])
     fields = issue.get("fields", {})
     desc_raw = fields.get("description")
@@ -333,7 +386,7 @@ def discover_state(server, user, token, parent_key, expected_children, config):
     state = SubmissionState()
     state.total_children = len(expected_children)
     marker = re.escape(config["comment_marker"])
-    split_link_type = _tracker(config)["split_link_type"]
+    split_link_type = _tracker_for(config)["split_link_type"]
     ids_in_order = [child_id for (child_id, _, _, _) in expected_children]
     id_by_title = {title: child_id for (child_id, title, _, _) in expected_children}
     title_by_id = {child_id: title for (child_id, title, _, _) in expected_children}
@@ -621,7 +674,7 @@ def phase2_create_link(
     find_review = config["find_review_fn"]
     feas_labels = _feasibility_labels(label_prefix)
     alignment_labels = config["alignment_labels"]
-    split_link_type = _tracker(config)["split_link_type"]
+    split_link_type = _tracker_for(config)["split_link_type"]
 
     for idx, (child_id, title, priority, artifact_path) in enumerate(children, 1):
         done = state.phase2_done.get(child_id)
@@ -841,7 +894,7 @@ def phase3_close(server, user, token, parent_key, children, state, config, dry_r
 
     total = len(children)
     label_prefix = config["label_prefix"]
-    close = _tracker(config)["close_superseded"]
+    close = _tracker_for(config)["close_superseded"]
     # The TARGET STATUS name (matched case-insensitively below) and the resolution set on it.
     target_status, resolution = close["transition"], close["resolution"]
 
@@ -905,10 +958,13 @@ def phase3_close(server, user, token, parent_key, children, state, config, dry_r
 def main():
     parser = _Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("parent_key", help="Parent Jira issue key to split")
+    # default=None: an absent flag reaches type_registry.resolve as "no signal" and lands on
+    # the grandfathered legacy default rung (rfe) silently; an explicit --type is rung 1 and
+    # prints the D3 line. The rendered default is unchanged.
     parser.add_argument(
         "--type",
         choices=_TYPES.choices(),
-        default="rfe",
+        default=None,
         help="Entry type (default: rfe)",
     )
     parser.add_argument(
@@ -918,7 +974,36 @@ def main():
         "--artifacts-dir", default="artifacts", help="Artifacts directory (default: artifacts)"
     )
     args = parser.parse_args()
-    config = SPLIT_CONFIG[args.type]
+
+    # Design §5 ladder: --type (rung 1) else the legacy default (rfe). The parent key is NOT
+    # an id signal here — submit.py already resolved the run's type and spawns this script
+    # per parent — so the result is never ambiguous. The binding on the resolution is the
+    # EFFECTIVE one (§3.2.1): the project and issue type the children are created under.
+    try:
+        resolution = type_registry.resolve(_TYPES, explicit_type=args.type, env=os.environ)
+        # D3: the resolve line only when a non-default rung decided, never on stdout, and not
+        # when submit.py — which resolved the run's type and printed the line — spawned this
+        # process per parent (RESOLVED_BY_PARENT_ENV on the child's environment).
+        if resolution.rung != type_registry.LEGACY_DEFAULT_RUNG and not os.environ.get(
+            type_registry.RESOLVED_BY_PARENT_ENV
+        ):
+            print(resolution.line(), file=sys.stderr)
+        # §3.2.1 g (runtime twin of gate-1 rule 1): the effective binding must be the
+        # resolved type's OWN. An override that binds it to another registered type's pair
+        # is refused here, before any artifact or Jira access — the children would
+        # otherwise be created as that other type. No override: silent.
+        type_registry.assert_registered_binding(
+            resolution.desc, env=os.environ, registry=_TYPES, shorthand=True
+        )
+        # The bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is a resolve-CLI verdict only: the
+        # artifact layer reads binding() without it, so a shorthand-sourced project would
+        # create the children and then fail their rename. Refused before any access.
+        type_registry.assert_not_shorthand(resolution.type_name, resolution.binding)
+    except type_registry.RegistryError as exc:
+        print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+        sys.exit(EXIT_USAGE)
+    type_name = resolution.type_name
+    config = _split_config(resolution.desc, resolution.binding)
 
     # A type without the split facts cannot be split: refuse before any scan or Jira call
     # rather than create children and then fail to link or close. Run-wide (every parent
@@ -926,7 +1011,7 @@ def main():
     missing = _missing_split_facts(config)
     if missing:
         print(
-            f"Error: type '{args.type}' declares no {' / '.join(missing)}; it cannot be split.",
+            f"Error: type '{type_name}' declares no {' / '.join(missing)}; it cannot be split.",
             file=sys.stderr,
         )
         sys.exit(EXIT_SYSTEMIC)
@@ -1020,26 +1105,48 @@ def main():
         print(f"  {i}. {child_id}: {title} (Priority: {priority})")
     print()
 
-    # Check for Jira conflicts on the parent before starting
+    # Check the parent before starting: it must be an issue of the resolved type — its
+    # (project, issuetype) one of the pairs the binding accepts (PR-3c) — and unmodified in
+    # Jira since fetch. One fetch serves both: the conflict check's request also carries the
+    # two binding witnesses; a parent with no original to compare with (the conflict check
+    # makes no request then) gets the smallest fetch that carries them.
     if not args.dry_run:
         originals_dir = config["originals_dir"]
         original_path = os.path.join(args.artifacts_dir, originals_dir, f"{args.parent_key}.md")
+        has_conflict, parent_fields = False, None
         try:
-            has_conflict, _ = check_description_conflict(
-                server, user, token, args.parent_key, original_path
+            has_conflict, parent_fields = check_description_conflict(
+                server,
+                user,
+                token,
+                args.parent_key,
+                original_path,
+                extra_fields=list(BINDING_WITNESS_FIELDS),
             )
-            if has_conflict:
-                print(
-                    f"Error: {args.parent_key} description was modified "
-                    f"in Jira since fetch. Refusing to split — requires "
-                    f"human review.",
-                    file=sys.stderr,
+            if parent_fields is None:
+                issue = get_issue(
+                    server, user, token, args.parent_key, fields=list(BINDING_WITNESS_FIELDS)
                 )
-                sys.exit(3)
-        except SystemExit:
-            raise
+                parent_fields = issue.get("fields") or {}
         except Exception as e:
             print(f"Warning: conflict check failed for {args.parent_key}: {e}", file=sys.stderr)
+        # The binding verdict first: a parent that is not this type's is not this run's to
+        # touch whatever its description says — refused per parent, before any write.
+        if parent_fields is not None:
+            refusal = _parent_binding_refusal(
+                args.parent_key, parent_fields, resolution.desc, resolution.binding
+            )
+            if refusal:
+                print(f"Error: {refusal}", file=sys.stderr)
+                sys.exit(EXIT_PER_PARENT)
+        if has_conflict:
+            print(
+                f"Error: {args.parent_key} description was modified "
+                f"in Jira since fetch. Refusing to split — requires "
+                f"human review.",
+                file=sys.stderr,
+            )
+            sys.exit(3)
 
     # Everything from discovery on talks to Jira. An escaped exception is
     # classified for submit.py's loop policy: per-parent failures let the

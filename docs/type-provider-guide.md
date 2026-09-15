@@ -16,10 +16,12 @@ default `rfe`), so a registered type gets its hard-filter labels, snapshot / run
 prefixes and fetch layout the same way; since PR-2d the Jira write path (`submit.TYPE_CONFIGS`,
 `split_submit.SPLIT_CONFIG`) is a projection too, so a registered type submits, approves, splits
 and closes with its own binding and conventions. Every per-type value a pending script still carries is pinned by test to its
-descriptor projection; each adoption deletes its pin (design §10). Adopted scripts use descriptor
-values only; the effective binding override and the resolution ladder (`resolve`, `candidates`,
-`assert_registered_binding`) ship in the registry since PR-3a and the entry scripts wire them in
-PR-3b/PR-3c.
+descriptor projection; each adoption deletes its pin (design §10). Adopted scripts read descriptor
+values for everything that is not a tracker binding; the tracker binding the fetch checks, the
+writers (`submit.py`, `split_submit.py`, `check_conflicts.py`) and the artifact helpers act on is
+the effective one — `resolve`, `assert_registered_binding` and `binding()`, in the registry since
+PR-3a and wired in since PR-3b/PR-3c — and with no override set every effective value is the
+descriptor value ("Deployment binding override" below).
 
 ## The surface, in one table
 
@@ -89,7 +91,10 @@ Rules that are easy to trip:
   `display.{entity,entity_plural}`,
   `conventions.{type_label,label_prefix,comment_prefix,removed_context_preamble}`,
   `conventions.labels.{rubric_pass,feasibility}` (`alignment` optional), `index.enabled` and
-  `snapshot.prefix` over every registered type when either module is imported. Everything but
+  `snapshot.prefix` over every registered type when either module is imported (descriptor
+  values; `main()` overlays the resolved type's effective `project`, `issue_type` and write
+  prefix on its entry after `resolve` and `assert_registered_binding`, "Deployment binding
+  override" below). Everything but
   the two label keys is schema-required, so a drop-in that omits `labels.rubric_pass` or
   `labels.feasibility` passes gate 1 and fails the import of `submit.py` with a `KeyError`
   naming the type and the field. `identity.jira.split_link_type` and
@@ -121,8 +126,10 @@ boundary as the binding override — and every other entry is dropped with one s
 `identity.<tracker>` is the default binding; three sources overlay it, highest precedence first:
 `RFE_CREATOR_BINDING_<TYPE>_{PROJECT,ISSUE_TYPE,LOCAL_PREFIX}` (env — the only source a headless
 or CI run honours), the bare `JIRA_PROJECT` / `JIRA_ISSUE_TYPE` shorthand (applied by `resolve` to
-the resolved type only), and the `bindings:` block of a workspace `rfe-creator.yaml` (read only
-from an explicit `--workspace-root`, honoured in interactive runs only). `python3
+the resolved type only — a `resolve`-CLI verdict: every writer refuses a shorthand-sourced binding
+with one `Error:` line, because the artifact layer does not read it), and the `bindings:` block of a
+workspace `rfe-creator.yaml` (read only from an explicit `--workspace-root`, honoured in interactive
+runs of the `resolve` CLI only, never by a writer). `python3
 scripts/type_registry.py binding <type>` shows the effective value (env and descriptor; the
 shorthand and the workspace file are resolve-time sources; `overrides` and a re-rendered
 `local_id_pattern` are printed only when something is overridden, so the zero-override output is
@@ -130,7 +137,67 @@ the PR-1 output). An overridden `local_prefix`
 re-renders the effective `local_id_pattern` (D13) and is a hard error when the descriptor pattern
 does not start with `^` + the descriptor prefix. The full rule set, including the trust boundary
 for headless and CI runs and the ownership check before a tracker write, is in
-[`types/README.md`](../types/README.md) "Deployment binding override".
+[`types/README.md`](../types/README.md) "Deployment binding override" and "Effective binding in
+the writers".
+
+### Pointing a type at another project (how-to)
+
+To run the `rfe` pipeline against, say, a `KONFLUX` project, set the type-scoped variables —
+`<TYPE>` is the type name upper-cased with non-alphanumerics mapped to `_` — as protected CI
+variables for a headless run, or in the shell for a local one. Nothing is required: an unset
+variable means the descriptor value.
+
+```bash
+export RFE_CREATOR_BINDING_RFE_PROJECT=KONFLUX                # the tracker project key
+export RFE_CREATOR_BINDING_RFE_ISSUE_TYPE="Feature Request"   # only when it differs from the descriptor
+```
+
+Set the typed variables, never the bare `JIRA_PROJECT` / `JIRA_ISSUE_TYPE` shorthand: the writers
+refuse a shorthand-sourced binding (`Error: JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured
+by the artifact layer; set RFE_CREATOR_BINDING_RFE_PROJECT / _ISSUE_TYPE instead`) because the
+artifact id grammar and the rename guard do not read it. `RFE_CREATOR_BINDING_RFE_LOCAL_PREFIX` is
+not a deployment knob yet: the registry honours it (`binding()`, `candidates()`, `owns_effective()`),
+but the artifact id grammar and the rename guard's local-id check stay the descriptor's until the
+grammar reads `binding()["local_id_pattern"]` (D6 deferred).
+
+What changes — and nothing else: judgement content, `dirs`, schemas, rubric and eval are never
+overridable, and every other type keeps its own binding.
+
+- **Fetch and JQL checks** compare against `(KONFLUX, Feature Request)`: `fetch_issue.py
+  --fetch-all` writes a `KONFLUX-N` issue into the rfe layout (`artifacts/rfe-tasks/KONFLUX-N.md`
+  with `type: rfe` and `tracker_ref: KONFLUX-N`, plus the original and the comments companion),
+  `snapshot_fetch.py` / `bootstrap_snapshot.py` accept a `project = KONFLUX` JQL and refuse one
+  naming `RHAIRFE`.
+- **Writes** (`submit.py`, `split_submit.py`, `check_conflicts.py`) create under `KONFLUX` with
+  the effective issue type, treat a task as an existing issue when its `tracker_ref` starts with
+  `KONFLUX-` — or `RHAIRFE-`, the descriptor prefix kept as a read prefix: an item submitted
+  before the override is still updated in place, its `(RHAIRFE, Feature Request)` pair being
+  accepted by the pre-update check for a key that carries the descriptor prefix
+  (`Descriptor.accepted_pairs`), while a `KONFLUX-N` whose issue type is not the binding's is
+  skipped — split a parent only after the same check on it, rename a submitted draft to
+  `KONFLUX-N`, use `KONFLUX-DRY` as the dry-run key and record the effective binding in the run
+  report (`binding: {tracker: jira, project: KONFLUX, issue_type: Feature Request, source: env}`).
+- **Artifacts**: the `rfe-task` / `rfe-review` id grammar admits `KONFLUX-\d+` next to `RFE-\d+`
+  and `RHAIRFE-\d+` (`artifact_utils.SCHEMAS`, built from the environment at import — export the
+  variables once, so `frontmatter.py` sees what the script that spawns it sees), and so does the
+  `parent_key` grammar (`Descriptor.parent_key_pattern_effective`, applied by the task schema and
+  by `validate_batch_input.py`), so the children of a fetched `KONFLUX-N` validate and can be split.
+- An override that selects the pair another registered type owns (`RHOAIENG` / `Initiative` for
+  `rfe`) is refused by every entry script before any access, and so are a value that fails the
+  grammar (`lower` is not a project key) and the bare `JIRA_PROJECT` / `JIRA_ISSUE_TYPE`
+  shorthand: one `Error:` line, non-zero exit.
+
+Verify before the first real run:
+
+```bash
+python3 scripts/type_registry.py binding rfe            # project: KONFLUX, key_prefixes: [KONFLUX-, RHAIRFE-], source: env, overrides: [project]
+python3 scripts/type_registry.py resolve --type rfe     # TYPE RESOLVED: rfe (--type; binding override project=KONFLUX)
+python3 scripts/type_registry.py candidates KONFLUX-12  # key_prefix: rfe  (without the override: tracker_grammar (provisional): rfe initiative)
+python3 scripts/submit.py --dry-run --type rfe          # the same resolve line on stderr, then the plan against KONFLUX; no tracker write
+```
+
+Unset the variables and the same commands print the descriptor values (`source: descriptor`, no
+resolve clause) and the dry-run plan of a stock deployment, byte for byte.
 
 ## Resolution
 

@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import split_submit
+import type_registry
 from jira_utils import add_comment, get_comments, get_issue, text_to_adf_paragraph
 from split_submit import (
     SPLIT_CONFIG,
@@ -627,3 +628,192 @@ class TestLegacyComments:
         state = discover_state(jira.url, "admin", "admin", PARENT_KEY, children, config)
 
         assert "RFE-001" not in state.phase2_done
+
+
+# ─── Overridden project (design §3.2.1; PR-3c, the writers) ──────────────────
+
+OVERRIDE_PROJECT = "KONFLUX"
+OVERRIDE_VAR = type_registry.binding_env_var("rfe", "PROJECT")
+
+
+def _override_config():
+    """SPLIT_CONFIG's rfe entry re-projected over the effective binding of a deployment whose
+    rfe project is overridden to KONFLUX — the config main() builds from ``resolve()``."""
+    desc = split_submit._TYPES.get("rfe")
+    return split_submit._split_config(desc, desc.binding({OVERRIDE_VAR: OVERRIDE_PROJECT}))
+
+
+class TestOverriddenProject:
+    """``RFE_CREATOR_BINDING_RFE_PROJECT=KONFLUX``: the children are created in the EFFECTIVE
+    project with the descriptor issue type, the recovery signals and labels are exactly today's
+    (they never carry the project), and the parent — an RHAIRFE issue, owned through the
+    descriptor read prefix — is linked and closed as before. The emulator has no KONFLUX project
+    until an issue with that key stem is imported (tests/conftest.py JiraHelper.create
+    auto-creates the project from the key's stem)."""
+
+    @pytest.fixture
+    def konflux(self, jira):
+        jira.create(f"{OVERRIDE_PROJECT}-1", "Seed", "Seeds the overridden project.")
+        return jira
+
+    def _run(self, art_dir, url, *extra):
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "admin",
+            "JIRA_TOKEN": "admin",
+            OVERRIDE_VAR: OVERRIDE_PROJECT,
+        }
+        return subprocess.run(
+            [sys.executable, SCRIPT, PARENT_KEY, "--artifacts-dir", art_dir, *extra],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def _split_results(self, url, project):
+        return _search_keys(url, f"project = {project} AND labels = rfe-creator-split-result")
+
+    def test_children_are_created_in_the_effective_project(self, art_dir, konflux):
+        _setup_parent(konflux, art_dir)
+        marker = _marker_for(art_dir, "RFE-001")
+
+        r = self._run(art_dir, konflux.url)
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert r.stderr == ""  # no --type: the legacy default rung stays silent (D3)
+        assert "Phase 2: Created KONFLUX-" in r.stdout
+
+        created = self._split_results(konflux.url, OVERRIDE_PROJECT)
+        assert len(created) == 2
+        assert all(key.startswith(f"{OVERRIDE_PROJECT}-") for key in created)
+        assert self._split_results(konflux.url, "RHAIRFE") == []
+        for key in created:
+            fields = get_issue(
+                konflux.url, "admin", "admin", key, ["issuetype", "labels", "project"]
+            )
+            fields = fields["fields"]
+            assert fields["project"]["key"] == OVERRIDE_PROJECT
+            assert fields["issuetype"]["name"] == "Feature Request"
+            assert {"rfe-creator-auto-created", "rfe-creator-split-result"} <= set(fields["labels"])
+        # The marker label is today's: label prefix, parent, local id, fingerprint — no project.
+        assert len(_search_keys(konflux.url, f'labels = "{marker}"')) == 1
+        # Linked to and closed the RHAIRFE parent.
+        assert _split_links(konflux.url, PARENT_KEY) == created
+        issue = get_issue(konflux.url, "admin", "admin", PARENT_KEY, ["status"])
+        assert issue["fields"]["status"]["statusCategory"]["key"] == "done"
+        # Artifacts renamed to the effective keys.
+        for key in created:
+            assert os.path.exists(f"{art_dir}/rfe-tasks/{key}.md"), key
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+
+    def test_rerun_under_the_override_is_a_no_op(self, art_dir, konflux):
+        _setup_parent(konflux, art_dir)
+        r = self._run(art_dir, konflux.url)
+        assert r.returncode == 0, r.stderr + r.stdout
+        comments_after_first = len(get_comments(konflux.url, "admin", "admin", PARENT_KEY))
+        created = self._split_results(konflux.url, OVERRIDE_PROJECT)
+
+        r = self._run(art_dir, konflux.url)
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert len(get_comments(konflux.url, "admin", "admin", PARENT_KEY)) == comments_after_first
+        assert self._split_results(konflux.url, OVERRIDE_PROJECT) == created
+
+    def test_dry_run_plans_the_effective_project_and_writes_nothing(self, art_dir, konflux):
+        _setup_parent(konflux, art_dir)
+        r = self._run(art_dir, konflux.url, "--dry-run")
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert "Would create KONFLUX ticket for child 1/2: Child RFE-001" in r.stdout
+        assert self._split_results(konflux.url, OVERRIDE_PROJECT) == []
+        assert self._split_results(konflux.url, "RHAIRFE") == []
+        issue = get_issue(konflux.url, "admin", "admin", PARENT_KEY, ["status"])
+        assert issue["fields"]["status"]["statusCategory"]["key"] != "done"
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+
+    def test_recovery_searches_the_effective_project(self, art_dir, konflux, monkeypatch):
+        """Death after create: the marker-label search that finds the orphan runs over the
+        EFFECTIVE project — the descriptor project would never see a KONFLUX child."""
+        children = _setup_parent(konflux, art_dir, child_ids=("RFE-001",))
+        config = _override_config()
+        state = discover_state(konflux.url, "admin", "admin", PARENT_KEY, children, config)
+        phase1_persist(konflux.url, "admin", "admin", PARENT_KEY, children, state, config, False)
+
+        def dying(*a, **k):
+            raise RuntimeError("died before link")
+
+        monkeypatch.setattr(split_submit, "create_issue_link", dying)
+        with pytest.raises(RuntimeError):
+            phase2_create_link(
+                konflux.url, "admin", "admin", PARENT_KEY, children, state, art_dir, config, False
+            )
+        monkeypatch.undo()
+        (orphan,) = self._split_results(konflux.url, OVERRIDE_PROJECT)
+        assert orphan.startswith(f"{OVERRIDE_PROJECT}-")
+
+        state = discover_state(konflux.url, "admin", "admin", PARENT_KEY, children, config)
+        assert state.phase2_done["RFE-001"] == {"key": orphan, "linked": False, "commented": False}
+        # The descriptor binding's config (project RHAIRFE) cannot see it: the JQL is
+        # binding-derived, not a constant.
+        unaware = discover_state(
+            konflux.url, "admin", "admin", PARENT_KEY, children, SPLIT_CONFIG["rfe"]
+        )
+        assert "RFE-001" not in unaware.phase2_done
+
+        phase2_create_link(
+            konflux.url, "admin", "admin", PARENT_KEY, children, state, art_dir, config, False
+        )
+        assert self._split_results(konflux.url, OVERRIDE_PROJECT) == [orphan]
+        assert _split_links(konflux.url, PARENT_KEY) == [orphan]
+
+
+# ─── The parent is verified before the first write (PR-3c, the writers) ─────────
+
+
+class TestParentBindingIsVerifiedBeforeAnyWrite:
+    """The pre-split fetch of the parent requests the two binding witnesses (and a parent with
+    no original gets its own fetch): a parent whose (project, issuetype) is not the binding's —
+    nor, for a descriptor-prefixed key, the descriptor pair — is refused with one Error: line and
+    the per-parent exit code, and nothing is commented, labelled, linked, created or closed."""
+
+    REFUSAL = (
+        "Error: RHAIRFE-1000 is (RHAIRFE, Epic) in Jira but the resolved type rfe binds "
+        "(RHAIRFE, Feature Request); refusing to split — nothing written\n"
+    )
+
+    def _epic_parent(self, jira, art_dir, original=True):
+        jira.create(PARENT_KEY, "Parent RFE", PARENT_DESC, issue_type="Epic")
+        _write(f"{art_dir}/rfe-tasks/{PARENT_KEY}.md", PARENT_TASK)
+        if original:
+            _write(f"{art_dir}/rfe-originals/{PARENT_KEY}.md", PARENT_DESC)
+        for cid in ("RFE-001", "RFE-002"):
+            _write(f"{art_dir}/rfe-tasks/{cid}.md", CHILD_TASK.format(child_id=cid, title=cid))
+
+    def _assert_untouched(self, jira, art_dir, r):
+        assert r.returncode == split_submit.EXIT_PER_PARENT
+        assert r.stderr == self.REFUSAL
+        assert "Checking submission state" not in r.stdout and "Phase 1:" not in r.stdout
+        assert get_comments(jira.url, "admin", "admin", PARENT_KEY) == []
+        fields = ["labels", "status", "issuelinks"]
+        issue = get_issue(jira.url, "admin", "admin", PARENT_KEY, fields)
+        assert issue["fields"]["labels"] == []
+        assert issue["fields"]["issuelinks"] == []
+        assert issue["fields"]["status"]["statusCategory"]["key"] != "done"
+        assert _search_keys(jira.url, "labels = rfe-creator-split-result") == []
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RFE-001.md")
+
+    def test_an_epic_parent_is_refused_and_untouched(self, art_dir, jira):
+        self._epic_parent(jira, art_dir)
+        self._assert_untouched(jira, art_dir, _run_split(art_dir, jira.url))
+
+    def test_a_parent_without_an_original_gets_its_own_witness_fetch(self, art_dir, jira):
+        # The conflict check makes no request without an original; the witnesses are fetched
+        # on their own and the refusal is the same.
+        self._epic_parent(jira, art_dir, original=False)
+        self._assert_untouched(jira, art_dir, _run_split(art_dir, jira.url))
+
+    def test_a_feature_request_parent_without_an_original_is_split(self, art_dir, jira):
+        _setup_parent(jira, art_dir)
+        os.remove(f"{art_dir}/rfe-originals/{PARENT_KEY}.md")
+        r = _run_split(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr + r.stdout
+        assert r.stderr == ""
+        assert len(_search_keys(jira.url, "labels = rfe-creator-split-result")) == 2

@@ -635,3 +635,49 @@ class TestParentKeyForwarding:
         assert len(issues) == 1
         assert jira.get(issues[0]["key"])["fields"].get("parent") is None
         assert "is not in Jira" in r.stdout
+
+
+class TestResolveLine:
+    """--type initiative is rung 1 of the design §5 ladder: exactly one D3 line on stderr, and
+    the run itself is unchanged (the initiative binding is the descriptor's — no override)."""
+
+    def test_explicit_type_prints_exactly_one_line_and_updates(self, art_dir, jira):
+        jira.create("RHOAIENG-1234", "Test Initiative", "Original.", issue_type="Initiative")
+        _write(f"{art_dir}/initiative-originals/RHOAIENG-1234.md", "Original.")
+        _write(
+            f"{art_dir}/initiatives/RHOAIENG-1234.md",
+            "---\ninitiative_id: RHOAIENG-1234\ntitle: Test Initiative\n"
+            "priority: Major\nstatus: Ready\ntype: initiative\ntracker_ref: RHOAIENG-1234\n"
+            "---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/initiative-reviews/RHOAIENG-1234-review.md",
+            _review("RHOAIENG-1234", auto_revised="true"),
+        )
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert r.stderr.startswith("TYPE RESOLVED: initiative (--type)\n")
+        assert r.stderr.count("TYPE RESOLVED") == 1 and "Traceback" not in r.stderr
+        assert "RHOAIENG-1234: Updated" in r.stdout
+        assert _read_frontmatter(f"{art_dir}/initiatives/RHOAIENG-1234.md")["status"] == "Submitted"
+
+    def test_a_feature_request_behind_an_initiative_key_is_skipped(self, art_dir, jira):
+        jira.create("RHOAIENG-1234", "Test Initiative", "Original.")  # a Feature Request
+        _write(f"{art_dir}/initiative-originals/RHOAIENG-1234.md", "Original.")
+        _write(
+            f"{art_dir}/initiatives/RHOAIENG-1234.md",
+            "---\ninitiative_id: RHOAIENG-1234\ntitle: Test Initiative\n"
+            "priority: Major\nstatus: Ready\n---\nRevised.",
+        )
+        _write(
+            f"{art_dir}/initiative-reviews/RHOAIENG-1234-review.md",
+            _review("RHOAIENG-1234", auto_revised="true"),
+        )
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert (
+            "Reason: binding mismatch — RHOAIENG-1234 is (RHOAIENG, Feature Request) in Jira "
+            "but type initiative binds (RHOAIENG, Initiative)"
+        ) in r.stdout
+        assert "Updated" not in r.stdout
+        assert _read_frontmatter(f"{art_dir}/initiatives/RHOAIENG-1234.md")["status"] == "Ready"

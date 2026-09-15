@@ -190,6 +190,10 @@ PROVISIONAL_RUNG = "tracker_grammar"
 # ``resolve()`` rungs, strongest first (design §5; rung 4, the interactive picker, is not here).
 # The last rung is the grandfathered default: entry scripts print no resolve line for it (D3).
 LEGACY_DEFAULT_RUNG = "legacy default"
+# D3, one line per run: a writer that spawns another writer for the type it already resolved
+# (submit.py -> split_submit.py per split parent) sets this in the child's environment and the
+# child skips its own ``TYPE RESOLVED`` line — the parent printed it.
+RESOLVED_BY_PARENT_ENV = "RFE_CREATOR_RESOLVED_BY_PARENT"
 RESOLVE_RUNGS = (
     "--type",
     "batch type",
@@ -291,7 +295,8 @@ class Descriptor:
 
     The raw mapping is available as ``data``; the accessors below are the projections the
     pin tests and the adopted scripts consume. Accessors return DESCRIPTOR values; only
-    ``binding()`` applies the §3.2.1 override overlay.
+    ``binding()`` applies the §3.2.1 override overlay, and ``owns_effective()`` is the one
+    ownership test over it.
     """
 
     def __init__(self, name, data, path=None, env=None):
@@ -398,7 +403,8 @@ class Descriptor:
         ``identity.local_id_pattern`` (most specific), else a tracker ``key_prefixes`` prefix
         match (Jira grammar), else an ``identity.local_prefix`` prefix match. Case-sensitive;
         ``None`` and the empty string never match. DESCRIPTOR values only — the §3.2.1 binding
-        overlay is consulted by ``TypeRegistry.candidates`` / ``resolve``, not here.
+        overlay is consulted by ``owns_effective``, ``TypeRegistry.candidates`` and ``resolve``,
+        not here.
         """
         if not isinstance(item_id, str) or not item_id:
             return False
@@ -406,6 +412,29 @@ class Descriptor:
             self._matches_local_id(item_id)
             or self._has_key_prefix(item_id)
             or self._has_local_prefix(item_id)
+        )
+
+    def owns_effective(self, item_id, env=None, workspace=None):
+        """``owns`` over the EFFECTIVE binding (design §3.2.1; PR-3c, the writers).
+
+        The same three definite rungs as ``owns`` — ``local_id_pattern`` full match, a
+        ``key_prefixes`` prefix match, a ``local_prefix`` prefix match — applied to
+        ``binding(env, workspace=workspace)`` with the read parity ``candidates()`` applies:
+        the overridden write prefix (``<PROJECT>-``) and the D13 re-rendered local pattern /
+        prefix count, and so do the descriptor's own (an item minted before the override is
+        still this type's). Never the provisional tracker-grammar rung: ownership is definite
+        or absent. ``env`` defaults as for ``binding()`` (the registry's environment, else
+        ``os.environ``), so with no override set this equals ``owns``; ``owns`` and
+        ``TypeRegistry.detect`` stay descriptor-only for the per-id routers. Case-sensitive;
+        ``None`` and the empty string never match.
+        """
+        if not isinstance(item_id, str) or not item_id:
+            return False
+        binding = self.binding(env, workspace=workspace)
+        return any(
+            _rung_matches(rung, self, binding, item_id)
+            for rung in CANDIDATE_RUNGS
+            if rung != PROVISIONAL_RUNG
         )
 
     # -- effective binding (design §3.2.1) --------------------------------------------------
@@ -544,6 +573,59 @@ class Descriptor:
         if not patterns:
             return None
         return "^(" + "|".join(patterns) + ")$"
+
+    def parent_key_pattern_effective(self, env=None):
+        """``parent_key_pattern`` over the EFFECTIVE binding (design §3.2.1; PR-3c, the writers).
+
+        Under a project override the effective write prefix's ``<PROJECT>-\\d+`` is prepended
+        as an alternative when it is not already one of the descriptor's
+        ``conventions.parent_key_patterns``, so a child of a parent fetched under the override
+        (``parent_key: KONFLUX-1``) passes the task schema and the batch validator. With no
+        project override — or when the derived alternative is already declared — the string is
+        ``parent_key_pattern`` byte for byte; ``None`` when the descriptor declares no patterns.
+        ``env`` defaults as for ``binding()`` and a malformed override raises ``RegistryError``
+        the same way (``artifact_utils`` and ``validate_batch_input`` fall back to
+        ``parent_key_pattern`` then; the writers report the value).
+        """
+        patterns = self.get("conventions.parent_key_patterns", None)
+        if not patterns:
+            return None
+        alternatives = list(patterns)
+        binding = self.binding(env)
+        if "project" in binding["overrides"]:
+            derived = binding["key_prefixes"][0] + r"\d+"
+            if derived not in alternatives:
+                alternatives.insert(0, derived)
+        return "^(" + "|".join(alternatives) + ")$"
+
+    def accepted_pairs(self, binding, key):
+        """The ``(project, issue_type)`` pairs a fetched issue behind ``key`` may carry to be this
+        type's own under ``binding`` (design §3.2.1; PR-3c, the writers).
+
+        The effective pair — what the run writes under — always; and, when ``key`` carries one
+        of the DESCRIPTOR key prefixes, the descriptor pair as well: such a key names an item of
+        the type created before the override (an ``RHAIRFE-`` issue while the rfe project is
+        overridden to ``KONFLUX``), which the writers still update in place and the fetch still
+        admits. With no override the two pairs are one. The key stem is never a witness (D9):
+        it only widens what the fetched ``project.key`` / ``issuetype.name`` may show.
+        """
+        pairs = [(binding.get("project"), binding.get("issue_type"))]
+        if isinstance(key, str) and any(key.startswith(p) for p in self.key_prefixes if p):
+            block = self._tracker_block()
+            descriptor_pair = (block.get("project"), block.get("issue_type"))
+            if descriptor_pair not in pairs:
+                pairs.append(descriptor_pair)
+        return pairs
+
+
+def render_pairs(pairs):
+    """The text a writer's refusal puts after ``binds``: ``(A, B)`` for one accepted pair,
+    ``(A, B) or, for a pre-override key, (C, D)`` for the two ``Descriptor.accepted_pairs``
+    returns for a key that carries a descriptor prefix under an override."""
+    rendered = [f"({project}, {issue_type})" for project, issue_type in pairs]
+    if len(rendered) == 1:
+        return rendered[0]
+    return f"{rendered[0]} or, for a pre-override key, {rendered[1]}"
 
 
 def _bare_dir(value):
@@ -1006,6 +1088,26 @@ def assert_registered_binding(
                 f"exactly one type (design §3.3 rule 1) — fix the override or pass --type "
                 f"{other.name}"
             )
+    return binding
+
+
+def assert_not_shorthand(type_name, binding):
+    """Refuse a binding the bare ``JIRA_PROJECT`` / ``JIRA_ISSUE_TYPE`` shorthand contributed
+    to (PR-3c, the writers).
+
+    The artifact layer the writers share (``artifact_utils``: the id grammar in ``SCHEMAS``, the
+    rename guard, the lookups) reads ``binding()`` WITHOUT the shorthand, so a shorthand-sourced
+    project would create the issue in the tracker and then fail the rename, orphaning it on
+    every retry. The shorthand therefore stays a ``resolve`` CLI verdict only; a writer calls
+    this right after ``assert_registered_binding`` and gets one ``RegistryError`` naming the
+    typed variables to set instead (``binding_env_var``), which it prints as its one ``Error:``
+    line before any file or tracker access. Returns ``binding`` when no shorthand contributed.
+    """
+    if "shorthand" in (binding.get("source") or "").split("+"):
+        raise RegistryError(
+            "JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand is not honoured by the artifact layer; set "
+            f"{binding_env_var(type_name, 'PROJECT')} / _ISSUE_TYPE instead"
+        )
     return binding
 
 

@@ -1789,6 +1789,27 @@ class TestLoadRunReportTypeCrossCheck:
         ids, _ = _load_run_report(results, run, config=BOOTSTRAP_CONFIG["rfe"])
         assert ids == {"RHAIRFE-7"}
 
+    def test_binding_header_is_tolerated(self, tmp_path):
+        # PR-3c (design §3.2.1 rule e, D11): generate_run_report.py appends an additive
+        # ``binding`` mapping after the header. The reader consumes ``type`` and the item list
+        # only, so the key passes through — with a descriptor binding and an overridden one.
+        for project, source in (("RHAIRFE", "descriptor"), ("KONFLUX", "env")):
+            results, run = self._write(
+                tmp_path / project,
+                "report_schema_version: 1\ntype: rfe\nreport_stage: final\n"
+                f"binding:\n  tracker: jira\n  project: {project}\n"
+                f"  issue_type: Feature Request\n  source: {source}\n"
+                "per_rfe:\n" + self.ENTRY.format(key="RHAIRFE-7"),
+            )
+            ids, report = _load_run_report(results, run, config=BOOTSTRAP_CONFIG["rfe"])
+            assert ids == {"RHAIRFE-7"}
+            assert report["binding"] == {
+                "tracker": "jira",
+                "project": project,
+                "issue_type": "Feature Request",
+                "source": source,
+            }
+
 
 class TestLoadRunReportConfig:
     """Verify _load_run_report uses config for report path and item key."""

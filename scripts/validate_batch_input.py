@@ -22,14 +22,17 @@ a pipe or /dev/stdin works) and the type is decided by ``type_registry.resolve``
 (the one ladder) over the parsed items: an item that is not a mapping is this
 validator's ``entry N: must be a mapping`` error, never an id signal
 (``items_are_ids=False``), and only the type verdict is taken
-(``binding=False``) — the environment's JIRA_PROJECT / JIRA_ISSUE_TYPE /
-RFE_CREATOR_BINDING_* values are neither read nor validated here, exactly as
-before. The per-type rules come from the resolved type's descriptor
+(``binding=False``) — the environment's JIRA_PROJECT / JIRA_ISSUE_TYPE
+shorthand is never read and no RFE_CREATOR_BINDING_* value is validated here.
+The per-type rules come from the resolved type's descriptor
 (types/<type>/type.yaml): the priority vocabulary is schema.task.priority.enum;
 the known fields are the shared base plus batch.extra_fields; ``parent_key`` is
 checked against conventions.parent_key_patterns (the same join as the task
-schema) only when the type declares the field — for any other type it is an
-unknown field (a warning), never a pattern error. Two deliberate differences
+schema — Descriptor.parent_key_pattern_effective, so under a
+RFE_CREATOR_BINDING_<TYPE>_PROJECT override the effective write prefix is an
+alternative too, and a malformed value falls back to the descriptor join) only
+when the type declares the field — for any other type it is an unknown field (a
+warning), never a pattern error. Two deliberate differences
 from the pre-PR-3b validator, both on malformed input: an rfe entry with a
 malformed ``parent_key`` was a pattern error and is now the unknown-field
 warning only (--strict still blocks it), and an initiative batch newly accepts
@@ -95,13 +98,26 @@ KNOWN_FIELDS = {
 }
 ALLOWED_PRIORITIES = {name: _priority_enum(_TYPES.get(name)) for name in _TYPES.names()}
 # conventions.parent_key_patterns (unanchored alternatives, rendered in the error text) and the
-# anchored alternation Descriptor.parent_key_pattern joins from them — the same string the
-# <type>-task schema carries (artifact_utils), so batch and task agree by construction (Q14).
+# anchored alternation Descriptor.parent_key_pattern_effective joins from them — the same string
+# the <type>-task schema carries (artifact_utils), so batch and task agree by construction (Q14).
+# Under a project override (RFE_CREATOR_BINDING_<TYPE>_PROJECT) the effective write prefix joins
+# first, so an entry whose parent was fetched under the override validates; with no override the
+# join is Descriptor.parent_key_pattern byte for byte, and so it is under a malformed override
+# (the writers report the value; this validator takes the type verdict only).
+
+
+def _parent_key_pattern(desc):
+    try:
+        return desc.parent_key_pattern_effective()
+    except type_registry.RegistryError:
+        return desc.parent_key_pattern
+
+
 PARENT_KEY_PATTERNS = {
     name: list(_TYPES.get(name).get("conventions.parent_key_patterns", None) or [])
     for name in _TYPES.names()
 }
-PARENT_KEY_PATTERN = {name: _TYPES.get(name).parent_key_pattern for name in _TYPES.names()}
+PARENT_KEY_PATTERN = {name: _parent_key_pattern(_TYPES.get(name)) for name in _TYPES.names()}
 _PARENT_KEY_RE = {
     name: re.compile(pattern) if pattern else None for name, pattern in PARENT_KEY_PATTERN.items()
 }

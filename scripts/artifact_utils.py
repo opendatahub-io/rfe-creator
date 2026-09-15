@@ -11,6 +11,16 @@ and the extra schema fields — come from the work-item type registry
 parse entry points are projections over it; the historical per-type names
 (scan_task_files, rename_to_jira_key, parse_child_artifact and their initiative twins)
 remain as thin wrappers over the generics that take a ``type_registry.Descriptor``.
+
+Tracker keys are matched against the EFFECTIVE binding (design §3.2.1; PR-3c, the writers):
+the id grammar in SCHEMAS, the rename guard and the archived-task / removed-context lookups
+read ``desc.binding()["key_prefixes"]`` — the write prefix first (``<PROJECT>-`` under a
+``RFE_CREATOR_BINDING_<TYPE>_PROJECT`` override), the descriptor prefixes kept as read
+prefixes — so with no override set every value equals the descriptor value and every byte
+is unchanged. Like every other effective-binding consumer, SCHEMAS reflects the environment
+at import time (``tests/data/schemas-golden.json`` pins it with no override set); the
+lookups evaluate the binding per call. ``_type_for`` keeps ``TypeRegistry.detect``'s
+descriptor-only contract for its fallback.
 """
 
 import copy
@@ -74,8 +84,10 @@ def resolve_ids(positional, ids_file):
 # order (rfe first): that key order is the `frontmatter.py schema` choices order. The base
 # fields and the shared vocabularies below are the artifact contract, identical for every
 # type; what differs per type is read from its descriptor — identity.id_field (the id
-# field's NAME), identity.local_id_pattern + the tracker key_prefixes (its grammar),
-# conventions.parent_key_patterns, schema.task.priority.enum, schema.task.extra_fields
+# field's NAME), identity.local_id_pattern + the EFFECTIVE tracker key_prefixes (its grammar;
+# binding()["key_prefixes"], the descriptor's own with no override set),
+# conventions.parent_key_patterns (the effective write prefix joining first under a project
+# override), schema.task.priority.enum, schema.task.extra_fields
 # (rfe: size), schema.review.score_fields (scores / before_scores) and
 # schema.review.extra_fields (initiative: alignment). tests/test_schemas_golden.py pins
 # the derived dicts byte for byte to tests/data/schemas-golden.json.
@@ -118,27 +130,78 @@ def _declares_schemas(desc):
     return all(desc.get(dotted, None) is not None for dotted in _SCHEMA_FACTS)
 
 
+def _effective_binding(desc):
+    """``desc.binding()`` — the effective tracker binding, from the registry's environment
+    (``os.environ`` for the module-level registry) at call time — or ``None`` when that
+    environment carries a malformed ``RFE_CREATOR_BINDING_*`` value for this type. The value
+    is a hard error, but the entry scripts own it (``type_registry.assert_registered_binding``
+    before any scan or write: one ``Error:`` line naming the variable, for every type's
+    variables); this module is imported by every script, so it degrades to the descriptor
+    values instead of turning the misconfiguration into an import traceback everywhere."""
+    try:
+        return desc.binding()
+    except type_registry.RegistryError:
+        return None
+
+
+def _effective_key_prefixes(desc):
+    """The type's EFFECTIVE tracker key prefixes, ``desc.binding()["key_prefixes"]``: the write
+    prefix first — ``<PROJECT>-`` under a project override — then the descriptor prefixes as
+    read prefixes; exactly ``desc.key_prefixes`` with no override set (or under a malformed
+    one, see ``_effective_binding``)."""
+    binding = _effective_binding(desc)
+    prefixes = desc.key_prefixes if binding is None else binding["key_prefixes"]
+    return [p for p in prefixes if p]
+
+
+def _owns_effective(desc, item_id):
+    """``desc.owns_effective(item_id)`` — the type's ownership ladder over its effective
+    binding — falling back to ``desc.owns(item_id)`` under a malformed override for this type
+    (see ``_effective_binding``); identical with no override set."""
+    try:
+        return desc.owns_effective(item_id)
+    except type_registry.RegistryError:
+        return desc.owns(item_id)
+
+
+def _effective_write_prefix(desc):
+    """The prefix a tracker key is minted under, ``binding()["key_prefixes"][0]`` (the
+    descriptor write prefix with no override set), or ``None`` when none is declared."""
+    prefixes = _effective_key_prefixes(desc)
+    return prefixes[0] if prefixes else None
+
+
 def _id_pattern(desc):
     """The id field's grammar: the local draft id or a tracker key, e.g.
-    ``^(RFE-\\d+|RHAIRFE-\\d+)$``. Prefixes are used verbatim (not re.escape'd), exactly as
-    the hand-written literals were: upper-case letters plus the trailing dash, none of which
-    is a regex metacharacter."""
+    ``^(RFE-\\d+|RHAIRFE-\\d+)$`` — under a project override the effective write prefix
+    joins first, ``^(RFE-\\d+|KONFLUX-\\d+|RHAIRFE-\\d+)$``, and the descriptor prefixes stay
+    so pre-override artifacts validate. The local grammar is the descriptor's
+    ``identity.local_id_pattern`` (no shipped type overrides its local prefix; D6). Prefixes
+    are used verbatim (not re.escape'd), exactly as the hand-written literals were:
+    upper-case letters plus the trailing dash, none of which is a regex metacharacter."""
     # Drop only the outer anchors: strip("^$") would also eat a pattern's own trailing
     # characters (e.g. a literal \$ before the closing anchor) and produce an invalid regex.
     alternatives = [desc.local_id_pattern.removeprefix("^").removesuffix("$")]
-    alternatives += [prefix + r"\d+" for prefix in desc.key_prefixes]
+    alternatives += [prefix + r"\d+" for prefix in _effective_key_prefixes(desc)]
     return "^(" + "|".join(alternatives) + ")$"
 
 
 def _parent_key_pattern(desc):
-    """``^(a|b|c)$`` over ``conventions.parent_key_patterns`` — ``Descriptor.parent_key_pattern``,
-    the one join the batch validator (validate_batch_input.py) applies too, so the task schema
-    and the batch rule cannot diverge (PR-1 decision Q14, reconciled in PR-3b). Reproduces the
-    pre-registry literal for both shipped types (rfe: RFE-/RHAIRFE-; initiative:
-    RHAISTRAT-/RHOAIENG-/INIT-). A shipped type must declare the fact: the bare ``get`` fails
-    the import with the loader's KeyError naming the field (see _SCHEMA_FACTS)."""
+    """``^(a|b|c)$`` over ``conventions.parent_key_patterns`` —
+    ``Descriptor.parent_key_pattern_effective``, the one join the batch validator
+    (validate_batch_input.py) applies too, so the task schema and the batch rule cannot diverge
+    (PR-1 decision Q14, reconciled in PR-3b). Reproduces the pre-registry literal for both
+    shipped types (rfe: RFE-/RHAIRFE-; initiative: RHAISTRAT-/RHOAIENG-/INIT-); under a project
+    override the effective write prefix joins first (``^(KONFLUX-\\d+|RFE-\\d+|RHAIRFE-\\d+)$``)
+    so a child of a parent fetched under the override validates — the descriptor join byte for
+    byte with no override, and under a malformed one (see ``_effective_binding``). A shipped type
+    must declare the fact: the bare ``get`` fails the import with the loader's KeyError naming
+    the field (see _SCHEMA_FACTS)."""
     desc.get("conventions.parent_key_patterns")
-    return desc.parent_key_pattern
+    try:
+        return desc.parent_key_pattern_effective()
+    except type_registry.RegistryError:
+        return desc.parent_key_pattern
 
 
 def _id_fields(desc):
@@ -755,9 +818,14 @@ def _type_for(identifier, artifacts_dir="artifacts"):
     ``type:`` its frontmatter declares (PR-3c self-describing artifacts) and a match wins.
     Otherwise today's rule stands: ``TypeRegistry.detect`` else rfe — the default branch of
     the prefix sniffs this replaced (anything that was not INIT-/RHOAIENG- went to the rfe
-    dirs), so every pre-migration id routes exactly as before.
+    dirs), so every pre-migration id routes exactly as before. ``candidates()`` reads every
+    type's effective binding; under a malformed ``RFE_CREATOR_BINDING_*`` value (the entry
+    scripts' error, see ``_effective_binding``) that fallback applies directly.
     """
-    found = _TYPES.candidates(identifier)
+    try:
+        found = _TYPES.candidates(identifier)
+    except type_registry.RegistryError:
+        return _TYPES.detect(identifier) or _TYPES.get("rfe")
     if len(found.matches) == 1 and not found.provisional:
         return found.matches[0]
     # An id is about to become a path component: never probe with a separator in it.
@@ -777,19 +845,21 @@ def find_task_file_including_archived(
 ):
     """Find a task file by ID, including archived tasks.
 
-    Two forms. With ``desc`` (a ``type_registry.Descriptor``) ownership is the descriptor's
-    own ladder, ``desc.owns(identifier)``, ``tasks_subdir`` defaults to its ``dirs.tasks``
-    and a tracker key (one of ``desc.key_prefixes``) matches ``<id>.md`` exactly while a local
-    id also matches a slug-suffixed ``<id>-*.md``. Without ``desc`` the legacy form applies
-    unchanged: a ``jira_prefix`` id matches exactly, a ``local_prefix`` id exactly or
-    slug-suffixed, anything else is not found (generate_review_pdf passes the two prefixes).
+    Two forms. With ``desc`` (a ``type_registry.Descriptor``) ownership is the type's ladder
+    over its EFFECTIVE binding, ``desc.owns_effective(identifier)`` through ``_owns_effective``
+    (``owns`` with no override set), ``tasks_subdir`` defaults to its ``dirs.tasks`` and a
+    tracker key (one of the effective ``key_prefixes``: the overridden write prefix or a
+    descriptor read prefix) matches ``<id>.md`` exactly while a local id also matches a
+    slug-suffixed ``<id>-*.md``.
+    Without ``desc`` the legacy form applies unchanged: a ``jira_prefix`` id matches exactly,
+    a ``local_prefix`` id exactly or slug-suffixed, anything else is not found.
     """
     if desc is not None:
         if tasks_subdir is None:
             tasks_subdir = desc.dirs("bare")["tasks"]
-        if not desc.owns(identifier):
+        if not _owns_effective(desc, identifier):
             return None
-        is_tracker_key = any(identifier.startswith(p) for p in desc.key_prefixes if p)
+        is_tracker_key = identifier.startswith(tuple(_effective_key_prefixes(desc)))
         is_local_id = not is_tracker_key
     else:
         is_tracker_key = identifier.startswith(jira_prefix)
@@ -825,7 +895,10 @@ def find_artifact_file_including_archived(artifacts_dir, identifier):
 def find_removed_context_yaml_in(
     artifacts_dir, identifier, tasks_subdir, jira_prefix, local_prefix
 ):
-    """Find a removed-context YAML file by ID in the given tasks subdirectory."""
+    """Find a removed-context YAML file by ID in the given tasks subdirectory.
+
+    ``jira_prefix`` is one prefix or a tuple of them (``str.startswith`` takes either);
+    ``find_removed_context_yaml`` passes the type's effective ``key_prefixes``."""
     tasks_dir = os.path.join(artifacts_dir, tasks_subdir)
     if not os.path.isdir(tasks_dir):
         return None
@@ -837,10 +910,19 @@ def find_removed_context_yaml_in(
 
 
 def find_removed_context_yaml(artifacts_dir, identifier):
-    """Find the removed-context YAML file for a given RFE/initiative ID or Jira key."""
+    """Find the removed-context YAML file for a given RFE/initiative ID or Jira key.
+
+    The type is ``_type_for``'s; a tracker key qualifies when it carries one of that type's
+    EFFECTIVE key prefixes (the overridden write prefix or a descriptor read prefix — the
+    descriptor write prefix alone with no override set), a local id when it carries the
+    descriptor local prefix."""
     desc = _type_for(identifier, artifacts_dir)
     return find_removed_context_yaml_in(
-        artifacts_dir, identifier, desc.dirs("bare")["tasks"], desc.write_prefix, desc.local_prefix
+        artifacts_dir,
+        identifier,
+        desc.dirs("bare")["tasks"],
+        tuple(_effective_key_prefixes(desc)),
+        desc.local_prefix,
     )
 
 
@@ -1030,7 +1112,9 @@ def rename_to_tracker_key(artifacts_dir, item_id, tracker_key, desc):
     Args:
         artifacts_dir: path to artifacts directory
         item_id: e.g. "RFE-001" — must match ``identity.local_id_pattern``
-        tracker_key: e.g. "RHAIRFE-1600" — must be the type's write prefix + digits
+        tracker_key: e.g. "RHAIRFE-1600" — must be the type's EFFECTIVE write prefix + digits
+            (``binding()["key_prefixes"][0]``: ``KONFLUX-`` under a project override, the
+            descriptor write prefix otherwise)
         desc: a ``type_registry.Descriptor``
 
     Raises:
@@ -1040,15 +1124,15 @@ def rename_to_tracker_key(artifacts_dir, item_id, tracker_key, desc):
     # Both ids become path components below. item_id comes from validated
     # frontmatter, but tracker_key arrives from a Jira API response — reject
     # anything that is not the documented shape before touching the fs.
-    # The key is checked against the WRITE prefix (key_prefixes[0]) alone, not the
-    # key_prefixes union design §10 item 2 names for the forked pairs' guards: the key an
-    # item is renamed TO is always the one its tracker binding creates under. Identical
-    # today (both shipped types declare a single prefix); PR-3, where key_prefixes gains
-    # read prefixes, decides whether a rename target may carry one of those.
+    # The key is checked against the effective WRITE prefix alone, never the key_prefixes
+    # union: the key an item is renamed TO is always the one its tracker binding creates
+    # under, so a descriptor read prefix (RHAIRFE- while the rfe project is overridden to
+    # KONFLUX) is not a rename target — the binding could not have created it (PR-3c).
     label = _rename_error_label(desc)
     if not re.fullmatch(desc.local_id_pattern, item_id):
         raise ValueError(f"{label}: invalid local id {item_id!r}")
-    if not re.fullmatch(desc.write_prefix + r"\d+", tracker_key):
+    write_prefix = _effective_write_prefix(desc)
+    if write_prefix is None or not re.fullmatch(write_prefix + r"\d+", tracker_key):
         raise ValueError(f"{label}: invalid Jira key {tracker_key!r}")
 
     dirs = desc.dirs("bare")

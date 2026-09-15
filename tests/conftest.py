@@ -13,6 +13,15 @@ import yaml
 
 TYPES_DIR = os.path.join(os.path.dirname(__file__), "..", "types")
 
+# Hermetic suite: a developer's or runner's binding override or shorthand must reach neither
+# the module-level registries the scripts build at import (artifact_utils.SCHEMAS reflects the
+# environment at import) nor an in-process main(). Stripped once here, before any test module
+# imports a script; a test that exercises an override passes it explicitly (monkeypatch.setenv
+# or a subprocess env).
+for _var in list(os.environ):
+    if _var.startswith("RFE_CREATOR_BINDING_") or _var in ("JIRA_PROJECT", "JIRA_ISSUE_TYPE"):
+        del os.environ[_var]
+
 
 # ─── Drop-in type descriptors ─────────────────────────────────────────────────
 
@@ -34,8 +43,10 @@ def _del_dotted(data, dotted):
 
 
 # A drop-in derived from types/rfe with its own binding, id grammar and layout, so it registers
-# next to the shipped types (split_submit refuses two types on one (project, issue_type) pair)
-# and scans its own directories. Everything else (labels, schema facts, snapshot, reporting)
+# next to the shipped types and scans its own directories. Its own (MEMO, Memo) pair keeps the
+# shipped (RHAIRFE, Feature Request) pair uniquely owned: no import polices the pair any more
+# (D12: split_submit keys its tracker facts by type name) — type_registry.assert_registered_binding
+# does, at run time, in every writer. Everything else (labels, schema facts, snapshot, reporting)
 # stays the rfe value, so every adopted table builds for it at import.
 MEMO_OVERRIDES = {
     "display": {"entity": "Memo", "entity_plural": "Memos"},

@@ -1158,3 +1158,192 @@ class TestKeyPrefixUnionFallback:
         by_id = {e["id"]: e for e in build_report([], "2026-09-15T12:00:00Z")["per_rfe"]}
         assert by_id["RHAIOLD-9"]["tracker_ref"] == "RHAIOLD-9"
         assert by_id["RHAIOLD-9"]["error"] == "review file not found"
+
+
+class TestBindingHeader:
+    """PR-3c (design §3.2.1 rule e, D11): the report carries the resolved type's EFFECTIVE
+    tracker binding — ``{tracker, project, issue_type, source}`` — as an additive ``binding``
+    key right after the self-describing header; everything else keeps its key order."""
+
+    HEADER = ["report_schema_version", "type", "report_stage", "binding"]
+    BODY = ["run_id", "started", "completed", "input_count", "results"]
+    BODY += ["before_scores_avg", "after_scores_avg"]
+
+    @pytest.fixture
+    def no_override(self, monkeypatch):
+        for var in list(os.environ):
+            if var.startswith(type_registry.BINDING_ENV_PREFIX):
+                monkeypatch.delenv(var)
+        for var in ("JIRA_PROJECT", "JIRA_ISSUE_TYPE"):
+            monkeypatch.delenv(var, raising=False)
+
+    def _one_rfe(self, art_dir):
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-1234", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-1234",
+                score=9,
+                pass_val="true",
+                recommendation="submit",
+                right_sized=2,
+            ),
+        )
+
+    def _initiative_dir(self, tmp_path):
+        for d in ["initiatives", "initiative-reviews"]:
+            os.makedirs(tmp_path / "artifacts" / d)
+        return str(tmp_path / "artifacts")
+
+    def test_descriptor_binding_by_default(self, no_override, art_dir, tmp_path):
+        self._one_rfe(art_dir)
+        report = build_report(["RHAIRFE-1234"], "2026-08-18T09:00:00Z")
+        assert report["binding"] == {
+            "tracker": "jira",
+            "project": "RHAIRFE",
+            "issue_type": "Feature Request",
+            "source": "descriptor",
+        }
+        initiative = build_report(
+            [],
+            "2026-08-18T09:00:00Z",
+            artifacts_dir=self._initiative_dir(tmp_path),
+            entry_type="initiative",
+        )
+        assert initiative["binding"] == {
+            "tracker": "jira",
+            "project": "RHOAIENG",
+            "issue_type": "Initiative",
+            "source": "descriptor",
+        }
+
+    def test_key_order_is_the_old_order_plus_binding_after_the_header(
+        self, no_override, art_dir, tmp_path
+    ):
+        self._one_rfe(art_dir)
+        report = build_report(["RHAIRFE-1234"], "2026-08-18T09:00:00Z")
+        assert list(report) == self.HEADER + self.BODY + ["per_rfe", "errors", "batch_size"]
+        assert list(report["binding"]) == list(generate_run_report.BINDING_HEADER_KEYS)
+        initiative = build_report(
+            [],
+            "2026-08-18T09:00:00Z",
+            artifacts_dir=self._initiative_dir(tmp_path),
+            entry_type="initiative",
+        )
+        assert list(initiative) == self.HEADER + self.BODY + ["per_initiative", "errors"]
+        assert generate_run_report.REPORT_SCHEMA_VERSION == 1  # additive: no version bump
+
+    def test_env_override_is_recorded_for_the_resolved_type_only(
+        self, no_override, monkeypatch, art_dir, tmp_path
+    ):
+        monkeypatch.setenv(type_registry.binding_env_var("rfe", "PROJECT"), "KONFLUX")
+        self._one_rfe(art_dir)
+        report = build_report(["RHAIRFE-1234"], "2026-08-18T09:00:00Z")
+        assert report["binding"] == {
+            "tracker": "jira",
+            "project": "KONFLUX",
+            "issue_type": "Feature Request",
+            "source": "env",
+        }
+        # The entry itself is unchanged: the id grammar and tracker_ref derivation are not
+        # what the header describes.
+        assert report["per_rfe"][0]["tracker_ref"] == "RHAIRFE-1234"
+        initiative = build_report(
+            [],
+            "2026-08-18T09:00:00Z",
+            artifacts_dir=self._initiative_dir(tmp_path),
+            entry_type="initiative",
+        )
+        assert initiative["binding"]["project"] == "RHOAIENG"
+        assert initiative["binding"]["source"] == "descriptor"
+
+    def test_shorthand_is_recorded_as_its_own_source(self, no_override, monkeypatch, art_dir):
+        monkeypatch.setenv("JIRA_PROJECT", "KONFLUX")
+        monkeypatch.setenv("JIRA_ISSUE_TYPE", "Story")
+        self._one_rfe(art_dir)
+        report = build_report(["RHAIRFE-1234"], "2026-08-18T09:00:00Z")
+        assert report["binding"] == {
+            "tracker": "jira",
+            "project": "KONFLUX",
+            "issue_type": "Story",
+            "source": "shorthand",
+        }
+
+    def test_binding_header_helper_reads_the_given_env(self, no_override):
+        env = {type_registry.binding_env_var("initiative", "PROJECT"): "PLAT"}
+        assert generate_run_report._binding_header("initiative", env) == {
+            "tracker": "jira",
+            "project": "PLAT",
+            "issue_type": "Initiative",
+            "source": "env",
+        }
+        assert generate_run_report._binding_header("rfe", env)["source"] == "descriptor"
+
+    def test_cli_writes_the_binding_header(self, tmp_path):
+        art = str(tmp_path / "artifacts")
+        os.makedirs(f"{art}/rfe-tasks")
+        os.makedirs(f"{art}/rfe-reviews")
+        self._one_rfe(art)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("RFE_CREATOR_BINDING_")}
+        env.pop("JIRA_PROJECT", None)
+        env.pop("JIRA_ISSUE_TYPE", None)
+        cmd = [
+            sys.executable,
+            os.path.join(os.path.dirname(__file__), "..", "scripts", "generate_run_report.py"),
+            "--start-time",
+            "20260818-090000",
+            "--artifacts-dir",
+            art,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""  # no resolve line: the report is not an entry script (D3)
+        with open(result.stdout.strip()) as f:
+            text = f.read()
+        # The YAML block as written, right after the header.
+        assert text.startswith(
+            "report_schema_version: 1\ntype: rfe\nreport_stage: pre_submit\nbinding:\n"
+            "  tracker: jira\n  project: RHAIRFE\n  issue_type: Feature Request\n"
+            "  source: descriptor\nrun_id: 20260818-090000\n"
+        )
+        env[type_registry.binding_env_var("rfe", "PROJECT")] = "KONFLUX"
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        with open(result.stdout.strip()) as f:
+            written = yaml.safe_load(f)
+        assert written["binding"] == {
+            "tracker": "jira",
+            "project": "KONFLUX",
+            "issue_type": "Feature Request",
+            "source": "env",
+        }
+
+    def test_a_malformed_override_fails_the_report_loudly(
+        self, no_override, monkeypatch, art_dir, capsys
+    ):
+        self._one_rfe(art_dir)
+        monkeypatch.setenv(type_registry.binding_env_var("rfe", "PROJECT"), "bad-key")
+        with pytest.raises(type_registry.RegistryError):
+            build_report(["RHAIRFE-1234"], "2026-08-18T09:00:00Z")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "generate_run_report.py",
+                "--start-time",
+                "20260818-090000",
+                "--artifacts-dir",
+                art_dir,
+            ],
+        )
+        with pytest.raises(SystemExit) as excinfo:
+            generate_run_report.main()
+        assert excinfo.value.code == 1
+        assert capsys.readouterr().err == (
+            "Error: RFE_CREATOR_BINDING_RFE_PROJECT='bad-key': expected an upper-case tracker "
+            "project key\n"
+        )
+        assert not os.path.exists(f"{art_dir}/auto-fix-runs")

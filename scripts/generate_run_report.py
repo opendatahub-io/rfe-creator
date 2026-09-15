@@ -24,8 +24,10 @@ DEFAULT_ARTIFACTS_DIR = os.path.join(os.getcwd(), "artifacts")
 
 # The work-item type registry (types/<name>/type.yaml), read once at import; every
 # per-type value below is a projection of a descriptor (design work-item-types-unified.md
-# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: deployment
-# overrides land with resolve() in a later PR.
+# §10 item 2). Deliberately the DESCRIPTOR values, not the effective binding: the artifact
+# layout and the id grammars this table drives are not overridable (§3.2.1 names the
+# binding-only fields). The one effective value the report carries is its ``binding``
+# header (``_binding_header``), computed at report time.
 _TYPES = type_registry.load()
 
 
@@ -156,6 +158,27 @@ def _frontmatter_tracker_ref(task_fm):
 def _usable_score(value):
     """An integer that is not a bool — the only shape the aggregates accept."""
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+# The header keys of the effective tracker binding a run report records (design §3.2.1 e,
+# PR-3 D11): where the run's items live. ``source`` says whether a deployment override was
+# in force (``descriptor`` when none was).
+BINDING_HEADER_KEYS = ("tracker", "project", "issue_type", "source")
+
+
+def _binding_header(entry_type, env=None):
+    """The ``binding`` header: the resolved type's EFFECTIVE binding at report time.
+
+    ``type_registry.resolve`` with the report's type as the explicit signal returns the
+    binding the writers of the same run resolved — ``identity.<tracker>`` overlaid with the
+    ``RFE_CREATOR_BINDING_<TYPE>_*`` variables and the ``JIRA_PROJECT`` / ``JIRA_ISSUE_TYPE``
+    shorthand of ``env`` (default: the process environment). Projected to
+    ``BINDING_HEADER_KEYS``; with no override set every value is the descriptor's own.
+    """
+    if env is None:
+        env = os.environ
+    binding = type_registry.resolve(_TYPES, explicit_type=entry_type, env=env).binding
+    return {key: binding.get(key) for key in BINDING_HEADER_KEYS}
 
 
 def _parse_run_id(start_time):
@@ -383,6 +406,11 @@ def build_report(
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "type": entry_type,
         "report_stage": report_stage,
+        # Additive (design §3.2.1 rule e, PR-3 D11): the effective tracker binding the run
+        # wrote under, after the self-describing header and before everything else, whose
+        # order is unchanged. Readers that predate it ignore it (bootstrap_snapshot reads
+        # ``type`` and the item list only); no schema version bump.
+        "binding": _binding_header(entry_type),
         "run_id": _parse_run_id(start_time),
         "started": start_time,
         "completed": now,
@@ -456,16 +484,23 @@ def main():
     retried = [x for x in args.retried.split(",") if x]
     retry_ok = [x for x in args.retry_successes.split(",") if x]
 
-    report = build_report(
-        ids,
-        args.start_time,
-        batch_size=args.batch_size,
-        retried_ids=retried,
-        retry_success_ids=retry_ok,
-        artifacts_dir=artifacts_dir,
-        entry_type=args.type,
-        report_stage=args.report_stage,
-    )
+    try:
+        report = build_report(
+            ids,
+            args.start_time,
+            batch_size=args.batch_size,
+            retried_ids=retried,
+            retry_success_ids=retry_ok,
+            artifacts_dir=artifacts_dir,
+            entry_type=args.type,
+            report_stage=args.report_stage,
+        )
+    except type_registry.RegistryError as exc:
+        # A malformed binding override (RFE_CREATOR_BINDING_<TYPE>_* / JIRA_PROJECT): the
+        # binding header cannot be computed, and a report that misstates where the run wrote
+        # is worse than none (design §3.2.1 g: a hard failure, not a warning).
+        print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+        sys.exit(1)
 
     out_dir = os.path.join(artifacts_dir, "auto-fix-runs")
     os.makedirs(out_dir, exist_ok=True)

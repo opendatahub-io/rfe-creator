@@ -73,7 +73,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Hermetic: default root is <repo>/types (``__file__``-relative in type_registry), no drop-in roots,
 # no RFE_CREATOR_BINDING_* overlay — the pins are about the DESCRIPTOR values (design §3.2.1: the
-# descriptor is the default binding; the effective binding is tested in test_type_registry.py).
+# descriptor is the default binding; the effective binding is tested in test_type_registry.py, and
+# since PR-3c (3/3) the writers and the artifact helpers act on it — with no override set every
+# effective value equals the descriptor value, which is the equality the pins below hold).
 REG = type_registry.load(extra_roots=[], env={})
 TYPES = REG.names()
 
@@ -348,9 +350,12 @@ MIGRATED = [
         "conventions.parent_key_patterns, schema.task.priority.enum, schema.task.extra_fields "
         "(rfe size), schema.review.score_fields (scores / before_scores), "
         "schema.review.extra_fields (initiative alignment); byte-pinned by "
-        "tests/test_schemas_golden.py; still pinned: the shared status / recommendation / "
-        "feasibility vocabularies (172, 173), the alignment cross-field residue (175) and the "
-        "frontmatter choices source form (162)",
+        "tests/test_schemas_golden.py; PR-3c (3/3): the tracker alternatives of the id grammar "
+        "are the EFFECTIVE key_prefixes (binding(): the overridden write prefix first, the "
+        "descriptor prefixes kept as read prefixes), read from the environment at import — the "
+        "descriptor's own with no override set, so the golden is unchanged; still pinned: the "
+        "shared status / recommendation / feasibility vocabularies (172, 173), the alignment "
+        "cross-field residue (175) and the frontmatter choices source form (162)",
     ),
     (
         (179, 180, 182, 183, 184, 185, 186, 187),
@@ -358,7 +363,10 @@ MIGRATED = [
         "PR-2b: find_artifact_file_including_archived reads the rfe descriptor; "
         "find_removed_context_yaml / find_review_file route via _type_for (PR-3c: candidates(), "
         "a probe of dirs.tasks/<id>.md for its type: when ambiguous or provisional, else detect() "
-        "or rfe); find_task_file_including_archived has a descriptor form (owns()); "
+        "or rfe); find_task_file_including_archived has a descriptor form whose ownership test "
+        "is the EFFECTIVE ladder, Descriptor.owns_effective() (PR-3c (3/3); owns() with no "
+        "override), and find_removed_context_yaml / rename_to_tracker_key's key guard read the "
+        "effective key_prefixes / write prefix (binding()) the same way; "
         "scan_tasks / scan_reviews / rename_to_tracker_key / parse_child take a Descriptor (the "
         "per-type names are wrappers); rebuild_index reads the rfe id_field; "
         "frontmatter._SCHEMA_BY_DIR from dirs; still literal and pinned: _is_companion_file "
@@ -651,7 +659,9 @@ class TestSubmitTypeConfigs:
         # subprocesses submit.py spawns: no --type for rfe (its argv is byte-identical), the type
         # name otherwise. submit.py:75,:106 carried None / "initiative" (consumed :497-498) and
         # :192-193,:210-211 appended '--type initiative' iff initiative; since PR-2d _type_config
-        # derives None if rfe else the type name and _generate_reports tests args.type != "rfe".
+        # derives None if rfe else the type name and _generate_reports tests the resolved type
+        # name != "rfe" (PR-3c-iii: passed explicitly as type_name — --type defaults to None and
+        # type_registry.resolve decides, so args.type is no longer the type).
         # UNMAPPED (no descriptor field) — pinned by value and source form.
         c = submit.TYPE_CONFIGS[ctx.t]
         pin(
@@ -664,9 +674,10 @@ class TestSubmitTypeConfigs:
         assert 'None if desc.name == "rfe" else desc.name' in source
         assert 'cmd.extend(["--type", cfg["split_type_arg"]])' in source  # :497-498
         reports = inspect.getsource(submit._generate_reports)
-        assert reports.count('if args.type != "rfe":') == 2
-        assert reports.count('extend(["--type", args.type])') == 2
+        assert reports.count('if type_name != "rfe":') == 2
+        assert reports.count('extend(["--type", type_name])') == 2
         assert 'extend(["--type", "initiative"])' not in source
+        assert argument_default("scripts/submit.py", "--type") is None
 
     def test_feasibility_label_changes_uses_the_type_map(self, ctx):
         feas = ctx.labels["feasibility"]
@@ -896,9 +907,10 @@ class TestSplitSubmitConfig:
         # rows: 42, 43 (MIGRATED) — split_submit.py:210,:410,:497,:610,:685,:716 carried the
         # literal 'Work item split' and :816-839 Closed / Obsolete; since PR-2d both come from
         # identity.jira.split_link_type and identity.jira.state_map.close_superseded through the
-        # private _TRACKER projection (keyed by the (project, issue_type) pair every SPLIT_CONFIG
-        # entry carries; read with a None default because the schema leaves both optional and a
-        # registered type that never splits must not break the import). The source form is
+        # private _TRACKER projection (keyed by the TYPE NAME every SPLIT_CONFIG entry carries
+        # since PR-3c, D12 — a binding override changes the pair, never the name; read with a
+        # None default because the schema leaves both optional and a registered type that never
+        # splits must not break the import). The source form is
         # pinned so a re-introduced literal is a visible change, the case-insensitive target match
         # is kept, and the emulator seed (tests/conftest.py:96) must keep offering the
         # descriptor's link type or the integration suites would exercise another transaction.
@@ -914,8 +926,9 @@ class TestSplitSubmitConfig:
             in source
         )
         # _inspect_child, discover_state, phase2_create_link / phase3_close
-        assert source.count('_tracker(config)["split_link_type"]') == 3
-        assert source.count('_tracker(config)["close_superseded"]') == 1
+        assert source.count('_tracker_for(config)["split_link_type"]') == 3
+        assert source.count('_tracker_for(config)["close_superseded"]') == 1
+        assert 'return _TRACKER[config["type"]]' in source  # D12: by type name, never the pair
         assert 'if t["to"].get("name", "").lower() == target_status.lower():' in source
         assert 'fields={"resolution": {"name": resolution}},' in source
         assert "(resolution: {resolution})" in source
@@ -1143,13 +1156,22 @@ class TestSmallRegistries:
             assert "Ready" in task["status"]["enum"], t
             assert "Major" in task["priority"]["enum"], t
 
-    def test_check_conflicts_write_prefix_predicate(self, ctx):
-        # rows: 66 — the dict is MIGRATED and the task scan is artifact_utils.scan_tasks(desc)
-        # since PR-2b (no scan_fn entry); still literal in check_conflicts.py: the
-        # startswith(jira_prefix) predicate — key_prefixes[0] only, prefix-union in a later
-        # PR-2 step
-        assert "scan_fn" not in check_conflicts._TYPE_CONFIG[ctx.t]
-        assert 'item_id.startswith(tc["jira_prefix"])' in read("scripts/check_conflicts.py")
+    def test_check_conflicts_existing_predicate_is_the_effective_binding_rule(self, ctx):
+        # rows: 66 (MIGRATED) — the dict is a descriptor projection since PR-2a, the task scan
+        # is artifact_utils.scan_tasks(desc) since PR-2b (no scan_fn entry), and since PR-3c the
+        # startswith(jira_prefix) write-prefix predicate is gone: "existing" is the design §5
+        # rule — frontmatter tracker_ref owned by the resolved type (a foreign one is a hard
+        # error), else membership in the EFFECTIVE key_prefixes union of the binding resolve()
+        # returned — and the same fetch verifies (project, issuetype) against that binding.
+        tc = check_conflicts._TYPE_CONFIG[ctx.t]
+        assert "scan_fn" not in tc and "jira_prefix" not in tc
+        assert list(tc) == ["originals_dir", "id_field"]
+        source = read("scripts/check_conflicts.py")
+        assert 'item_id.startswith(tc["jira_prefix"])' not in source
+        assert 'key_prefixes = list(binding.get("key_prefixes") or [])' in source
+        assert "_is_existing(task_data, item_id, type_name, key_prefixes)" in source
+        assert 'extra_fields=["project", "issuetype"]' in source
+        assert "_binding_mismatch(fields, type_name, binding, issue_key)" in source
 
     def test_batch_parent_key_pattern_is_reconciled(self, ctx):
         # rows: 68 — Q14 closed in PR-3b: the batch validator, the <type>-task schema and the
@@ -1935,6 +1957,50 @@ class TestArtifactHelpers:
             assert literal in source, literal
         assert "scan_task_files(" in source and "scan_review_files(" in source
         assert "Size" in source and "size" in rfe.schema["task"]["extra_fields"]
+
+    def test_helpers_read_the_effective_binding(self, ctx):
+        # rows: 162-171, 179, 180, 183 (PR-3c (3/3), design §3.2.1; plan "PR-3c" effective
+        # binding in the writers) — the tracker part of the id grammar, the rename key guard
+        # and the archived-task / removed-context ownership tests read binding()["key_prefixes"]
+        # (write prefix first, descriptor prefixes kept) through the two artifact_utils helpers,
+        # never desc.key_prefixes / desc.write_prefix / desc.owns(); with no override (this
+        # registry) every effective value is the descriptor value, so the pins above hold.
+        assert artifact_utils._effective_key_prefixes(ctx.desc) == list(ctx.jira["key_prefixes"])
+        assert artifact_utils._effective_write_prefix(ctx.desc) == ctx.wp
+        assert (
+            artifact_utils._id_pattern(ctx.desc)
+            == (artifact_utils.SCHEMAS[ctx.task_schema][ctx.id_field]["pattern"])
+        )
+        for fn, needle, gone in (
+            (artifact_utils._id_pattern, "_effective_key_prefixes(desc)", "desc.key_prefixes"),
+            (
+                artifact_utils.find_task_file_including_archived,
+                "_owns_effective(desc, identifier)",
+                "desc.owns(",
+            ),
+            (
+                artifact_utils.find_task_file_including_archived,
+                "tuple(_effective_key_prefixes(desc))",
+                "desc.key_prefixes",
+            ),
+            (
+                artifact_utils.find_removed_context_yaml,
+                "tuple(_effective_key_prefixes(desc))",
+                "desc.write_prefix",
+            ),
+            (
+                artifact_utils.rename_to_tracker_key,
+                "_effective_write_prefix(desc)",
+                "desc.write_prefix",
+            ),
+        ):
+            source = inspect.getsource(fn)
+            assert needle in source, (fn.__name__, needle)
+            assert gone not in source, (fn.__name__, gone)
+        # The routers keep detect()'s descriptor-only contract for their fallback.
+        assert "_TYPES.detect(identifier) or" in inspect.getsource(artifact_utils._type_for)
+        for item_id in ctx.sample_ids:
+            assert ctx.desc.owns_effective(item_id) is ctx.desc.owns(item_id) is True
 
     def test_name_keyed_residues_until_pr3(self):
         # rows: 184, 185 (residue) — three artifact_utils projections are keyed on the type NAME

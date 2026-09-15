@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Tests for scripts/artifact_utils.py — schema validation, frontmatter I/O, migration."""
 
+import json
 import os
+import re
+import subprocess
 import sys
 
 import pytest
@@ -20,6 +23,7 @@ from artifact_utils import (
     find_artifact_file_including_archived,
     find_removed_context_yaml,
     find_review_file,
+    find_task_file_including_archived,
     parse_child,
     parse_child_artifact,
     parse_child_initiative,
@@ -1897,6 +1901,10 @@ class _FakeDesc:
     def key_prefixes(self):
         return list(self._data.get("identity.jira.key_prefixes", []))
 
+    def binding(self, env=None, workspace=None, shorthand=False):
+        # No overlay: the effective prefixes are the descriptor's (what the helpers read).
+        return {"key_prefixes": self.key_prefixes}
+
     @property
     def id_field(self):
         return self._data.get("identity.id_field", "x_id")
@@ -1918,3 +1926,352 @@ def test_id_pattern_strips_only_the_outer_anchors():
         and re.match(pattern, "XYZ-3")
         and not re.match(pattern, "ABC-12")
     )
+
+
+# ── PR-3c (3/3): the effective binding in the artifact helpers ─────────────────
+#
+# design §3.2.1; plan "PR-3c" (effective binding in the writers). Under
+# RFE_CREATOR_BINDING_RFE_PROJECT=KONFLUX the rfe write prefix is KONFLUX- and RHAIRFE- stays
+# a read prefix: the id grammar, the rename guard and the archived-task / removed-context
+# lookups follow binding()["key_prefixes"]. With no override every value is the descriptor's
+# and every byte is unchanged (tests/test_schemas_golden.py and the suites above run with
+# none set).
+
+KONFLUX_ENV = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+SCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+
+def _bound_to(desc, env):
+    """The shipped descriptor ``desc`` with ``env`` as its binding environment."""
+    import type_registry
+
+    return type_registry.Descriptor(desc.name, desc.data, desc.path, env=env)
+
+
+def _env_without_seams(**extra):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("RFE_CREATOR_")}
+    env.update(extra)
+    return env
+
+
+class TestEffectiveIdGrammar:
+    """_id_pattern / SCHEMAS: the tracker alternatives are the EFFECTIVE key prefixes, write
+    prefix first, descriptor prefixes kept; the local alternative stays the descriptor's."""
+
+    def test_no_override_is_the_descriptor_grammar(self):
+        import artifact_utils
+
+        desc = _bound_to(RFE, {})
+        assert artifact_utils._effective_key_prefixes(desc) == RFE.key_prefixes
+        assert artifact_utils._effective_write_prefix(desc) == RFE.write_prefix
+        assert artifact_utils._id_pattern(desc) == SCHEMAS["rfe-task"]["rfe_id"]["pattern"]
+        assert artifact_utils._id_pattern(desc) == r"^(RFE-\d+|RHAIRFE-\d+)$"
+
+    def test_project_override_puts_the_write_prefix_first_and_keeps_the_read_prefix(self):
+        import artifact_utils
+
+        desc = _bound_to(RFE, KONFLUX_ENV)
+        assert artifact_utils._effective_key_prefixes(desc) == ["KONFLUX-", "RHAIRFE-"]
+        assert artifact_utils._effective_write_prefix(desc) == "KONFLUX-"
+        pattern = artifact_utils._id_pattern(desc)
+        assert pattern == r"^(RFE-\d+|KONFLUX-\d+|RHAIRFE-\d+)$"
+        for ident in ("RFE-001", "KONFLUX-1", "RHAIRFE-1"):
+            assert re.fullmatch(pattern, ident), ident
+        for ident in ("RHOAIENG-1", "KONFLUX-", "konflux-1", "INIT-001"):
+            assert not re.fullmatch(pattern, ident), ident
+        task, review = artifact_utils._task_schema(desc), artifact_utils._review_schema(desc)
+        assert task["rfe_id"]["pattern"] == review["rfe_id"]["pattern"] == pattern
+        # The local grammar is the descriptor's (no shipped type overrides its local prefix).
+        assert task["local_id"]["pattern"] == review["local_id"]["pattern"] == RFE.local_id_pattern
+        # The parent_key grammar follows the write prefix too, so a child of a parent fetched
+        # under the override (parent_key: KONFLUX-1) validates.
+        assert task["parent_key"]["pattern"] == r"^(KONFLUX-\d+|RFE-\d+|RHAIRFE-\d+)$"
+        assert artifact_utils._parent_key_pattern(desc) == task["parent_key"]["pattern"]
+        # Everything else in the schema is untouched by the binding.
+        task["rfe_id"]["pattern"] = SCHEMAS["rfe-task"]["rfe_id"]["pattern"]
+        task["parent_key"]["pattern"] = SCHEMAS["rfe-task"]["parent_key"]["pattern"]
+        assert task == SCHEMAS["rfe-task"]
+
+    def test_no_override_parent_key_grammar_is_the_descriptor_join(self):
+        import artifact_utils
+
+        for desc in (RFE, INITIATIVE):
+            bound = _bound_to(desc, {})
+            assert artifact_utils._parent_key_pattern(bound) == desc.parent_key_pattern
+            assert SCHEMAS[f"{desc.name}-task"]["parent_key"]["pattern"] == desc.parent_key_pattern
+
+    def test_a_child_of_an_overridden_parent_validates_at_import(self):
+        # A fresh interpreter under the override: parent_key KONFLUX-1 passes the rfe task
+        # schema (the shape split_submit / submit Phase 1 read), the descriptor parents still
+        # pass, a foreign one still fails; in this process (no override) KONFLUX-1 is refused.
+        code = (
+            "import sys, json; sys.path.insert(0, 'scripts'); import artifact_utils as a; "
+            "fm = {'rfe_id': 'RFE-001', 'title': 'T', 'priority': 'Major', 'status': 'Ready'}; "
+            "print(json.dumps([a.SCHEMAS['rfe-task']['parent_key']['pattern'], "
+            "a.validate({**fm, 'parent_key': 'KONFLUX-1'}, 'rfe-task'), "
+            "a.validate({**fm, 'parent_key': 'RHAIRFE-1'}, 'rfe-task'), "
+            "a.validate({**fm, 'parent_key': 'RHOAIENG-1'}, 'rfe-task')]))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=os.path.join(os.path.dirname(__file__), ".."),
+            env=_env_without_seams(**KONFLUX_ENV),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        pattern, konflux, rhairfe, rhoaieng = json.loads(result.stdout)
+        assert pattern == r"^(KONFLUX-\d+|RFE-\d+|RHAIRFE-\d+)$"
+        assert konflux == [] and rhairfe == []
+        assert rhoaieng == [f"parent_key: 'RHOAIENG-1' does not match {pattern}"]
+        fm = {"rfe_id": "RFE-001", "title": "T", "priority": "Major", "status": "Ready"}
+        assert validate({**fm, "parent_key": "KONFLUX-1"}, "rfe-task") == [
+            f"parent_key: 'KONFLUX-1' does not match {SCHEMAS['rfe-task']['parent_key']['pattern']}"
+        ]
+
+    def test_the_other_type_is_untouched(self):
+        import artifact_utils
+
+        desc = _bound_to(INITIATIVE, KONFLUX_ENV)
+        assert artifact_utils._task_schema(desc) == SCHEMAS["initiative-task"]
+        assert artifact_utils._review_schema(desc) == SCHEMAS["initiative-review"]
+
+    def test_schemas_reflect_the_environment_at_import(self):
+        # SCHEMAS is built once at import from the process environment (like every other
+        # effective-binding consumer): a fresh interpreter under the override validates the
+        # overridden project's key as an rfe id and still validates the descriptor's.
+        code = (
+            "import sys, json; sys.path.insert(0, 'scripts'); import artifact_utils as a; "
+            "fm = {'title': 'T', 'priority': 'Major', 'status': 'Ready'}; "
+            "print(json.dumps([a.SCHEMAS['rfe-task']['rfe_id']['pattern'], "
+            "a.SCHEMAS['initiative-task']['initiative_id']['pattern'], "
+            "a.validate({'rfe_id': 'KONFLUX-1', **fm}, 'rfe-task'), "
+            "a.validate({'rfe_id': 'RHAIRFE-1', **fm}, 'rfe-task'), "
+            "a.validate({'rfe_id': 'RHOAIENG-1', **fm}, 'rfe-task')]))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=os.path.join(os.path.dirname(__file__), ".."),
+            env=_env_without_seams(**KONFLUX_ENV),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        rfe_pattern, init_pattern, konflux, rhairfe, rhoaieng = json.loads(result.stdout)
+        assert rfe_pattern == r"^(RFE-\d+|KONFLUX-\d+|RHAIRFE-\d+)$"
+        assert init_pattern == SCHEMAS["initiative-task"]["initiative_id"]["pattern"]
+        assert konflux == [] and rhairfe == []
+        assert rhoaieng == [f"rfe_id: 'RHOAIENG-1' does not match {rfe_pattern}"]
+        # In this process (no override) the overridden key is not an rfe id.
+        assert validate(
+            {"rfe_id": "KONFLUX-1", "title": "T", "priority": "Major", "status": "Ready"},
+            "rfe-task",
+        )
+
+
+class TestMalformedOverrideNeverBreaksTheImport:
+    """A malformed RFE_CREATOR_BINDING_* value is the entry scripts' hard error (one line from
+    assert_registered_binding before any write); artifact_utils — imported by every script,
+    frontmatter.py included — degrades that type's effective values to the descriptor's rather
+    than failing every import with a traceback."""
+
+    def test_import_and_schemas_degrade_to_the_descriptor(self):
+        code = (
+            "import sys, json; sys.path.insert(0, 'scripts'); import artifact_utils as a; "
+            "print(json.dumps([a.SCHEMAS['rfe-task']['rfe_id']['pattern'], "
+            "a.SCHEMAS['initiative-task']['initiative_id']['pattern'], "
+            "a.SCHEMAS['rfe-task']['parent_key']['pattern'], "
+            "a.SCHEMAS['initiative-task']['parent_key']['pattern']]))"
+        )
+        for var in ("RFE_CREATOR_BINDING_INITIATIVE_PROJECT", "RFE_CREATOR_BINDING_RFE_PROJECT"):
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=os.path.join(os.path.dirname(__file__), ".."),
+                env=_env_without_seams(**{var: "lower"}),
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, (var, result.stderr)
+            assert "Traceback" not in result.stderr
+            assert json.loads(result.stdout) == [
+                SCHEMAS["rfe-task"]["rfe_id"]["pattern"],
+                SCHEMAS["initiative-task"]["initiative_id"]["pattern"],
+                SCHEMAS["rfe-task"]["parent_key"]["pattern"],
+                SCHEMAS["initiative-task"]["parent_key"]["pattern"],
+            ], var
+
+    def test_helpers_degrade_to_the_descriptor(self, tmp_dir, monkeypatch):
+        import artifact_utils
+
+        _write("artifacts/rfe-tasks/RHAIRFE-1.md", _task_fm("rfe_id", "RHAIRFE-1"))
+        _write("artifacts/rfe-tasks/RHAIRFE-1-removed-context.yaml", "blocks: []\n")
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_PROJECT", "lower")
+        with pytest.raises(artifact_utils.type_registry.RegistryError):
+            RFE.binding()
+        assert artifact_utils._effective_binding(RFE) is None
+        assert artifact_utils._effective_key_prefixes(RFE) == RFE.key_prefixes
+        assert artifact_utils._parent_key_pattern(RFE) == RFE.parent_key_pattern
+        assert artifact_utils._owns_effective(RFE, "RHAIRFE-1") is True
+        assert artifact_utils._owns_effective(RFE, "KONFLUX-1") is False
+        assert find_task_file_including_archived("artifacts", "RHAIRFE-1", desc=RFE) == (
+            "artifacts/rfe-tasks/RHAIRFE-1.md"
+        )
+        assert find_removed_context_yaml("artifacts", "RHAIRFE-1") == os.path.join(
+            "artifacts", "rfe-tasks", "RHAIRFE-1-removed-context.yaml"
+        )
+        with pytest.raises(ValueError, match="invalid Jira key 'KONFLUX-7'"):
+            rename_to_jira_key("artifacts", "RFE-001", "KONFLUX-7")
+
+
+class TestLookupsUnderAProjectOverride:
+    """find_task_file_including_archived (descriptor form) and find_removed_context_yaml
+    evaluate the binding per call: the module registry reads os.environ live."""
+
+    def test_find_task_file_including_archived(self, tmp_dir, monkeypatch):
+        _write("artifacts/rfe-tasks/KONFLUX-1.md", _task_fm("rfe_id", "KONFLUX-1", type="rfe"))
+        _write("artifacts/rfe-tasks/KONFLUX-2-slug.md", _task_fm("rfe_id", "KONFLUX-2", type="rfe"))
+        _write("artifacts/rfe-tasks/RHAIRFE-1.md", _task_fm("rfe_id", "RHAIRFE-1"))
+        _write("artifacts/rfe-tasks/RFE-001.md", _task_fm("rfe_id", "RFE-001"))
+        find = find_task_file_including_archived
+        # No override: an overridden project's key is nobody's (unchanged).
+        assert find("artifacts", "KONFLUX-1", desc=RFE) is None
+        assert find_artifact_file_including_archived("artifacts", "KONFLUX-1") is None
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_PROJECT", "KONFLUX")
+        assert find("artifacts", "KONFLUX-1", desc=RFE) == "artifacts/rfe-tasks/KONFLUX-1.md"
+        assert find("artifacts", "KONFLUX-2", desc=RFE) is None  # tracker key: exact name only
+        assert find("artifacts", "RHAIRFE-1", desc=RFE) == "artifacts/rfe-tasks/RHAIRFE-1.md"
+        assert find("artifacts", "RFE-001", desc=RFE) == "artifacts/rfe-tasks/RFE-001.md"
+        assert find("artifacts", "KONFLUX-1", desc=INITIATIVE) is None  # the other type: never
+        assert find_artifact_file_including_archived("artifacts", "KONFLUX-1") == (
+            "artifacts/rfe-tasks/KONFLUX-1.md"
+        )
+        # The legacy (prefix) form is what generate_review_pdf passes; it is untouched.
+        assert (
+            find("artifacts", "KONFLUX-1", "rfe-tasks", RFE.write_prefix, RFE.local_prefix) is None
+        )
+
+    def test_find_removed_context_yaml(self, tmp_dir, monkeypatch):
+        _write("artifacts/rfe-tasks/KONFLUX-1.md", _task_fm("rfe_id", "KONFLUX-1", type="rfe"))
+        _write("artifacts/rfe-tasks/KONFLUX-1-removed-context.yaml", "blocks: []\n")
+        _write("artifacts/rfe-tasks/KONFLUX-3-removed-context.yaml", "blocks: []\n")
+        _write("artifacts/rfe-tasks/RHAIRFE-1-removed-context.yaml", "blocks: []\n")
+        _write("artifacts/initiatives/KONFLUX-1-removed-context.yaml", "blocks: []\n")
+        # No override: the provisional key is routed to rfe by its task's type, then rejected
+        # by the descriptor write prefix (unchanged: the removed-context comment is not posted).
+        assert find_removed_context_yaml("artifacts", "KONFLUX-1") is None
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_PROJECT", "KONFLUX")
+        # Under the override the key is a non-provisional rfe candidate (no probe needed) and
+        # carries the effective write prefix.
+        assert find_removed_context_yaml("artifacts", "KONFLUX-1") == os.path.join(
+            "artifacts", "rfe-tasks", "KONFLUX-1-removed-context.yaml"
+        )
+        assert find_removed_context_yaml("artifacts", "KONFLUX-3") == os.path.join(
+            "artifacts", "rfe-tasks", "KONFLUX-3-removed-context.yaml"
+        )
+        assert find_removed_context_yaml("artifacts", "RHAIRFE-1") == os.path.join(
+            "artifacts", "rfe-tasks", "RHAIRFE-1-removed-context.yaml"
+        )
+        assert find_removed_context_yaml("artifacts", "INIT-001") is None
+
+
+class TestRenameUnderAProjectOverride:
+    """rename_to_tracker_key: the key guard is the EFFECTIVE write prefix — the overridden
+    project's key is the only rename target under the override, and never one without it —
+    and the renamed files validate against the effective grammar (a fresh interpreter, as
+    submit.py is)."""
+
+    def _draft(self):
+        os.makedirs("artifacts/rfe-tasks")
+        os.makedirs("artifacts/rfe-reviews")
+        write_frontmatter(
+            "artifacts/rfe-tasks/RFE-001.md",
+            {"rfe_id": "RFE-001", "title": "T", "priority": "Major", "status": "Ready"},
+            "rfe-task",
+        )
+        _write("artifacts/rfe-tasks/RFE-001-comments.md", "comments\n")
+        _write("artifacts/rfe-tasks/RFE-001-removed-context.yaml", "blocks: []\n")
+        write_frontmatter(
+            "artifacts/rfe-reviews/RFE-001-review.md",
+            {**VALID_REVIEW_FM, "rfe_id": "RFE-001"},
+            "rfe-review",
+        )
+
+    def _rename(self, env, key):
+        code = (
+            f"import sys; sys.path.insert(0, {SCRIPTS_DIR!r}); import artifact_utils as a; "
+            f"a.rename_to_jira_key('artifacts', 'RFE-001', {key!r}); "
+            "print(sorted(p for p, _ in a.scan_task_files('artifacts')), "
+            "sorted(p for p, _ in a.scan_review_files('artifacts')))"
+        )
+        return subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+
+    def test_renames_to_the_overridden_projects_key(self, tmp_dir):
+        self._draft()
+        result = self._rename(_env_without_seams(**KONFLUX_ENV), "KONFLUX-7")
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        # scan_tasks / scan_reviews validate the renamed files against the effective grammar.
+        assert result.stdout == (
+            "['artifacts/rfe-tasks/KONFLUX-7.md'] ['artifacts/rfe-reviews/KONFLUX-7-review.md']\n"
+        )
+        assert sorted(os.listdir("artifacts/rfe-tasks")) == [
+            "KONFLUX-7-comments.md",
+            "KONFLUX-7-removed-context.yaml",
+            "KONFLUX-7.md",
+        ]
+        data, _ = read_frontmatter("artifacts/rfe-tasks/KONFLUX-7.md")
+        assert [data[k] for k in ("rfe_id", "status", "local_id", "type", "tracker_ref")] == [
+            "KONFLUX-7",
+            "Submitted",
+            "RFE-001",
+            "rfe",
+            "KONFLUX-7",
+        ]
+        review, _ = read_frontmatter("artifacts/rfe-reviews/KONFLUX-7-review.md")
+        assert (review["rfe_id"], review["local_id"], review["type"], review["tracker_ref"]) == (
+            "KONFLUX-7",
+            "RFE-001",
+            "rfe",
+            "KONFLUX-7",
+        )
+
+    def test_a_descriptor_read_prefix_is_not_a_rename_target(self, tmp_dir):
+        self._draft()
+        result = self._rename(_env_without_seams(**KONFLUX_ENV), "RHAIRFE-7")
+        assert result.returncode == 1
+        assert "ValueError: rename_to_jira_key: invalid Jira key 'RHAIRFE-7'" in result.stderr
+        assert sorted(os.listdir("artifacts/rfe-tasks")) == [
+            "RFE-001-comments.md",
+            "RFE-001-removed-context.yaml",
+            "RFE-001.md",
+        ]
+
+    def test_without_the_override_the_overridden_prefix_is_refused(self, tmp_dir):
+        self._draft()
+        with pytest.raises(ValueError, match="invalid Jira key 'KONFLUX-7'"):
+            rename_to_jira_key("artifacts", "RFE-001", "KONFLUX-7")
+        assert os.path.isfile("artifacts/rfe-tasks/RFE-001.md")
+        rename_to_jira_key("artifacts", "RFE-001", "RHAIRFE-7")
+        assert os.path.isfile("artifacts/rfe-tasks/RHAIRFE-7.md")
+
+    def test_the_other_types_guard_is_untouched(self, tmp_dir):
+        os.makedirs("artifacts/initiatives")
+        write_frontmatter(
+            "artifacts/initiatives/INIT-001.md",
+            {"initiative_id": "INIT-001", "title": "T", "priority": "Major", "status": "Ready"},
+            "initiative-task",
+        )
+        code = (
+            f"import sys; sys.path.insert(0, {SCRIPTS_DIR!r}); import artifact_utils as a; "
+            "a.rename_initiative_to_jira_key('artifacts', 'INIT-001', 'KONFLUX-1')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env=_env_without_seams(**KONFLUX_ENV),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        assert "ValueError: rename_initiative_to_jira_key: invalid Jira key 'KONFLUX-1'" in (
+            result.stderr
+        )
