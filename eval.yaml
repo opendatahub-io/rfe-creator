@@ -13,6 +13,11 @@ execution:
 runner:
   type: claude-code
   effort: high            # Claude Code reasoning effort: low | medium | high | xhigh | max
+  # THROWAWAY (D14 fault injection, never merge): a 120 s no-progress window makes
+  # legitimate 2-4 min agents trip the wave stall guard so the retry / escalation
+  # path and the orchestrator's reaction to a STALL line can be read in a live run.
+  env:
+    PIPELINE_WAVE_STALL_SECS: "120"
 
 # Models — defaults for each role (CLI flags override)
 models:
