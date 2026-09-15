@@ -967,7 +967,10 @@ def cmd_init(args):
     }
     _save_state(state)
     _export_headless_marker(state)
-    print(f"Initialized pipeline state: type={opts.type} batch_size={opts.batch_size}")
+    print(
+        f"Initialized pipeline state: type={opts.type} batch_size={opts.batch_size}"
+        f" stall_window={_wave_stall_secs()}s retry_cap={_wave_retry_cap()}"  # THROWAWAY
+    )
 
 
 def cmd_get_phase(args):

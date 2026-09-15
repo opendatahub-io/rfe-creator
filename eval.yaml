@@ -8,16 +8,16 @@ execution:
   arguments: --headless --dry-run --input batch.yaml
   timeout: 7200          # 2 hours — opus with 20 cases + splits needs ~60 min
   max_budget_usd: 100.0  # Per-invocation cost cap
+  # THROWAWAY (D14 fault injection, never merge): a 60 s no-progress window makes a
+  # legitimate 2-4 min agent trip the wave stall guard, so the retry / escalation path
+  # and the orchestrator's reaction to a STALL line can be read in a live run.
+  env:
+    PIPELINE_WAVE_STALL_SECS: "60"
 
 # Runner — agent harness + runner-specific knobs
 runner:
   type: claude-code
   effort: high            # Claude Code reasoning effort: low | medium | high | xhigh | max
-  # THROWAWAY (D14 fault injection, never merge): a 120 s no-progress window makes
-  # legitimate 2-4 min agents trip the wave stall guard so the retry / escalation
-  # path and the orchestrator's reaction to a STALL line can be read in a live run.
-  env:
-    PIPELINE_WAVE_STALL_SECS: "120"
 
 # Models — defaults for each role (CLI flags override)
 models:
@@ -38,7 +38,7 @@ mlflow:
   experiment: rfe-speedrun-eval
 
 dataset:
-  path: eval/dataset/cases
+  path: eval/dataset-d14/cases   # THROWAWAY: one revision-expected case
   schema: |
     Each case directory contains 2 files:
 
