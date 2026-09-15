@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "bootstrap_snapshot.py")
 
+import bootstrap_snapshot  # noqa: E402
 import type_registry  # noqa: E402
 from bootstrap_snapshot import (  # noqa: E402
     _RFE_SNAPSHOT_PREFIX,
@@ -979,7 +980,7 @@ class TestBootstrapIntegration:
         assert snap["issues"]["RHAIRFE-2"] == historical_hash_2
         assert snap["issues"]["RHAIRFE-3"] == historical_hash_3
 
-    def _run_bootstrap(self, results, art_dir, url, extra=None):
+    def _run_bootstrap(self, results, art_dir, url, extra=None, jql="project = RHAIRFE"):
         env = {
             **os.environ,
             "JIRA_SERVER": url,
@@ -996,7 +997,7 @@ class TestBootstrapIntegration:
         ]
         if extra:
             cmd.extend(extra)
-        cmd.append("project = RHAIRFE")
+        cmd.append(jql)
         return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     @staticmethod
@@ -1212,7 +1213,10 @@ class TestBootstrapIntegration:
         art_dir = str(tmp_path / "artifacts")
         os.makedirs(art_dir)
 
-        r = self._run_bootstrap(results, art_dir, url, extra=["--type", "initiative"])
+        # The JQL must name the initiative project: bootstrap runs the JQL/binding check too.
+        r = self._run_bootstrap(
+            results, art_dir, url, extra=["--type", "initiative"], jql="project = RHOAIENG"
+        )
         assert r.returncode == 0, r.stderr
         assert "walking back to 20260331-110000" in r.stderr
 
@@ -1364,6 +1368,97 @@ class TestBootstrapIntegration:
         assert "--include-all" in r.stderr
         assert "Traceback" not in r.stderr
         assert not os.path.exists(os.path.join(art_dir, "auto-fix-runs"))
+
+    def test_other_types_report_fails_loudly(self, tmp_path, mock_jira):
+        """PR-3c: a report that says `type: initiative` under the (default) rfe bootstrap is
+        refused like a corrupt one — it says nothing about what the rfe run processed."""
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Issue one."}
+        results = _make_results_dir(
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            reports={
+                "20260401-120000": {
+                    "type": "initiative",
+                    "per_initiative": [{"id": "RHOAIENG-1", "recommendation": "submit"}],
+                }
+            },
+        )
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        cmd = [sys.executable, SCRIPT, "--results-dir", results, "--artifacts-dir", art_dir]
+
+        r = subprocess.run(cmd + ["project = RHAIRFE"], capture_output=True, text=True, env=env)
+        assert r.returncode == 1
+        report = os.path.join(results, "20260401-120000", "auto-fix-runs", "20260401-120000.yaml")
+        assert (
+            f"Error: run report {report} is a initiative report, expected rfe. "
+            "Pass --include-all to snapshot every fetched issue as unprocessed instead."
+        ) in r.stderr
+        assert "Traceback" not in r.stderr
+        assert not os.path.exists(os.path.join(art_dir, "auto-fix-runs"))
+
+        # The escape hatch is the same as for every other malformed report.
+        r = subprocess.run(
+            cmd + ["--include-all", "project = RHAIRFE"], capture_output=True, text=True, env=env
+        )
+        assert r.returncode == 0, r.stderr
+        assert "is a initiative report, expected rfe — --include-all set" in r.stderr
+        assert os.path.exists(os.path.join(art_dir, "auto-fix-runs"))
+
+    def test_self_describing_rfe_report_is_read_as_before(self, tmp_path, mock_jira):
+        """A `type: rfe` report (every report generate_run_report.py writes since 3c-i) filters
+        exactly like a legacy one."""
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Issue one.", "RHAIRFE-2": "Issue two."}
+        results = _make_results_dir(
+            tmp_path,
+            ["20260401-120000"],
+            latest="20260401-120000",
+            reports={
+                "20260401-120000": {
+                    "report_schema_version": 1,
+                    "type": "rfe",
+                    "report_stage": "post_submit",
+                    "per_rfe": [{"id": "RHAIRFE-1", "recommendation": "submit"}],
+                }
+            },
+        )
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+        env = {
+            **os.environ,
+            "JIRA_SERVER": url,
+            "JIRA_USER": "test@example.com",
+            "JIRA_TOKEN": "test-token",
+        }
+        r = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                "project = RHAIRFE",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        (name,) = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, name)) as f:
+            snapshot = yaml.safe_load(f)
+        assert set(snapshot["issues"]) == {"RHAIRFE-1"}
 
     def test_include_all_overrides_a_corrupt_report(self, tmp_path, mock_jira):
         """The recovery override applies to corruption too, and stays fail-safe."""
@@ -1610,6 +1705,91 @@ class TestLoadRunReportRejectsCorruptFiles:
         assert ids is None and report is None
 
 
+# Hermetic registry for the cross-check parametrization (REG below is defined after this class).
+_REG = type_registry.load(extra_roots=[], env={})
+
+
+class TestLoadRunReportTypeCrossCheck:
+    """PR-3c: a self-describing run report (``type:``, generate_run_report.py) must name the
+    bootstrap's own type; another type's report is a malformed-report ValueError like the other
+    shapes, and a legacy report without the key is read unchanged."""
+
+    ENTRY = "  - id: {key}\n    recommendation: submit\n"
+
+    def _write(self, tmp_path, body, prefix="", run_name="20260401-120000"):
+        results = str(tmp_path / "results")
+        report_dir = os.path.join(results, run_name, "auto-fix-runs")
+        os.makedirs(report_dir, exist_ok=True)
+        with open(os.path.join(report_dir, f"{prefix}{run_name}.yaml"), "w") as f:
+            f.write(body)
+        return results, run_name
+
+    def test_matching_type_is_read(self, tmp_path):
+        results, run = self._write(
+            tmp_path, "type: rfe\nper_rfe:\n" + self.ENTRY.format(key="RHAIRFE-1")
+        )
+        ids, report = _load_run_report(results, run)
+        assert ids == {"RHAIRFE-1"}
+        assert report["type"] == "rfe"
+
+    def test_absent_type_is_a_legacy_report(self, tmp_path):
+        results, run = self._write(tmp_path, "per_rfe:\n" + self.ENTRY.format(key="RHAIRFE-1"))
+        ids, report = _load_run_report(results, run)
+        assert ids == {"RHAIRFE-1"}
+        assert "type" not in report
+
+    def test_null_type_is_tolerated_like_absent(self, tmp_path):
+        results, run = self._write(
+            tmp_path, "type: null\nper_rfe:\n" + self.ENTRY.format(key="RHAIRFE-1")
+        )
+        ids, _ = _load_run_report(results, run)
+        assert ids == {"RHAIRFE-1"}
+
+    def test_mismatching_type_raises_before_the_item_key_check(self, tmp_path):
+        # An initiative report under the rfe bootstrap: the type verdict, not the drift shape
+        # ("has no per_rfe item list") the same file would otherwise produce.
+        results, run = self._write(
+            tmp_path, "type: initiative\nper_initiative:\n" + self.ENTRY.format(key="RHOAIENG-1")
+        )
+        path = os.path.join(results, run, "auto-fix-runs", f"{run}.yaml")
+        with pytest.raises(ValueError) as exc:
+            _load_run_report(results, run)
+        assert str(exc.value) == f"run report {path} is a initiative report, expected rfe"
+
+    def test_mismatch_is_decided_by_type_even_when_the_item_key_matches(self, tmp_path):
+        results, run = self._write(
+            tmp_path, "type: initiative\nper_rfe:\n" + self.ENTRY.format(key="RHAIRFE-1")
+        )
+        with pytest.raises(ValueError, match="is a initiative report, expected rfe"):
+            _load_run_report(results, run)
+
+    @pytest.mark.parametrize("type_name", _REG.names())
+    def test_every_type_checks_its_own_name(self, tmp_path, type_name):
+        cfg = BOOTSTRAP_CONFIG[type_name]
+        desc = _REG.get(type_name)
+        key = f"{desc.write_prefix}1"
+        body = f"type: {type_name}\n{cfg['item_key']}:\n" + self.ENTRY.format(key=key)
+        results, run = self._write(tmp_path, body, prefix=cfg["report_prefix"])
+        ids, _ = _load_run_report(results, run, config=cfg)
+        assert ids == {key}
+        other = next(n for n in _REG.names() if n != type_name)
+        body = f"type: {other}\n{cfg['item_key']}:\n" + self.ENTRY.format(key=key)
+        results, run = self._write(tmp_path / other, body, prefix=cfg["report_prefix"])
+        with pytest.raises(ValueError, match=f"is a {other} report, expected {type_name}"):
+            _load_run_report(results, run, config=cfg)
+
+    def test_generated_report_round_trips(self, tmp_path):
+        # The writer's own header (generate_run_report.py: report_schema_version, type,
+        # report_stage) under the matching bootstrap.
+        results, run = self._write(
+            tmp_path,
+            "report_schema_version: 1\ntype: rfe\nreport_stage: post_submit\nper_rfe:\n"
+            + self.ENTRY.format(key="RHAIRFE-7"),
+        )
+        ids, _ = _load_run_report(results, run, config=BOOTSTRAP_CONFIG["rfe"])
+        assert ids == {"RHAIRFE-7"}
+
+
 class TestLoadRunReportConfig:
     """Verify _load_run_report uses config for report path and item key."""
 
@@ -1743,13 +1923,18 @@ class TestBootstrapConfigDerivesFromTheRegistry:
     def test_values_are_the_pre_registry_literals(self):
         # Behaviour-neutral migration: same keys, same order, same values as the literal table
         # this replaced (rfe's empty report prefix is grandfathered: its reports are <run>.yaml).
+        # PR-3c appends the config's own type name (`type`): the report.type cross-check key.
         assert BOOTSTRAP_CONFIG == {
-            "rfe": {"report_prefix": "", "item_key": "per_rfe"},
-            "initiative": {"report_prefix": "initiative-run-", "item_key": "per_initiative"},
+            "rfe": {"report_prefix": "", "item_key": "per_rfe", "type": "rfe"},
+            "initiative": {
+                "report_prefix": "initiative-run-",
+                "item_key": "per_initiative",
+                "type": "initiative",
+            },
         }
         assert list(BOOTSTRAP_CONFIG) == ["rfe", "initiative"]
         for config in BOOTSTRAP_CONFIG.values():
-            assert list(config) == ["report_prefix", "item_key"]
+            assert list(config) == ["report_prefix", "item_key", "type"]
 
     @pytest.mark.parametrize("type_name", REG.names())
     def test_projection_from_the_descriptor(self, type_name):
@@ -1757,6 +1942,7 @@ class TestBootstrapConfigDerivesFromTheRegistry:
         bc = BOOTSTRAP_CONFIG[type_name]
         assert bc["report_prefix"] == desc.get("snapshot.report_prefix")
         assert bc["item_key"] == desc.get("reporting.item_key")
+        assert bc["type"] == type_name == desc.name
 
     def test_type_choices_are_the_registry_choices(self):
         result = subprocess.run(
@@ -1817,3 +2003,206 @@ class TestRunDirSnapshotProbeIsGrandfatheredToTheRfePrefix:
         self._plant(tmp_path, "run", "issue-snapshot-20260401-120000.yaml.bak")
         assert _run_dir_has_snapshots(str(tmp_path), "run") is False
         assert _run_dir_has_snapshots(str(tmp_path), "missing") is False
+
+
+# ── The JQL/binding check (PR-3c): the same check as snapshot_fetch over the same positional ──
+
+
+class TestBootstrapJqlBindingCheck:
+    """bootstrap_snapshot takes the JQL positional snapshot_fetch takes and wraps it the same
+    way, so it runs ``snapshot_fetch.jql_binding_conflict`` over it against ``--type``'s
+    effective binding (shorthand included) — after argument parsing and before the credentials,
+    the results directory or any snapshot are read — with the same ERROR line and exit 1; a
+    malformed override is one clean line."""
+
+    CONFLICTS = [
+        (
+            "rfe",
+            "project = RHOAIENG",
+            "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+        ),
+        (
+            "rfe",
+            "project in (RHAIRFE, RHOAIENG)",
+            "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+        ),
+        (
+            "initiative",
+            'project = RHOAIENG AND issuetype = "Feature Request"',
+            "ERROR: --jql names issuetype Feature Request but the initiative binding is Initiative",
+        ),
+    ]
+    CREDS_LINE = "Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN required\n"
+
+    @staticmethod
+    def _argv(tmp_path, jql, type_name="rfe"):
+        return [
+            "bootstrap_snapshot.py",
+            "--results-dir",
+            str(tmp_path / "results"),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--type",
+            type_name,
+            jql,
+        ]
+
+    @staticmethod
+    def _hermetic(monkeypatch):
+        # The in-process runs read os.environ: no shorthand or override may leak in from the
+        # developer's shell.
+        for var in ("JIRA_PROJECT", "JIRA_ISSUE_TYPE"):
+            monkeypatch.delenv(var, raising=False)
+        for var in [v for v in os.environ if v.startswith("RFE_CREATOR_BINDING_")]:
+            monkeypatch.delenv(var, raising=False)
+
+    @staticmethod
+    def _arm(monkeypatch):
+        def boom(*a, **kw):
+            raise AssertionError("must not be reached on a JQL/binding conflict")
+
+        # Credentials are not even read, nor the results directory, nor Jira: the conflict is
+        # decided first.
+        for name in (
+            "require_env",
+            "find_latest_run_timestamp",
+            "fetch_all_issues",
+            "_fetch_paginated",
+            "_load_run_report",
+        ):
+            monkeypatch.setattr(bootstrap_snapshot, name, boom)
+
+    @pytest.mark.parametrize("type_name, jql, message", CONFLICTS)
+    def test_conflict_exits_1_before_any_read(
+        self, tmp_path, monkeypatch, capsys, type_name, jql, message
+    ):
+        self._hermetic(monkeypatch)
+        self._arm(monkeypatch)
+        monkeypatch.setattr(sys, "argv", self._argv(tmp_path, jql, type_name))
+        with pytest.raises(SystemExit) as exc:
+            bootstrap_snapshot.main()
+        assert exc.value.code == 1
+        out, err = capsys.readouterr()
+        assert (out, err) == ("", message + "\n")
+        # Neither the results directory nor the artifacts directory was touched or created.
+        assert sorted(os.listdir(tmp_path)) == []
+
+    def test_production_jql_passes_to_the_credential_check(self, tmp_path, monkeypatch, capsys):
+        # A match is silent: the first line is the next gate's (credentials). Both shipped
+        # types' query_default, the CI single-quoted form and a membership / negation form.
+        self._hermetic(monkeypatch)
+        monkeypatch.setattr(bootstrap_snapshot, "require_env", lambda: (None, None, None))
+        cases = [(name, REG.get(name).get("conventions.query_default")) for name in REG.names()]
+        cases += [
+            ("rfe", "project = RHAIRFE AND issuetype = 'Feature Request'"),
+            ("rfe", "project in (RHAIRFE) AND NOT (issuetype = Epic)"),
+            ("initiative", "project = RHOAIENG AND issuetype not in (Epic)"),
+        ]
+        for type_name, jql in cases:
+            assert jql, type_name
+            monkeypatch.setattr(sys, "argv", self._argv(tmp_path, jql, type_name))
+            with pytest.raises(SystemExit) as exc:
+                bootstrap_snapshot.main()
+            assert exc.value.code == 1, (type_name, jql)
+            assert capsys.readouterr() == ("", self.CREDS_LINE), (type_name, jql)
+        assert sorted(os.listdir(tmp_path)) == []
+
+    def test_shorthand_binding_is_what_is_checked(self, tmp_path, monkeypatch, capsys):
+        # The bare JIRA_PROJECT shorthand applies to --type, as it does to snapshot_fetch's
+        # resolved type: the descriptor key is now the conflict and the shorthand key passes.
+        self._hermetic(monkeypatch)
+        monkeypatch.setenv("JIRA_PROJECT", "KONFLUX")
+        self._arm(monkeypatch)
+        monkeypatch.setattr(sys, "argv", self._argv(tmp_path, "project = RHAIRFE"))
+        with pytest.raises(SystemExit) as exc:
+            bootstrap_snapshot.main()
+        assert exc.value.code == 1
+        assert capsys.readouterr() == (
+            "",
+            "ERROR: --jql names project RHAIRFE but the rfe binding is KONFLUX\n",
+        )
+        monkeypatch.setattr(bootstrap_snapshot, "require_env", lambda: (None, None, None))
+        monkeypatch.setattr(sys, "argv", self._argv(tmp_path, "project = KONFLUX"))
+        with pytest.raises(SystemExit) as exc:
+            bootstrap_snapshot.main()
+        assert exc.value.code == 1
+        assert capsys.readouterr() == ("", self.CREDS_LINE)
+
+    def test_malformed_override_is_one_clean_line(self, tmp_path, monkeypatch, capsys):
+        # Mirrors cmd_fetch: a RegistryError from the binding is printed as one line, exit 1 —
+        # never a traceback, and still before any read.
+        self._hermetic(monkeypatch)
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_PROJECT", "lower")
+        self._arm(monkeypatch)
+        monkeypatch.setattr(sys, "argv", self._argv(tmp_path, "project = RHAIRFE"))
+        with pytest.raises(SystemExit) as exc:
+            bootstrap_snapshot.main()
+        assert exc.value.code == 1
+        assert capsys.readouterr() == (
+            "",
+            "Error: RFE_CREATOR_BINDING_RFE_PROJECT='lower': expected an upper-case tracker "
+            "project key\n",
+        )
+        assert sorted(os.listdir(tmp_path)) == []
+
+    def test_cli_conflict_needs_no_credentials(self, tmp_path):
+        # Through the CLI, without JIRA_* at all: the default --type is rfe and the initiative
+        # pair is refused with the one ERROR line, nothing created.
+        env = _clean_env()
+        for var in ("JIRA_SERVER", "JIRA_USER", "JIRA_TOKEN", "JIRA_PROJECT", "JIRA_ISSUE_TYPE"):
+            env.pop(var, None)
+        r = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                str(tmp_path / "results"),
+                "--artifacts-dir",
+                str(tmp_path / "artifacts"),
+                "project = RHOAIENG AND issuetype = Initiative",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert r.returncode == 1
+        assert (r.stdout, r.stderr) == (
+            "",
+            "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE\n",
+        )
+        assert "Traceback" not in r.stderr
+        assert sorted(os.listdir(tmp_path)) == []
+
+    def test_production_jql_bootstraps_end_to_end(self, tmp_path, mock_jira):
+        # The rfe query_default through the whole script against the mock Jira: the check adds
+        # no line on the pass path and the snapshot is written as before.
+        url, server = mock_jira
+        server.issues = {"RHAIRFE-1": "Issue one."}
+        results = _make_results_dir(
+            tmp_path, ["20260401-120000"], latest="20260401-120000", processed_ids=["RHAIRFE-1"]
+        )
+        art_dir = str(tmp_path / "artifacts")
+        os.makedirs(art_dir)
+        env = _clean_env(JIRA_SERVER=url, JIRA_USER="test@example.com", JIRA_TOKEN="test-token")
+        for var in ("JIRA_PROJECT", "JIRA_ISSUE_TYPE"):
+            env.pop(var, None)
+        r = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "--results-dir",
+                results,
+                "--artifacts-dir",
+                art_dir,
+                REG.get("rfe").get("conventions.query_default"),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "ERROR: --jql" not in r.stderr
+        snapshot_dir = os.path.join(art_dir, "auto-fix-runs")
+        (name,) = [f for f in os.listdir(snapshot_dir) if f.startswith("issue-snapshot-")]
+        with open(os.path.join(snapshot_dir, name)) as f:
+            assert set(yaml.safe_load(f)["issues"]) == {"RHAIRFE-1"}

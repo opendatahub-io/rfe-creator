@@ -14,6 +14,10 @@ Usage:
     python3 scripts/bootstrap_snapshot.py --results-dir <path> "<jql>"
     python3 scripts/bootstrap_snapshot.py --dry-run --results-dir <path> "<jql>"
 
+The JQL is checked against --type's effective (project, issue_type) binding
+exactly as snapshot_fetch.py checks its own: a `project` / `issuetype` clause
+naming another value exits 1 with one ERROR line before anything is read.
+
 Environment variables:
     JIRA_SERVER  Jira server URL
     JIRA_USER    Jira username/email
@@ -39,6 +43,7 @@ from snapshot_fetch import (
     _fetch_paginated,
     compute_content_hash,
     fetch_all_issues,
+    jql_binding_conflict,
 )
 
 _TYPES = type_registry.load()
@@ -48,10 +53,13 @@ _TYPES = type_registry.load()
 # bare <run>.yaml) and the entry-list key is reporting.item_key. Same keys, same order and
 # same values as the literal table this replaces; generate_run_report.py writes from the
 # same two fields and tests/test_report_roundtrip.py round-trips the pair through the CLI.
+# `type` (appended, PR-3c) is the config's own type name: a run report that carries a
+# `type:` key must name it (_load_run_report), a legacy report without one is tolerated.
 BOOTSTRAP_CONFIG = {
     name: {
         "report_prefix": _TYPES.get(name).get("snapshot.report_prefix"),
         "item_key": _TYPES.get(name).get("reporting.item_key"),
+        "type": name,
     }
     for name in _TYPES.names()
 }
@@ -84,10 +92,16 @@ def _load_run_report(results_dir, run_name, config=None):
     has a documented fallback, whereas a corrupt report says nothing about what the run processed,
     and treating it as absent would misdiagnose it (0 of the 278 published reports have any of
     these shapes, so this is defence, not compatibility).
+
+    A report that carries a ``type:`` key (self-describing run reports, design §5 / PR-3c) must
+    name this bootstrap's own type (``config["type"]``); another type's report is the same
+    ValueError — a snapshot built from it would freeze the wrong backlog. A report without the
+    key is a legacy report and is read as before.
     """
     cfg = config or BOOTSTRAP_CONFIG["rfe"]
     report_prefix = cfg["report_prefix"]
     item_key = cfg["item_key"]
+    expected_type = cfg.get("type")
     path = os.path.join(results_dir, run_name, "auto-fix-runs", f"{report_prefix}{run_name}.yaml")
     if not os.path.exists(path):
         return None, None
@@ -98,6 +112,9 @@ def _load_run_report(results_dir, run_name, config=None):
         raise ValueError(f"run report {path} is unreadable: {e}") from e
     if not isinstance(report, dict):
         raise ValueError(f"run report {path} is not a mapping (got {type(report).__name__})")
+    report_type = report.get("type")
+    if report_type is not None and expected_type is not None and report_type != expected_type:
+        raise ValueError(f"run report {path} is a {report_type} report, expected {expected_type}")
     if item_key not in report:
         # The drift shape: a report written under a different item key. An empty LIST is a
         # legitimate zero-count run (the caller walks back); a missing KEY means the
@@ -442,6 +459,22 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    # PR-3c: the JQL's own positive `project` / `issuetype` clauses must agree with --type's
+    # EFFECTIVE binding (design §3.2.1; the bare JIRA_PROJECT / JIRA_ISSUE_TYPE shorthand
+    # applies to the selected type, as it does to snapshot_fetch's resolved one) — the same
+    # check, the same ERROR line and the same exit as snapshot_fetch.cmd_fetch, decided before
+    # the credentials, the results directory or any snapshot are read; a JQL that names neither
+    # field is not checked. A malformed RFE_CREATOR_BINDING_* / shorthand value is one line.
+    try:
+        binding = _TYPES.get(args.type).binding(os.environ, shorthand=True)
+    except type_registry.RegistryError as exc:
+        print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+        sys.exit(1)
+    conflict = jql_binding_conflict(args.jql, binding, args.type)
+    if conflict is not None:
+        print(conflict, file=sys.stderr)
+        sys.exit(1)
 
     snap_config = SNAPSHOT_CONFIG[args.type]
     boot_config = BOOTSTRAP_CONFIG[args.type]

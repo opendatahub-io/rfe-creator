@@ -81,7 +81,8 @@ Rules that are easy to trip:
   naming the type and the field. Copying `types/rfe/` keeps them; a third type must also pass
   `prefix=` explicitly to the snapshot helpers (their default is the rfe `snapshot.prefix`).
   `fetch_issue.py --fetch-all --type <t>` reads `dirs.{tasks,originals}`, `identity.id_field`
-  and `companions.comments` (all schema-required).
+  and `companions.comments` (all schema-required), plus the effective
+  `identity.jira.{project,issue_type}` it verifies the fetched issue against.
 - **Submit facts are read at import, for every type.** `submit.TYPE_CONFIGS` and
   `split_submit.SPLIT_CONFIG` read `identity.jira.{project,issue_type,key_prefixes}`,
   `identity.{id_field,local_prefix}`, `dirs.{tasks,reviews,originals}`,
@@ -159,3 +160,15 @@ artifact refers to a tracker issue, `tracker_ref: <key>`), so a drop-in type's a
 frontmatter rung without any id-grammar work. Which writers stamp which field, the no-back-fill rule
 (D7), the review stamping by `verify_phase` (D8) and how readers fall back for pre-migration artifacts
 are in [`types/README.md`](../types/README.md) "Self-describing artifacts".
+
+Fetches verify against the effective binding before they write: `fetch_issue.py --fetch-all
+--type <t>` compares the issue's `(project, issuetype)` with `binding()` and on a mismatch writes
+nothing and exits non-zero (headless: the `fetch_failed` error-stub path; interactive: the stderr
+line names the `--type` to re-run with; an override that binds the type to another registered
+type's pair is refused before the fetch), `snapshot_fetch.py` refuses a `--jql` whose positive
+`project` / `issuetype` (or `type`) clauses — `= X`, or any member of `in (X, Y)`; a `NOT`-negated
+clause is not read — name a key or type other than it (a project given by name or id is left to
+Jira), `bootstrap_snapshot.py` runs the same check over its own JQL positional and refuses a run
+report whose `type:` is not `--type` (a report without one is read as today). A drop-in type gets
+all of these checks from its `identity.jira` block with nothing to write
+([`types/README.md`](../types/README.md) "Fetch verification").

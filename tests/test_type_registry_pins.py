@@ -2201,17 +2201,58 @@ class TestSkillLayer:
         )
 
     def test_fetch_agent_companions(self, ctx):
-        # rows: 226 — rfe.review/prompts/fetch-agent.md:14,:16,:26;
-        # initiative-review/prompts/fetch-agent.md:10,:24
+        # rows: 226 — rfe.review/prompts/fetch-agent.md:5-8,:11,:13-14,:16,:26;
+        # initiative-review/prompts/fetch-agent.md:5-8,:11,:13-14,:19 (D10: both twins are the
+        # same body — step 1 is `fetch_issue.py {KEY} --fetch-all artifacts` (the initiative one
+        # adds `--type initiative`, the rfe one keeps the grandfathered flag-less form), the MCP
+        # fallback runs only on exit 2 (missing creds) and any other non-zero exit — a fetch
+        # error or a post-fetch (project, issue_type) mismatch — stops the agent; the comments
+        # companion (its MCP request field, the file and its verify line) exists iff
+        # companions.comments). The three step-1 verdict lines are pinned as WHOLE lines: the
+        # twins may differ only by the --type flag and the comments companion, so neither may
+        # grow a sentence of its own (the rfe twin is production and byte-frozen).
         text = skill(ctx.t, "review", "prompts/fetch-agent.md")
+        comments = ctx.d["companions"]["comments"]
+        type_flag = "" if ctx.t == "rfe" else f" --type {ctx.t}"
+        lines = text.splitlines()
+        calls = [ln for ln in lines if "scripts/fetch_issue.py" in ln]
+        step1 = f"1. Run: python3 scripts/fetch_issue.py {{KEY}} --fetch-all artifacts{type_flag}"
+        assert calls == [step1], calls
+        verdicts = lines[lines.index(step1) + 1 : lines.index(step1) + 4]
+        assert verdicts == [
+            "   If this succeeds (exit 0), skip to step 3.",
+            "   If it exits with code 2 (missing JIRA creds), continue to step 2.",
+            "   If it exits with any other error, report the failure and stop.",
+        ], verdicts
+        assert "2. MCP fallback (only if step 1 exited with code 2):" in text
+        assert text.count("--fields") == 0 and text.count("--markdown") == 0
+        mcp = re.search(r"mcp__atlassian__getJiraIssue .*?fields=\[([^\]]*)\]", text).group(1)
+        fields = [f.strip('"') for f in mcp.split(",")]
+        assert fields[:5] == ["summary", "description", "priority", "labels", "status"]
+        # PR-3c-ii: the MCP fallback requests the same two witnesses fetch_issue verifies and
+        # stops before any write on a mismatch (the fallback cannot call verify_binding).
+        assert fields[5:7] == ["issuetype", "project"]
+        pin("companions.comments", "fetch-agent.md MCP fields", comments, fields[7:] == ["comment"])
+        assert (
+            f"If the response's project.key or issuetype.name differs from the {ctx.t} binding "
+            f"(python3 scripts/type_registry.py binding {ctx.t} shows it), report the mismatch "
+            "and stop — write no files."
+        ) in text
         pin(
             "companions.comments",
             "fetch-agent.md",
-            ctx.d["companions"]["comments"],
+            comments,
             f"{ctx.dirs['tasks']}/{{KEY}}-comments.md" in text,
         )
-        assert ("-comments.md" in text) is ctx.d["companions"]["comments"]
+        assert ("-comments.md" in text) is comments
+        assert f"frontmatter.py schema {ctx.task_schema}" in text
         assert f"{ctx.id_field}={{KEY}}" in text
+        verify = text.split("3. Verify all output files exist:")[1].split("\n\n")[0]
+        listed = re.findall(r"^   - (\S+)", verify, re.M)
+        expected = [f"{ctx.dirs['tasks']}/{{KEY}}.md", f"{ctx.dirs['originals']}/{{KEY}}.md"]
+        if comments:
+            expected.append(f"{ctx.dirs['tasks']}/{{KEY}}-comments.md")
+        assert listed == expected, listed
 
     def test_resplit_rules_in_split_skills(self, ctx):
         # rows: 227 — rfe.split/SKILL.md:115 uses resplit {right_sized, 2}; initiative-split:115

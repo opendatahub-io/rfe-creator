@@ -38,6 +38,9 @@ REG = type_registry.load(extra_roots=[], env={})
 
 JIRA_ENV = {"JIRA_SERVER": "http://x", "JIRA_USER": "u", "JIRA_TOKEN": "t"}
 DEFAULT_FIELDS = ["summary", "description", "priority", "labels", "status", "issuetype"]
+# --fetch-all also requests the project witness of the post-fetch verification (PR-3c, D9);
+# the JSON modes keep DEFAULT_FIELDS.
+FETCH_ALL_FIELDS = DEFAULT_FIELDS + ["project"]
 
 
 def _clean_env(**extra):
@@ -135,12 +138,20 @@ GOLDEN_COMMENTS = (
 
 
 def _issue_for(key):
-    """ISSUE re-keyed; an initiative key carries no priority (exercises the Major fallback)."""
+    """ISSUE re-keyed to ``key`` and living where the key says: ``project.key`` is the key stem
+    and ``issuetype.name`` the issue type of the registered type whose prefix the key carries
+    (fetch_issue's live registry, so a drop-in counts) — the pair the post-fetch verification
+    compares with the effective binding (PR-3c, D9). A key no type owns keeps ISSUE's Feature
+    Request. An initiative key carries no priority (exercises the Major fallback)."""
     fields = dict(ISSUE["fields"])
+    stem = key.split("-")[0]
+    fields["project"] = {"key": stem, "id": "10001", "name": stem}
+    desc = fetch_issue._TYPES.detect(key)
+    if desc is not None:
+        fields["issuetype"] = {"name": desc.binding(env={})["issue_type"], "id": "1"}
     if key.startswith(REG.get("initiative").write_prefix):
         fields["priority"] = None
         fields["labels"] = []
-        fields["issuetype"] = {"name": "Initiative", "id": "10103"}
     return {"key": key, "fields": fields}
 
 
@@ -219,9 +230,10 @@ class TestRfeInvocationIsByteIdentical:
             "rfe-tasks/RHAIRFE-1595-comments.md",
         }
         assert out == f"OK: wrote {task}, {original}, {comments}\n"
-        # The request lists are PR-1's (issuetype requested, nothing written reads it) and the
-        # comments are fetched exactly once, after the issue.
-        assert fake_jira["issue"] == [("RHAIRFE-1595", DEFAULT_FIELDS)]
+        # The request list is PR-1's plus the PR-3c project witness (both requested for the
+        # post-fetch verification only; nothing written reads them) and the comments are
+        # fetched exactly once, after the issue.
+        assert fake_jira["issue"] == [("RHAIRFE-1595", FETCH_ALL_FIELDS)]
         assert fake_jira["comments"] == ["RHAIRFE-1595"]
 
     def test_explicit_type_rfe_equals_no_type(self, tmp_path, monkeypatch, fake_jira):
@@ -261,7 +273,7 @@ class TestInitiativeLayout:
         assert out == f"OK: wrote {task}, {original}\n"
         # companions.comments is false for initiative: no companion AND no comment request.
         assert fake_jira["comments"] == []
-        assert fake_jira["issue"] == [("RHOAIENG-12345", DEFAULT_FIELDS)]
+        assert fake_jira["issue"] == [("RHOAIENG-12345", FETCH_ALL_FIELDS)]
 
         data, body = read_frontmatter_validated(str(task), "initiative-task")
         assert data["initiative_id"] == "RHOAIENG-12345"
@@ -276,7 +288,9 @@ class TestInitiativeLayout:
 
     def test_frontmatter_bytes(self, tmp_path, fake_jira):
         # The initiative-task schema's field order and defaults (no `size`, parent_key null),
-        # written by scripts/frontmatter.py exactly as the initiative fetch agent hand-built it.
+        # written by scripts/frontmatter.py exactly as the pre-D10 initiative fetch agent
+        # hand-built them from `--fields ... --markdown` JSON; since PR-3c the agent runs
+        # `--fetch-all artifacts --type initiative`, so this writer is the only one.
         rc, _ = _fetch_all("RHOAIENG-12345", tmp_path, type_name="initiative")
         assert rc == 0
         assert (tmp_path / "initiatives" / "RHOAIENG-12345.md").read_bytes() == (
@@ -406,6 +420,299 @@ class TestDropInType:
         )
         assert result.returncode == 0
         assert "--type {rfe,docs,initiative}" in result.stdout
+
+
+# ── post-fetch verification (design §5 self-describing artifacts, PR-3c D9) ─────────────────
+
+RFE_BINDS = "(RHAIRFE, Feature Request)"
+
+
+class TestPostFetchVerification:
+    """The fetched ``(project.key, issuetype.name)`` pair must equal the resolved type's EFFECTIVE
+    ``(project, issue_type)`` before anything is written. A mismatch writes no task, original or
+    comments file (not even the directories), prints one stderr line naming the key, the fetched
+    pair, the expected pair and the resolved type — plus ``re-run with --type <t>`` when exactly
+    one registered type owns the fetched pair — and returns 1; a response without a witness
+    cannot be verified and fails the same way (fail closed)."""
+
+    @staticmethod
+    def _serve(monkeypatch, issue):
+        monkeypatch.setattr(fetch_issue, "get_issue", lambda *a, **kw: issue)
+
+    def test_mismatch_writes_nothing_and_hints_the_owning_type(self, tmp_path, fake_jira, capsys):
+        artifacts = tmp_path / "artifacts"
+        # The legacy default (rfe) over an Initiative: the pair is owned by exactly one type.
+        rc, out = _fetch_all("RHOAIENG-12345", artifacts)
+        assert (rc, out) == (1, "")
+        assert capsys.readouterr().err == (
+            "Error: RHOAIENG-12345 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
+            f"binds {RFE_BINDS}; nothing written - re-run with --type initiative\n"
+        )
+        assert not artifacts.exists()
+        assert fake_jira["comments"] == []
+
+    def test_wrong_explicit_type_hints_the_right_one(self, tmp_path, fake_jira, capsys):
+        rc, _ = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts", type_name="initiative")
+        assert rc == 1
+        assert capsys.readouterr().err == (
+            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type "
+            "initiative binds (RHOAIENG, Initiative); nothing written - re-run with --type rfe\n"
+        )
+        assert not (tmp_path / "artifacts").exists()
+
+    def test_no_hint_when_no_type_owns_the_pair(self, tmp_path, fake_jira, monkeypatch, capsys):
+        issue = _issue_for("RHAIRFE-1595")
+        issue["fields"]["issuetype"] = {"name": "Bug", "id": "1"}
+        self._serve(monkeypatch, issue)
+        rc, _ = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert err == (
+            "Error: RHAIRFE-1595 is (RHAIRFE, Bug) in Jira but the resolved type rfe binds "
+            f"{RFE_BINDS}; nothing written\n"
+        )
+        assert "re-run with --type" not in err
+        assert not (tmp_path / "artifacts").exists()
+
+    @pytest.mark.parametrize(
+        "dropped, named",
+        [
+            (("project",), "project"),
+            (("issuetype",), "issuetype"),
+            (("project", "issuetype"), "project or issuetype"),
+        ],
+    )
+    def test_missing_witness_fails_closed(
+        self, tmp_path, fake_jira, monkeypatch, capsys, dropped, named
+    ):
+        issue = _issue_for("RHAIRFE-1595")
+        for name in dropped:
+            del issue["fields"][name]
+        self._serve(monkeypatch, issue)
+        rc, out = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        assert (rc, out) == (1, "")
+        assert capsys.readouterr().err == (
+            f"Error: cannot verify RHAIRFE-1595 against the resolved type rfe binding {RFE_BINDS}: "
+            f"the fetched issue has no {named} field; nothing written\n"
+        )
+        assert not (tmp_path / "artifacts").exists()
+
+    @pytest.mark.parametrize("value", [None, {}, {"id": "10001"}, "RHAIRFE"])
+    def test_a_project_without_a_key_is_missing(
+        self, tmp_path, fake_jira, monkeypatch, capsys, value
+    ):
+        issue = _issue_for("RHAIRFE-1595")
+        issue["fields"]["project"] = value
+        self._serve(monkeypatch, issue)
+        rc, _ = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        assert rc == 1
+        assert "the fetched issue has no project field" in capsys.readouterr().err
+
+    def test_verification_uses_the_effective_binding(self):
+        # The pure check over explicit environments: a foreign-project Feature Request is refused
+        # under the descriptor binding (no hint: no type owns KONFLUX) and accepted once rfe is
+        # bound to that project; the hint follows the effective bindings too.
+        rfe = REG.get("rfe")
+        fields = _issue_for("KONFLUX-1")["fields"]
+        assert fields["issuetype"]["name"] == "Feature Request"
+        assert fetch_issue.verify_binding("KONFLUX-1", fields, "rfe", rfe.binding(env={}), {}) == (
+            "Error: KONFLUX-1 is (KONFLUX, Feature Request) in Jira but the resolved type rfe "
+            f"binds {RFE_BINDS}; nothing written"
+        )
+        env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+        assert fetch_issue.verify_binding("KONFLUX-1", fields, "rfe", rfe.binding(env), env) is None
+        home = _issue_for("RHAIRFE-1")["fields"]
+        assert fetch_issue.verify_binding("RHAIRFE-1", home, "rfe", rfe.binding(env), env) == (
+            "Error: RHAIRFE-1 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
+            "binds (KONFLUX, Feature Request); nothing written"
+        )
+        # An issue-type override is honoured the same way, and the artifact path is open to it
+        # (the key grammar is unchanged): see the emulator suite below.
+        env = {"RFE_CREATOR_BINDING_RFE_ISSUE_TYPE": "Epic"}
+        epic = _issue_for("RHAIRFE-1")["fields"] | {"issuetype": {"name": "Epic"}}
+        assert fetch_issue.verify_binding("RHAIRFE-1", epic, "rfe", rfe.binding(env), env) is None
+
+    def test_the_resolved_type_is_never_the_hint(self, tmp_path, monkeypatch, fake_jira, capsys):
+        # Under the bare JIRA_PROJECT shorthand rfe resolves to (RHOAIENG, Feature Request); a
+        # fetched (RHAIRFE, Feature Request) is rfe's own DESCRIPTOR pair, but the shorthand
+        # follows the resolved type, so re-running with --type rfe would fail the same way. The
+        # owners scan therefore skips the resolved type: the refusal carries no hint at all
+        # rather than "re-run with --type rfe".
+        env = {"JIRA_PROJECT": "RHOAIENG"}
+        rfe = REG.get("rfe")
+        binding = rfe.binding(env, shorthand=True)
+        assert (binding["project"], binding["issue_type"]) == ("RHOAIENG", "Feature Request")
+        fields = _issue_for("RHAIRFE-1595")["fields"]
+        message = fetch_issue.verify_binding("RHAIRFE-1595", fields, "rfe", binding, env)
+        assert message == (
+            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
+            "binds (RHOAIENG, Feature Request); nothing written"
+        )
+        assert "re-run with --type" not in message
+        # Through main: resolve applies the shorthand to the legacy default (no D3 line), the
+        # ownership check passes (initiative binds Initiative, not Feature Request) and the
+        # post-fetch refusal is exactly the line above.
+        monkeypatch.setenv("JIRA_PROJECT", "RHOAIENG")
+        code, out = _main(monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path / "a"))
+        assert (code, out) == (1, "")
+        assert capsys.readouterr().err == message + "\n"
+        assert not (tmp_path / "a").exists()
+        # Another type that owns the fetched pair is still offered under the same shorthand.
+        rc, _ = _fetch_all("RHOAIENG-12345", tmp_path / "b")
+        assert rc == 1
+        assert capsys.readouterr().err == (
+            "Error: RHOAIENG-12345 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
+            "binds (RHOAIENG, Feature Request); nothing written - re-run with --type initiative\n"
+        )
+        assert not (tmp_path / "b").exists()
+
+    def test_direct_callers_verify_against_the_types_own_effective_binding(
+        self, tmp_path, fake_jira, monkeypatch, capsys
+    ):
+        # _fetch_all without a binding (the positional callers) resolves the type's effective
+        # binding itself — the same pair main() would pass.
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_ISSUE_TYPE", "Epic")
+        rc, _ = _fetch_all("RHAIRFE-1595", tmp_path / "artifacts")
+        assert rc == 1
+        assert capsys.readouterr().err == (
+            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type rfe "
+            "binds (RHAIRFE, Epic); nothing written\n"
+        )
+
+    def test_a_malformed_override_for_another_type_drops_the_hint_not_the_refusal(
+        self, tmp_path, monkeypatch, fake_jira, capsys
+    ):
+        # The re-run hint scans every type's effective binding; for a direct caller of
+        # _fetch_all (main refuses such an environment up front, see the emulator suite) a
+        # malformed variable for a type OTHER than the resolved one must not turn the refusal
+        # into a traceback: the one-line refusal stands, without the hint.
+        monkeypatch.setenv("RFE_CREATOR_BINDING_INITIATIVE_PROJECT", "lower")
+        artifacts = tmp_path / "artifacts"
+        rc, out = _fetch_all("RHOAIENG-12345", artifacts)
+        assert (rc, out) == (1, "")
+        assert capsys.readouterr().err == (
+            "Error: RHOAIENG-12345 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
+            f"binds {RFE_BINDS}; nothing written\n"
+        )
+        assert not artifacts.exists()
+        # The match path never read that variable and is unaffected.
+        rc, out = _fetch_all("RHAIRFE-1595", artifacts)
+        assert rc == 0 and out.startswith("OK: wrote ")
+
+    def test_an_override_selecting_another_types_pair_is_refused_before_the_fetch(
+        self, tmp_path, monkeypatch, fake_jira, capsys
+    ):
+        # §3.2.1 g: rfe re-bound to the initiative pair would pass the post-fetch check for an
+        # Initiative and start the rfe-layout write of it; the ownership assert refuses the
+        # override first — no fetch, no directory, exit 1 — and names the type to pass.
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_PROJECT", "RHOAIENG")
+        monkeypatch.setenv("RFE_CREATOR_BINDING_RFE_ISSUE_TYPE", "Initiative")
+        code, out = _main(monkeypatch, "RHOAIENG-12345", "--fetch-all", str(tmp_path / "a"))
+        assert (code, out) == (1, "")
+        err = capsys.readouterr().err
+        assert err.startswith(
+            "Error: rfe: effective binding ('jira', 'RHOAIENG', 'Initiative') (source: env) is "
+            "the binding registered for type 'initiative'; a tracker binding must be owned by "
+            "exactly one type"
+        )
+        assert err.rstrip("\n").endswith("pass --type initiative")
+        assert "Traceback" not in err
+        assert fake_jira["issue"] == []
+        assert not (tmp_path / "a").exists()
+        # With an explicit --type the D3 line (which names the override) precedes the refusal.
+        code, _ = _main(
+            monkeypatch, "RHOAIENG-12345", "--fetch-all", str(tmp_path / "b"), "--type", "rfe"
+        )
+        assert code == 1
+        err = capsys.readouterr().err
+        assert err.startswith(
+            "TYPE RESOLVED: rfe (--type; binding override project=RHOAIENG "
+            "issue_type=Initiative)\nError: rfe: effective binding"
+        )
+        assert fake_jira["issue"] == []
+
+    def test_resolve_line_only_for_an_explicit_type(self, tmp_path, monkeypatch, fake_jira, capsys):
+        # D3: the legacy default stays silent (the production invocation is byte-identical on
+        # stderr too); an explicit --type is rung 1 and prints the line, never on stdout.
+        code, out = _main(monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path / "a"))
+        assert code == 0 and out.startswith("OK: wrote ")
+        assert capsys.readouterr().err == ""
+        code, out = _main(
+            monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path / "b"), "--type", "rfe"
+        )
+        assert code == 0 and out.startswith("OK: wrote ")
+        assert capsys.readouterr().err == "TYPE RESOLVED: rfe (--type)\n"
+        assert "TYPE RESOLVED" not in out
+
+    def test_cli_mismatch_exits_1_after_the_resolve_line(
+        self, tmp_path, monkeypatch, fake_jira, capsys
+    ):
+        code, out = _main(
+            monkeypatch, "RHAIRFE-1595", "--fetch-all", str(tmp_path), "--type", "initiative"
+        )
+        assert (code, out) == (1, "")
+        assert capsys.readouterr().err == (
+            "TYPE RESOLVED: initiative (--type)\n"
+            "Error: RHAIRFE-1595 is (RHAIRFE, Feature Request) in Jira but the resolved type "
+            "initiative binds (RHOAIENG, Initiative); nothing written - re-run with --type rfe\n"
+        )
+        assert _tree(tmp_path) == {}
+
+    def test_type_default_is_none_so_the_ladder_decides(self):
+        with open(SCRIPT, encoding="utf-8") as f:
+            source = f.read()
+        assert 'default="rfe"' not in source
+        assert "type_registry.resolve(_TYPES, explicit_type=args.type, env=os.environ)" in source
+        assert "if resolution.rung != type_registry.LEGACY_DEFAULT_RUNG:" in source
+        assert fetch_issue.FETCH_ALL_FIELDS == FETCH_ALL_FIELDS
+
+
+# ── a failed frontmatter step leaves nothing behind ──────────────────────────────────────────
+
+
+class TestFrontmatterFailureWritesNothing:
+    """When the verification passed but ``scripts/frontmatter.py set`` fails, the body-only task
+    file just written is removed again before ``_fetch_all`` returns 1: the fetch barrier
+    accepts a task file that merely exists, so leaving it would pass a frontmatter-less artifact
+    downstream instead of firing the ``fetch_failed`` stub path. Nothing else was written yet —
+    no original, no comments companion (the comments are not even requested)."""
+
+    @pytest.mark.parametrize(
+        "key, kwargs, task_rel, original_rel",
+        [
+            ("RHAIRFE-1595", {}, "rfe-tasks/RHAIRFE-1595.md", "rfe-originals/RHAIRFE-1595.md"),
+            (
+                "RHOAIENG-12345",
+                {"type_name": "initiative"},
+                "initiatives/RHOAIENG-12345.md",
+                "initiative-originals/RHOAIENG-12345.md",
+            ),
+        ],
+    )
+    def test_task_file_is_removed_and_no_original_is_written(
+        self, tmp_path, fake_jira, monkeypatch, capsys, key, kwargs, task_rel, original_rel
+    ):
+        calls = []
+
+        def failing_run(cmd, *args, **run_kwargs):
+            calls.append(list(cmd))
+            # The task file exists at this point — the failure is the frontmatter step's own.
+            assert os.path.exists(cmd[3]), cmd
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="schema says no\n")
+
+        monkeypatch.setattr(fetch_issue.subprocess, "run", failing_run)
+        artifacts = tmp_path / "artifacts"
+        rc, out = _fetch_all(key, artifacts, **kwargs)
+        assert (rc, out) == (1, "")
+        assert capsys.readouterr().err == "Error setting frontmatter: schema says no\n"
+        assert len(calls) == 1 and calls[0][1:3] == ["scripts/frontmatter.py", "set"]
+        # The issue was fetched and verified (the write started) ...
+        assert fake_jira["issue"] == [(key, FETCH_ALL_FIELDS)]
+        # ... but no file survives: not the task file, no original, no comments companion.
+        assert not (artifacts / task_rel).exists()
+        assert not (artifacts / original_rel).exists()
+        assert _tree(artifacts) == {}
+        assert fake_jira["comments"] == []
 
 
 # ── CLI surface ──────────────────────────────────────────────────────────────────────────────
@@ -563,3 +870,166 @@ class TestFetchAllAgainstTheEmulator:
         assert (data["type"], data["tracker_ref"]) == ("initiative", "RHOAIENG-1")
         assert body == "Init body.\n"
         assert original.read_text(encoding="utf-8") == "Init body.\n"
+
+    # ── post-fetch verification (PR-3c D9): the emulator serves project and issuetype ──────
+
+    def test_initiative_under_the_rfe_default_is_refused_then_fetched_with_the_hint(
+        self, tmp_path, jira, env
+    ):
+        jira.create("RHOAIENG-2", "Serve models at the edge", "Init body.", issue_type="Initiative")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHOAIENG-2", "--fetch-all", str(artifacts))
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr == (
+            "Error: RHOAIENG-2 is (RHOAIENG, Initiative) in Jira but the resolved type rfe "
+            f"binds {RFE_BINDS}; nothing written - re-run with --type initiative\n"
+        )
+        assert not artifacts.exists()
+        # The hint is right: the same key under --type initiative is written (its project
+        # matches the initiative binding), after the D3 line.
+        result = self._run(env, "RHOAIENG-2", "--fetch-all", str(artifacts), "--type", "initiative")
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == "TYPE RESOLVED: initiative (--type)\n"
+        assert _tree(artifacts).keys() == {
+            "initiatives/RHOAIENG-2.md",
+            "initiative-originals/RHOAIENG-2.md",
+        }
+        data, _ = read_frontmatter_validated(
+            str(artifacts / "initiatives" / "RHOAIENG-2.md"), "initiative-task"
+        )
+        assert (data["type"], data["tracker_ref"]) == ("initiative", "RHOAIENG-2")
+
+    def test_feature_request_under_type_initiative_is_refused_and_the_hint_names_rfe(
+        self, tmp_path, jira, env
+    ):
+        jira.create("RHAIRFE-3", "Export models", "Body text.")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHAIRFE-3", "--fetch-all", str(artifacts), "--type", "initiative")
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr == (
+            "TYPE RESOLVED: initiative (--type)\n"
+            "Error: RHAIRFE-3 is (RHAIRFE, Feature Request) in Jira but the resolved type "
+            "initiative binds (RHOAIENG, Initiative); nothing written - re-run with --type rfe\n"
+        )
+        assert not artifacts.exists()
+
+    def test_pair_owned_by_no_type_is_refused_without_a_hint(self, tmp_path, jira, env):
+        jira.create("RHAIRFE-4", "Not a feature request", "Body text.", issue_type="Bug")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHAIRFE-4", "--fetch-all", str(artifacts))
+        assert result.returncode == 1
+        assert result.stderr == (
+            "Error: RHAIRFE-4 is (RHAIRFE, Bug) in Jira but the resolved type rfe binds "
+            f"{RFE_BINDS}; nothing written\n"
+        )
+        assert not artifacts.exists()
+
+    def test_foreign_project_is_refused_unless_the_binding_is_overridden(self, tmp_path, jira, env):
+        # A Feature Request in another project (the emulator creates the project from the key).
+        jira.create("KONFLUX-1", "Export models", "Body text.")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "KONFLUX-1", "--fetch-all", str(artifacts))
+        assert result.returncode == 1
+        assert result.stderr == (
+            "Error: KONFLUX-1 is (KONFLUX, Feature Request) in Jira but the resolved type rfe "
+            f"binds {RFE_BINDS}; nothing written\n"
+        )
+        assert not artifacts.exists()
+        # The verification compares with the EFFECTIVE binding: with rfe bound to KONFLUX the
+        # same issue passes it and the write starts. It then stops at frontmatter.py, whose id
+        # grammar is still the descriptor's (the overridden-project artifact suite is PR-3c-iii;
+        # flip this tail to returncode 0 and a written task there).
+        result = self._run(
+            {**env, "RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"},
+            "KONFLUX-1",
+            "--fetch-all",
+            str(artifacts),
+        )
+        assert "Error: KONFLUX-1 is" not in result.stderr
+        assert "cannot verify" not in result.stderr
+        assert result.returncode == 1 and "Error setting frontmatter" in result.stderr
+        # The failed write leaves no body-only task file (and no original) for the fetch
+        # barrier to accept.
+        assert not (artifacts / "rfe-tasks" / "KONFLUX-1.md").exists()
+        assert not (artifacts / "rfe-originals" / "KONFLUX-1.md").exists()
+
+    def test_malformed_override_for_the_other_type_is_one_line_never_a_traceback(
+        self, tmp_path, jira, env
+    ):
+        # Through the CLI the ownership check (§3.2.1 g) computes every registered type's
+        # effective binding before the fetch, so a malformed RFE_CREATOR_BINDING_* variable
+        # for ANY type — not only the resolved one — is refused up front with one line naming
+        # the variable, on the mismatch path and the match path alike: never a traceback, never
+        # a write. (An in-process caller of _fetch_all that bypasses main gets the plain
+        # post-fetch refusal without the hint: TestPostFetchVerification.)
+        malformed = {**env, "RFE_CREATOR_BINDING_INITIATIVE_PROJECT": "lower"}
+        line = (
+            "Error: RFE_CREATOR_BINDING_INITIATIVE_PROJECT='lower': expected an upper-case "
+            "tracker project key\n"
+        )
+        jira.create("RHOAIENG-2", "Serve models at the edge", "Init body.", issue_type="Initiative")
+        jira.create("RHAIRFE-3", "Export models", "Body text.")
+        artifacts = tmp_path / "artifacts"
+        for key in ("RHOAIENG-2", "RHAIRFE-3"):
+            result = self._run(malformed, key, "--fetch-all", str(artifacts))
+            assert (result.returncode, result.stdout, result.stderr) == (1, "", line), key
+            assert not artifacts.exists()
+        # Without the typo both keys behave as the tests above pin (match / refusal).
+        assert self._run(env, "RHAIRFE-3", "--fetch-all", str(artifacts)).returncode == 0
+
+    def test_rfe_bound_to_the_initiative_pair_is_refused_as_an_ownership_violation(
+        self, tmp_path, jira, env
+    ):
+        # §3.2.1 g through the CLI: the override is refused before the fetch, so an Initiative
+        # can never be written into the rfe layout by re-binding rfe to its pair.
+        jira.create("RHOAIENG-2", "Serve models at the edge", "Init body.", issue_type="Initiative")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(
+            {
+                **env,
+                "RFE_CREATOR_BINDING_RFE_PROJECT": "RHOAIENG",
+                "RFE_CREATOR_BINDING_RFE_ISSUE_TYPE": "Initiative",
+            },
+            "RHOAIENG-2",
+            "--fetch-all",
+            str(artifacts),
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr.startswith(
+            "Error: rfe: effective binding ('jira', 'RHOAIENG', 'Initiative') (source: env) is "
+            "the binding registered for type 'initiative'; a tracker binding must be owned by "
+            "exactly one type"
+        )
+        assert result.stderr.count("\n") == 1 and "Traceback" not in result.stderr
+        assert not artifacts.exists()
+
+    def test_overridden_issue_type_is_accepted_end_to_end(self, tmp_path, jira, env):
+        jira.create("RHAIRFE-5", "An epic-shaped request", "Epic body.", issue_type="Epic")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHAIRFE-5", "--fetch-all", str(artifacts))
+        assert result.returncode == 1
+        assert result.stderr == (
+            "Error: RHAIRFE-5 is (RHAIRFE, Epic) in Jira but the resolved type rfe binds "
+            f"{RFE_BINDS}; nothing written\n"
+        )
+        assert not artifacts.exists()
+        result = self._run(
+            {**env, "RFE_CREATOR_BINDING_RFE_ISSUE_TYPE": "Epic"},
+            "RHAIRFE-5",
+            "--fetch-all",
+            str(artifacts),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""  # legacy default rung: silent, override or not (D3)
+        task = artifacts / "rfe-tasks" / "RHAIRFE-5.md"
+        assert result.stdout.startswith(f"OK: wrote {task}, ")
+        data, body = read_frontmatter_validated(str(task), "rfe-task")
+        assert (data["rfe_id"], data["type"], data["tracker_ref"]) == (
+            "RHAIRFE-5",
+            "rfe",
+            "RHAIRFE-5",
+        )
+        assert body == "Epic body.\n"

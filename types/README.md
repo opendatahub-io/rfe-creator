@@ -75,7 +75,7 @@ itself is fine — `resolve()` follows the link).
 |---|---|---|
 | `artifact_utils.py` | `SCHEMAS` (`<type>-task` / `<type>-review` per type), `scan_tasks` / `scan_reviews` / `rename_to_tracker_key` / `parse_child` generics over a `Descriptor` (the per-type names are wrappers); the id-only routers `find_review_file` / `find_removed_context_yaml` go through `_type_for`, which uses `candidates()` — one non-provisional candidate wins, an ambiguous or provisional id probes `dirs.tasks/<id>.md` for the `type:` it declares, else `detect()`-or-rfe; `find_task_file_including_archived` has a descriptor form (`desc=`) whose ownership test is `owns()` | PR-2b; PR-3c (1/3): `type` / `tracker_ref` on every base schema, `rename_to_tracker_key` stamps them on the files it rewrites and the readers above ("Self-describing artifacts" below); the id-only routers keep the rfe fallback in interactive and headless runs alike for now; name-keyed until the rest of PR-3: the rename error label, rfe's slug-tolerant review lookup and `parse_child`'s rfe markdown fallbacks; the `rfes.md` index contract stays literal (`index.enabled`) |
 | `batch_summary.py` | `_TYPE_CONFIG` (dirs view of `generate_run_report.TYPE_CONFIG`), `--type` choices | PR-2a |
-| `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG` (`snapshot.report_prefix`, `reporting.item_key`), `--type` choices | PR-2c; the `issue-snapshot-` run-dir probe (`_run_dir_has_snapshots`) reads the rfe descriptor's `snapshot.prefix` and stays rfe-only for every `--type` (grandfathered; the per-type probe is a deliberate follow-up, design §10 PR-10) |
+| `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG` (`snapshot.report_prefix`, `reporting.item_key`), `--type` choices; the effective `identity.jira.{project,issue_type}` of `--type`, which its JQL positional is checked against exactly as `snapshot_fetch.py` checks its own, before the credentials, the results directory or any snapshot are read; the type name, cross-checked against each run report's `type:` before the report is read into the snapshot | PR-2c; PR-3c (2/3): JQL/binding check and report-type check ("Fetch verification" below; a legacy report without `type:` is read as today); the `issue-snapshot-` run-dir probe (`_run_dir_has_snapshots`) reads the rfe descriptor's `snapshot.prefix` and stays rfe-only for every `--type` (grandfathered; the per-type probe is a deliberate follow-up, design §10 PR-10) |
 | `check_conflicts.py` | `_TYPE_CONFIG`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b; `startswith(jira_prefix)` → prefix-union pending |
 | `check_revised.py` | `_TYPE_CONFIG`; `--type` validated through `type_registry.parse_type_arg` (unknown → exit 2 with the registered list) | PR-2a; PR-3a (validation) |
 | `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices | PR-2b; `_detect_fast` config allowlist literal until the `initiative-speedrun-config` drift is fixed deliberately; the rfe-only `create` row (`_CREATE_BARRIER_TYPES`, lifted in PR-5) and the initiative row order (`_LEGACY_ROW_ORDER`, CLI choices text) are documented legacy literals |
@@ -83,7 +83,7 @@ itself is fine — `resolve()` follows the link).
 | `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
 | `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
-| `fetch_issue.py` | `--fetch-all` layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments companion and its request gated on `companions.comments`), new `--type` (registry choices, default `rfe`; the no-`--type` invocation is byte-identical) | PR-2c; PR-3c (1/3): `--fetch-all` appends `type:` and `tracker_ref:` to the task file it writes; `status=Ready` and the `Major` priority fallback stay literal (shared pipeline vocabulary, not type facts) |
+| `fetch_issue.py` | `--fetch-all` layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments companion and its request gated on `companions.comments`), new `--type` (registry choices, default `rfe`; the no-`--type` invocation is byte-identical); the effective `identity.jira.{project,issue_type}` (`Descriptor.binding(env)`) that `--fetch-all` verifies the fetched issue's `(project, issuetype)` against before writing anything | PR-2c; PR-3c (1/3): `--fetch-all` appends `type:` and `tracker_ref:` to the task file it writes; `status=Ready` and the `Major` priority fallback stay literal (shared pipeline vocabulary, not type facts); PR-3c (2/3): post-fetch verification ("Fetch verification" below) — the initiative fetch agent now calls `--fetch-all --type initiative` instead of `--fields` (D10) |
 | `filter_for_revision.py` | prefix sniff → `detect()` | PR-2a |
 | `frontmatter.py` | `_detect_schema_type` path table (`_SCHEMA_BY_DIR`), `schema` / `--schema-type` choices through `SCHEMAS`; frontmatter `type:` chooses the schema when present, the path table is the fallback; `set` refuses an explicit `--schema-type` (or `type=`) that contradicts a known directory's type | PR-2b; PR-3c (1/3) |
 | `generate_review_pdf.py` | `REPORT_CONFIG`, `--type` choices; the Jira link target is the task's `tracker_ref:` (key-prefix-union fallback for pre-migration artifacts) and the split-child predicate is `Descriptor.owns` | PR-2a; PR-3c (1/3) |
@@ -93,7 +93,7 @@ itself is fine — `resolve()` follows the link).
 | `prep_assess.py` | prefix sniff → `detect()` | PR-2a |
 | `preserve_review_state.py` | prefix sniff → `detect()` | PR-2a |
 | `reassess_save.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
-| `snapshot_fetch.py` | `SNAPSHOT_CONFIG` (`conventions.labels.{ignore,split_quarantine}`, `snapshot.prefix`), default `prefix=` of `find_previous_snapshot` / `load_snapshot_from_dir` / `update_snapshot_hashes` (rfe `snapshot.prefix`, bound at import), `--type` choices | PR-2c; the hard-filter JQL wrapper and the `f"{prefix}{ts}.yaml"` file name are composition, still pinned by source form |
+| `snapshot_fetch.py` | `SNAPSHOT_CONFIG` (`conventions.labels.{ignore,split_quarantine}`, `snapshot.prefix`), default `prefix=` of `find_previous_snapshot` / `load_snapshot_from_dir` / `update_snapshot_hashes` (rfe `snapshot.prefix`, bound at import), `--type` choices; the effective `identity.jira.{project,issue_type}` of `--type`, which `fetch` checks the positive `project` / `issuetype` clauses of `--jql` (`= X` and every member of `in (X, Y)`; `NOT`-negated clauses are not read) against before any snapshot is read | PR-2c; PR-3c (2/3): JQL/binding check ("Fetch verification" below); the hard-filter JQL wrapper and the `f"{prefix}{ts}.yaml"` file name are composition, still pinned by source form |
 | `split_collect.py` | `_TYPE_CONFIG`, `_set_revise` defaults, `--type` choices | PR-2a |
 | `split_submit.py` | `SPLIT_CONFIG` (descriptor projection over `names()`: `identity.jira.{project,issue_type}`, `conventions.{comment_prefix,label_prefix}`, `display.{entity,entity_plural}`, `id_field`, `dirs`, `index.enabled`, alignment labels; `scan_fn` / `rename_fn` / `parse_child_fn` bound to the `artifact_utils` generics, `find_review_fn` = `find_review_file`), the split link type and the close-superseded transition / resolution from `identity.jira.{split_link_type,state_map.close_superseded}`, `--type` choices | PR-2d; the feasibility set, the split-child marker and every phase label are still composed from `conventions.label_prefix`; the durable-store comment grammar and the `<PROJECT>-DRY` sentinel are composition, pinned by source form |
 | `submit.py` | `TYPE_CONFIGS` (descriptor projection over `names()`), `--type` choices, task scan / rename via `artifact_utils.scan_tasks` / `rename_to_tracker_key(desc)`, approve target from `identity.jira.state_map.approved` | PR-2d; grandfathered: the rfe `snapshot_prefix` `''` sentinel and the `split_type_arg` / report `--type` argv convention (no `--type` for rfe); the `auto-created` / `auto-revised` / `needs-attention` / `split-quarantine` labels are still composed from `conventions.label_prefix` |
@@ -342,9 +342,51 @@ re-derived from an id prefix, with key-prefix-union membership as the fallback f
 artifacts (`generate_run_report.py`'s `tracker_ref`/`role`, the review PDF's predicates). The
 id-only routers keep the rfe fallback in both interactive and headless runs for now: the
 headless-fails-loudly rule of D5 lives in `resolve()`, and wiring `resolve` into the writers is
-PR-3c-iii. Post-fetch `(project, issue_type)` verification, the initiative fetch
-agent's switch to `fetch_issue.py`, the `is_existing := tracker_ref` redefinition, the writers'
-effective binding and the run report's `binding:` key are the later PR-3c PRs.
+PR-3c-iii. Post-fetch `(project, issue_type)` verification and the initiative fetch agent's
+switch to `fetch_issue.py` are "Fetch verification" below (PR-3c-ii); the `is_existing :=
+tracker_ref` redefinition, the writers' effective binding and the run report's `binding:` key are
+PR-3c-iii.
+
+### Fetch verification (PR-3c)
+
+A tracker issue is checked against the resolved type's **effective** binding —
+`identity.jira.{project,issue_type}` after the overlay of "Deployment binding override" above,
+`Descriptor.binding(env)` — before any artifact is written from it. `fetch_issue.py --fetch-all`
+requests `project` next to `issuetype` (request-only, D9: neither field is persisted, and the
+project is the tracker's answer, never inferred from the key stem) and compares the issue's
+`(project.key, issuetype.name)` with the effective pair of `--type` (default `rfe`). A match is
+silent: the files written are the ones written today, byte for byte. On a mismatch nothing is
+written — no task file, no original, no companion — and the script exits non-zero with one
+stderr line naming the issue's actual pair, the expected one and, when another registered type
+owns the actual pair, the `--type <t>` to re-run with. Headless that is the existing `fetch_failed`
+path (the task file is missing, the orchestrator writes the error stub and the run moves on);
+interactive the user re-runs with the printed type. The check compares against the resolved
+type's own binding only: a `RFE_CREATOR_BINDING_<TYPE>_*` override that binds `--type` to another
+registered type's pair is refused before the fetch (`type_registry.assert_registered_binding`,
+§3.2.1 g — otherwise an issue of that other type would pass the check into this type's layout); the
+same check proves every registered type's binding, so a `RFE_CREATOR_BINDING_*` value that fails
+the grammar for ANY type is refused up front with one line naming the variable (never a traceback;
+the post-fetch refusal itself never depends on another type's variables — a caller that bypasses the
+CLI's check only loses the `--type <t>` hint). The initiative fetch agent is on the same path since
+D10: its step 1 is `fetch_issue.py {KEY} --fetch-all artifacts --type initiative`, the
+MCP fallback runs only on exit 2 (missing credentials) and any other non-zero exit is reported and
+never retried through MCP — one writer and one check for both twins (the agent bodies are pinned
+by `tests/test_type_registry_pins.py`, `test_fetch_agent_companions`; the twins differ only by the
+`--type initiative` flag and the comments companion). `snapshot_fetch.py fetch` parses the positive
+`project` and `issuetype` clauses (`type`, Jira's alias of `issuetype`, counts as the latter) out of
+`--jql` — the equality `= X` and every member of a membership `in (X, Y)` — and fails loudly when
+any names something other than the effective binding of `--type`; a clause negated with `NOT`
+(`NOT issuetype = Epic`, or anything inside a `NOT ( ... )` group), `!=` and `not in (...)` assert
+nothing and are not read. The check runs before any snapshot is read or written and changes no
+snapshot semantics (`docs/snapshot-incremental-fetch.md` "Design Invariants"), and a JQL that names
+neither clause is accepted as today. Only values the binding has a counterpart for are compared: a
+project given by its NAME (`project = "Red Hat AI RFE project"`, which Jira accepts as an alias of
+the key) or by numeric id is not key-shaped, cannot be mapped offline, and is left to Jira — neither
+accepted nor refused (the key form is checked case-insensitively, as Jira compares it).
+`bootstrap_snapshot.py` takes the same JQL positional, wraps it the same way and runs the same check
+over it (same line, same exit, decided after argument parsing and before the credentials, the
+results directory or any snapshot are read); it also cross-checks each run report's `type:` against
+`--type` and refuses a report of another type; a legacy report without `type:` is read as today.
 
 ## Lint gates (§3.3)
 

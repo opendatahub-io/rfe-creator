@@ -20,7 +20,11 @@ Environment variables:
 
 Exit codes:
     0  Success
-    1  API/network/script error
+    1  API/network/script error, or (--fetch-all) a fetched issue whose
+       (project, issue type) is not the resolved type's binding — nothing
+       is written and stderr names the type to re-run with, if any — or a
+       RFE_CREATOR_BINDING_* override that binds the resolved type to
+       another registered type's pair (refused before the fetch)
     2  Missing JIRA credentials (caller should try MCP fallback)
 """
 
@@ -56,7 +60,88 @@ def _format_comment_date(iso_date):
     return iso_date[:10]
 
 
-def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe"):
+# The --fetch-all request list: the pre-registry fields, then the two witnesses of the
+# post-fetch verification below — issuetype (PR-1) and project (PR-3c, D9: requested
+# explicitly, never inferred from the key stem). Request-only widening: nothing written by
+# _fetch_all reads either, so the artifact bytes do not depend on them.
+FETCH_ALL_FIELDS = [
+    "summary",
+    "description",
+    "priority",
+    "labels",
+    "status",
+    "issuetype",
+    "project",
+]
+
+
+def _fetched_pair(fields):
+    """``(project key, issue type name, missing)`` from a fetched issue's ``fields``: the
+    ``project.key`` / ``issuetype.name`` witnesses and the names (``project`` / ``issuetype``)
+    of the ones the response does not carry (absent, null, or without a key / name)."""
+    project = fields.get("project")
+    issuetype = fields.get("issuetype")
+    project_key = project.get("key") if isinstance(project, dict) else None
+    type_name = issuetype.get("name") if isinstance(issuetype, dict) else None
+    missing = [
+        name for name, value in (("project", project_key), ("issuetype", type_name)) if not value
+    ]
+    return project_key, type_name, missing
+
+
+def verify_binding(issue_key, fields, type_name, binding, env=None):
+    """Post-fetch verification (design §5 self-describing artifacts, PR-3c D9).
+
+    The fetched ``(project.key, issuetype.name)`` pair must equal the resolved type's
+    EFFECTIVE binding ``(project, issue_type)`` — ``binding`` is what ``type_registry.resolve``
+    returned, so a ``RFE_CREATOR_BINDING_<TYPE>_*`` override is honoured. Returns ``None`` on a
+    match and otherwise the one-line refusal to print: it names the key, the fetched pair, the
+    expected pair and the resolved type, and — when exactly one OTHER registered type's effective
+    binding owns the fetched pair — the ``re-run with --type <t>`` hint (best-effort: a type
+    whose ``RFE_CREATOR_BINDING_*`` variables fail the grammar cannot be offered and is skipped;
+    ``main`` refuses such an environment before the fetch, a direct caller merely loses the
+    hint). The resolved type itself is never offered: under the bare ``JIRA_PROJECT`` /
+    ``JIRA_ISSUE_TYPE`` shorthand its own descriptor binding may own the fetched pair, but the
+    shorthand follows the resolved type, so re-running with it would fail the same way. A
+    response without a ``project`` or ``issuetype`` witness cannot be verified and is refused
+    the same way (fail closed), naming the missing field.
+    """
+    if env is None:
+        env = os.environ
+    expected = (binding.get("project"), binding.get("issue_type"))
+    expected_text = f"({expected[0]}, {expected[1]})"
+    project_key, issue_type, missing = _fetched_pair(fields)
+    if missing:
+        return (
+            f"Error: cannot verify {issue_key} against the resolved type {type_name} binding "
+            f"{expected_text}: the fetched issue has no {' or '.join(missing)} field; "
+            f"nothing written"
+        )
+    if (project_key, issue_type) == expected:
+        return None
+    message = (
+        f"Error: {issue_key} is ({project_key}, {issue_type}) in Jira but the resolved type "
+        f"{type_name} binds {expected_text}; nothing written"
+    )
+    owners = []
+    for name in _TYPES.names():
+        if name == type_name:
+            continue
+        try:
+            other = _TYPES.get(name).binding(env)
+        except type_registry.RegistryError:
+            # A malformed RFE_CREATOR_BINDING_<OTHER>_* variable: that type cannot be offered
+            # as the hint, and its error is not this run's to raise (the resolved type's own
+            # variables were validated by resolve) — the refusal stands without the hint.
+            continue
+        if (other.get("project"), other.get("issue_type")) == (project_key, issue_type):
+            owners.append(name)
+    if len(owners) == 1:
+        message += f" - re-run with --type {owners[0]}"
+    return message
+
+
+def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", binding=None):
     """Fetch issue and write all artifact files for one work-item type.
 
     The artifact layout is the ``type_name`` descriptor's (design
@@ -64,30 +149,38 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe"):
     are ``dirs.tasks`` / ``dirs.originals``, the frontmatter id field is
     ``identity.id_field`` and the ``<KEY>-comments.md`` companion is written
     only when ``companions.comments`` is true. Returns 0 on success, 1 on error.
+
+    Before anything is written the fetched issue is verified against ``binding`` — the
+    type's effective ``(project, issue_type)`` as ``type_registry.resolve`` returned it to
+    ``main``; a direct caller that passes none gets the type's own effective binding — and a
+    mismatch (or a response that cannot be verified) writes no task, original or comments
+    file: one line on stderr, return 1 (``verify_binding``). The task file is written first and
+    its frontmatter set by ``scripts/frontmatter.py``; when that step fails the task file is
+    removed again before returning 1, so a failed fetch never leaves a body-only task file for
+    the fetch barrier to accept (the original and the companion are not yet written then).
     """
     desc = _TYPES.get(type_name)
+    if binding is None:
+        binding = desc.binding(os.environ, shorthand=True)
     dirs = desc.dirs(form="bare")
     tasks_dir = os.path.join(artifacts_dir, dirs["tasks"])
     originals_dir = os.path.join(artifacts_dir, dirs["originals"])
-    os.makedirs(tasks_dir, exist_ok=True)
-    os.makedirs(originals_dir, exist_ok=True)
 
     # Fetch issue fields
     try:
-        issue = get_issue(
-            server,
-            user,
-            token,
-            issue_key,
-            # issuetype is requested for post-fetch (project, issue_type)
-            # verification (work-item-types PR-3); nothing written below reads it.
-            fields=["summary", "description", "priority", "labels", "status", "issuetype"],
-        )
+        issue = get_issue(server, user, token, issue_key, fields=list(FETCH_ALL_FIELDS))
     except Exception as e:
         print(f"Error fetching issue {issue_key}: {e}", file=sys.stderr)
         return 1
 
     fields = issue.get("fields", {})
+    refusal = verify_binding(issue_key, fields, type_name, binding)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return 1
+
+    os.makedirs(tasks_dir, exist_ok=True)
+    os.makedirs(originals_dir, exist_ok=True)
     desc_md = _desc_to_markdown(fields.get("description"))
 
     # Extract field values. The "Major" fallback below and status=Ready in the
@@ -126,6 +219,12 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe"):
     result = subprocess.run(fm_args, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Error setting frontmatter: {result.stderr.strip()}", file=sys.stderr)
+        # The body-only task file must not survive: the fetch barrier accepts a task file that
+        # merely exists, so leaving it would pass a frontmatter-less artifact downstream instead
+        # of the fetch_failed stub. Nothing else is on disk yet (the original and the comments
+        # companion are written only after this point), so removing it restores "nothing
+        # written".
+        os.remove(task_path)
         return 1
 
     # Write original description (deterministic baseline for conflict
@@ -190,10 +289,13 @@ def main():
         "(rfe-tasks, rfe-originals, comments) to "
         "the given directory.",
     )
+    # default=None: an absent flag reaches type_registry.resolve as "no signal" and lands on the
+    # grandfathered legacy default rung (rfe) silently; an explicit --type is rung 1 and prints
+    # the D3 line. The rendered default is unchanged.
     parser.add_argument(
         "--type",
         choices=_TYPES.choices(),
-        default="rfe",
+        default=None,
         help="Work-item type whose artifact layout --fetch-all "
         "writes: task and original directories, frontmatter "
         "id field and comments companion come from "
@@ -229,7 +331,34 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(2)
-        rc = _fetch_all(args.issue_key, args.fetch_all, server, user, token, args.type)
+        # Design §5 ladder: --type (rung 1) else the legacy default (rfe). The key is NOT an
+        # id signal here (D9: the project witness comes from the fetched issue, never from
+        # the key stem), so the result is never ambiguous. The binding on the resolution is
+        # the effective one (§3.2.1) — what the fetched issue is verified against.
+        try:
+            resolution = type_registry.resolve(_TYPES, explicit_type=args.type, env=os.environ)
+            # D3: the resolve line only when a non-default rung decided, and never on stdout.
+            if resolution.rung != type_registry.LEGACY_DEFAULT_RUNG:
+                print(resolution.line(), file=sys.stderr)
+            # §3.2.1 g (runtime twin of gate-1 rule 1): the effective binding must be the
+            # resolved type's OWN. An override that binds it to another registered type's
+            # pair is refused here, before the fetch — otherwise the post-fetch check would
+            # pass an issue of that other type into this type's layout. No override: silent.
+            type_registry.assert_registered_binding(
+                resolution.desc, env=os.environ, registry=_TYPES, shorthand=True
+            )
+        except type_registry.RegistryError as exc:
+            print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+            sys.exit(1)
+        rc = _fetch_all(
+            args.issue_key,
+            args.fetch_all,
+            server,
+            user,
+            token,
+            resolution.type_name,
+            resolution.binding,
+        )
         sys.exit(rc)
 
     # --write-original-only mode: no --fields means caller just wants

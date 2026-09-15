@@ -14,6 +14,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import snapshot_fetch
 import type_registry
 from snapshot_fetch import (
     SNAPSHOT_CONFIG,
@@ -21,6 +22,8 @@ from snapshot_fetch import (
     compute_content_hash,
     diff_snapshots,
     find_previous_snapshot,
+    jql_binding_clauses,
+    jql_binding_conflict,
     load_snapshot_from_dir,
     read_id_file,
     update_snapshot_hashes,
@@ -596,7 +599,7 @@ class TestRandom:
 
         args = argparse.Namespace(
             reprocess=True,
-            jql="project = TEST",
+            jql="project = RHAIRFE",
             random=random_n,
             limit=None,
             data_dir=None,
@@ -678,7 +681,7 @@ class TestUnchangedSkippedFromSelection:
 
         args = argparse.Namespace(
             reprocess=reprocess,
-            jql="project = TEST",
+            jql="project = RHAIRFE",
             random=None,
             limit=limit,
             data_dir=None,
@@ -890,7 +893,7 @@ class TestCmdFetchInitiativeType:
 
         args = argparse.Namespace(
             reprocess=False,
-            jql="project = RHOAIENG",
+            jql=f"project = {REG.get(issue_type).binding(env={})['project']}",
             random=None,
             limit=None,
             data_dir=None,
@@ -1050,6 +1053,412 @@ class TestSnapshotConfigDerivesFromTheRegistry:
         assert result.returncode == 0, result.stderr
         assert result.stdout == "TOTAL=2\nCHANGED=2\nNEW=0\nUNCHANGED=0\n"
         assert changed_file.read_text() == "DOCS-1\nDOCS-2\n"
+
+
+class TestJqlBindingCheck:
+    """PR-3c: the positive ``project`` / ``issuetype`` clauses of --jql — ``= X`` and every member
+    of ``in (X, Y)``; a clause negated with ``NOT`` is not read — are compared with the resolved
+    type's EFFECTIVE binding (design §3.2.1) before any snapshot is read and before anything is
+    fetched or written; a JQL that names neither is not checked."""
+
+    RFE = REG.get("rfe").binding(env={})
+    INITIATIVE = REG.get("initiative").binding(env={})
+
+    @pytest.mark.parametrize(
+        "jql, expected",
+        [
+            (
+                'project = RHAIRFE AND issuetype = "Feature Request"',
+                {"project": ["RHAIRFE"], "issuetype": ["Feature Request"]},
+            ),
+            (
+                "project = RHAIRFE AND issuetype = 'Feature Request'",
+                {"project": ["RHAIRFE"], "issuetype": ["Feature Request"]},
+            ),
+            (
+                "project = RHOAIENG AND issuetype = Initiative",
+                {"project": ["RHOAIENG"], "issuetype": ["Initiative"]},
+            ),
+            (
+                "PROJECT=RHAIRFE and IssueType = Epic",
+                {"project": ["RHAIRFE"], "issuetype": ["Epic"]},
+            ),
+            ("(project = RHAIRFE) AND labels = foo", {"project": ["RHAIRFE"], "issuetype": []}),
+            (
+                "project = RHAIRFE OR project = RHOAIENG",
+                {"project": ["RHAIRFE", "RHOAIENG"], "issuetype": []},
+            ),
+            # Memberships: every member is a positive assertion, quotes stripped, in order.
+            (
+                "project in (RHAIRFE, RHOAIENG) AND issuetype in ('Feature Request', Epic)",
+                {"project": ["RHAIRFE", "RHOAIENG"], "issuetype": ["Feature Request", "Epic"]},
+            ),
+            ('issuetype in ("Feature Request")', {"project": [], "issuetype": ["Feature Request"]}),
+            ("project IN(RHAIRFE)", {"project": ["RHAIRFE"], "issuetype": []}),
+            ("type in (Epic, 10700)", {"project": [], "issuetype": ["Epic", "10700"]}),
+            (
+                'project in ("Red Hat AI RFE project", RHAIRFE)',
+                {"project": ["Red Hat AI RFE project", "RHAIRFE"], "issuetype": []},
+            ),
+            # Negations assert nothing: `not in`, `!=`, `NOT <clause>` and `NOT ( ... )` groups
+            # (balanced, nested, quoted parentheses respected).
+            ("project not in (RHOAIENG)", {"project": [], "issuetype": []}),
+            ("project != RHOAIENG AND issuetype != Epic", {"project": [], "issuetype": []}),
+            (
+                "project = RHAIRFE AND NOT issuetype = Epic",
+                {"project": ["RHAIRFE"], "issuetype": []},
+            ),
+            (
+                "project = RHAIRFE AND NOT (issuetype = Epic)",
+                {"project": ["RHAIRFE"], "issuetype": []},
+            ),
+            (
+                "not(issuetype = Epic) and project=RHAIRFE",
+                {"project": ["RHAIRFE"], "issuetype": []},
+            ),
+            (
+                "NOT (project = RHOAIENG AND (type = Epic OR type in (Bug, Task))) AND "
+                "project = RHAIRFE",
+                {"project": ["RHAIRFE"], "issuetype": []},
+            ),
+            (
+                'NOT (summary ~ "a ) b" AND project = RHOAIENG) AND project = RHAIRFE',
+                {"project": ["RHAIRFE"], "issuetype": []},
+            ),
+            ("NOT (project = RHOAIENG AND type = Epic", {"project": [], "issuetype": []}),
+            # `type` is Jira's documented alias of `issuetype` and is listed under it.
+            (
+                "project = RHOAIENG AND type = Epic",
+                {"project": ["RHOAIENG"], "issuetype": ["Epic"]},
+            ),
+            ("TYPE = 'Feature Request'", {"project": [], "issuetype": ["Feature Request"]}),
+            ("myproject = X AND type = Epic", {"project": [], "issuetype": ["Epic"]}),
+            # Word boundaries: a custom field named "... Type", `subtype`, `myproject`.
+            (
+                '"Request Type" = foo AND subtype = bar AND myproject = X',
+                {"project": [], "issuetype": []},
+            ),
+            ("labels = foo AND statusCategory != Done", {"project": [], "issuetype": []}),
+            ("", {"project": [], "issuetype": []}),
+            (None, {"project": [], "issuetype": []}),
+        ],
+    )
+    def test_binding_clauses(self, jql, expected):
+        assert jql_binding_clauses(jql) == expected
+
+    def test_production_jql_passes_silently_for_both_shipped_types(self):
+        for name in REG.names():
+            desc = REG.get(name)
+            jql = desc.get("conventions.query_default")
+            assert jql_binding_conflict(jql, desc.binding(env={}), name) is None, name
+        # The CI form quotes the issue type with single quotes.
+        assert (
+            jql_binding_conflict(
+                "project = RHAIRFE AND issuetype = 'Feature Request'", self.RFE, "rfe"
+            )
+            is None
+        )
+        assert jql_binding_conflict("project = RHAIRFE", self.RFE, "rfe") is None
+        assert jql_binding_conflict("project = RHOAIENG", self.INITIATIVE, "initiative") is None
+
+    @pytest.mark.parametrize(
+        "jql, message",
+        [
+            (
+                "project = RHOAIENG",
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            (
+                "project = RHAIRFE AND issuetype = Initiative",
+                "ERROR: --jql names issuetype Initiative but the rfe binding is Feature Request",
+            ),
+            (
+                'project = RHAIRFE AND issuetype = "Epic"',
+                "ERROR: --jql names issuetype Epic but the rfe binding is Feature Request",
+            ),
+            (
+                "project = RHAIRFE OR project = RHOAIENG",
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            (
+                "project = RHOAIENG AND issuetype = Initiative",
+                # both conflict: project is reported first
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            # Memberships: a member other than the binding is the same conflict, whether it is
+            # the only member or one of several (the first offending member is reported).
+            (
+                "project in (RHOAIENG)",
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            (
+                "project in (RHAIRFE, RHOAIENG)",
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            (
+                "project = RHAIRFE AND issuetype in (Initiative, Epic)",
+                "ERROR: --jql names issuetype Initiative but the rfe binding is Feature Request",
+            ),
+            (
+                'project = RHAIRFE AND type in ("Feature Request", Epic)',
+                "ERROR: --jql names issuetype Epic but the rfe binding is Feature Request",
+            ),
+        ],
+    )
+    def test_conflicts_under_rfe(self, jql, message):
+        assert jql_binding_conflict(jql, self.RFE, "rfe") == message
+
+    @pytest.mark.parametrize(
+        "jql",
+        [
+            'summary ~ "not (a" AND project = RHOAIENG',
+            "summary ~ 'NOT (x' AND project = RHOAIENG",
+            'text ~ "foo not (bar) baz" AND issuetype = Epic',
+        ],
+    )
+    def test_a_quoted_not_paren_is_text_not_a_negated_group(self, jql):
+        """``not (`` inside a quoted literal must not open a group and swallow the clauses
+        after it (the guard would otherwise pass a conflicting JQL through)."""
+        assert jql_binding_conflict(jql, self.RFE, "rfe") is not None
+
+    @pytest.mark.parametrize(
+        "jql",
+        [
+            'issuetype in ("Feature Request")',
+            "project in (RHAIRFE) AND issuetype in ('Feature Request')",
+            "project not in (RHOAIENG)",
+            "project = RHAIRFE AND NOT issuetype = Epic",
+            "project = RHAIRFE AND NOT (issuetype = Epic)",
+            "project = RHAIRFE AND issuetype not in (Epic, Initiative)",
+            "NOT (project = RHOAIENG AND issuetype = Initiative) AND project = RHAIRFE",
+            # The member skip rules are the equality ones: ids and project names go to Jira.
+            'project in (10001, "Red Hat AI RFE project") AND issuetype in (10700)',
+        ],
+    )
+    def test_memberships_and_negations_that_pass_under_rfe(self, jql):
+        assert jql_binding_conflict(jql, self.RFE, "rfe") is None
+
+    def test_conflicts_under_initiative(self):
+        assert jql_binding_conflict("project = RHAIRFE", self.INITIATIVE, "initiative") == (
+            "ERROR: --jql names project RHAIRFE but the initiative binding is RHOAIENG"
+        )
+        assert jql_binding_conflict(
+            "project = RHOAIENG AND issuetype = 'Feature Request'", self.INITIATIVE, "initiative"
+        ) == (
+            "ERROR: --jql names issuetype Feature Request but the initiative binding is Initiative"
+        )
+        # The `type` alias is the same clause, reported as issuetype.
+        assert (
+            jql_binding_conflict(
+                "project = RHOAIENG AND type = Epic", self.INITIATIVE, "initiative"
+            )
+            == "ERROR: --jql names issuetype Epic but the initiative binding is Initiative"
+        )
+        assert (
+            jql_binding_conflict(
+                "project = RHOAIENG AND type = Initiative", self.INITIATIVE, "initiative"
+            )
+            is None
+        )
+
+    def test_project_names_and_ids_are_left_to_jira(self):
+        # Jira accepts a project's NAME as an alias of its key in `project = ...`; the binding
+        # carries the key only, so a value that is not key-shaped cannot be compared offline
+        # and is neither accepted nor refused — Jira resolves it. The key form is still checked,
+        # in either case, and a numeric id is skipped as before.
+        assert (
+            jql_binding_conflict(
+                "project = \"Red Hat AI RFE project\" AND issuetype = 'Feature Request'",
+                self.RFE,
+                "rfe",
+            )
+            is None
+        )
+        assert jql_binding_conflict('project = "RHAI RFEs"', self.RFE, "rfe") is None
+        assert jql_binding_conflict("project = 10001", self.RFE, "rfe") is None
+        assert jql_binding_conflict("project = RHOAIENG", self.RFE, "rfe") == (
+            "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE"
+        )
+        assert jql_binding_conflict("project = rhoaieng", self.RFE, "rfe") == (
+            "ERROR: --jql names project rhoaieng but the rfe binding is RHAIRFE"
+        )
+        # An issue type has no key form: its name is compared as before.
+        assert jql_binding_conflict(
+            'project = "Red Hat AI RFE project" AND type = Epic', self.RFE, "rfe"
+        ) == ("ERROR: --jql names issuetype Epic but the rfe binding is Feature Request")
+        # Key-shaped is the registry's own project-key grammar (the override validator's).
+        assert snapshot_fetch._JQL_PROJECT_KEY_RE.pattern == type_registry._PROJECT_KEY_RE.pattern
+
+    def test_memberships_are_checked_and_the_other_operators_are_not(self):
+        # `in (...)` is a positive assertion like `=`; `!=`, `not in`, `~` and a `NOT`-negated
+        # clause assert nothing the binding could contradict.
+        assert jql_binding_conflict(
+            "project in (RHOAIENG) AND issuetype in (Initiative, Epic)", self.RFE, "rfe"
+        ) == ("ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE")
+        assert jql_binding_conflict(
+            "project in (RHOAIENG) AND issuetype in (Epic)", self.INITIATIVE, "initiative"
+        ) == ("ERROR: --jql names issuetype Epic but the initiative binding is Initiative")
+        assert jql_binding_conflict("project != RHAIRFE AND issuetype ~ x", self.RFE, "rfe") is None
+        assert (
+            jql_binding_conflict(
+                "project not in (RHAIRFE) AND NOT type = 'Feature Request'", self.RFE, "rfe"
+            )
+            is None
+        )
+        assert jql_binding_conflict("labels = foo", self.RFE, "rfe") is None
+
+    def test_values_compare_case_insensitively_and_ids_are_skipped(self):
+        assert (
+            jql_binding_conflict(
+                'project = rhairfe AND issuetype = "feature request"', self.RFE, "rfe"
+            )
+            is None
+        )
+        assert (
+            jql_binding_conflict("project = 10001 AND issuetype = 10700", self.RFE, "rfe") is None
+        )
+
+    def test_effective_binding_is_what_is_checked(self):
+        env = {"RFE_CREATOR_BINDING_RFE_PROJECT": "KONFLUX"}
+        binding = REG.get("rfe").binding(env)
+        assert (
+            jql_binding_conflict(
+                "project = KONFLUX AND issuetype = 'Feature Request'", binding, "rfe"
+            )
+            is None
+        )
+        assert jql_binding_conflict("project = RHAIRFE", binding, "rfe") == (
+            "ERROR: --jql names project RHAIRFE but the rfe binding is KONFLUX"
+        )
+
+    @staticmethod
+    def _args(tmp_path, jql, type_name):
+        import argparse
+
+        return argparse.Namespace(
+            reprocess=False,
+            jql=jql,
+            random=None,
+            limit=None,
+            data_dir=str(tmp_path / "data"),
+            type=type_name,
+            ids_file=str(tmp_path / "ids.txt"),
+            changed_file=str(tmp_path / "changed.txt"),
+        )
+
+    @pytest.mark.parametrize(
+        "type_name, jql, message",
+        [
+            (
+                "rfe",
+                "project = RHOAIENG",
+                "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE",
+            ),
+            (
+                "initiative",
+                'project = RHOAIENG AND issuetype = "Feature Request"',
+                "ERROR: --jql names issuetype Feature Request but the initiative binding is "
+                "Initiative",
+            ),
+        ],
+    )
+    def test_cmd_fetch_conflict_exits_1_before_any_read_or_fetch(
+        self, tmp_path, monkeypatch, capsys, type_name, jql, message
+    ):
+        def boom(*a, **kw):
+            raise AssertionError("must not be reached on a JQL/binding conflict")
+
+        # Credentials are not even read: the conflict is decided first.
+        for name in (
+            "require_env",
+            "fetch_all_issues",
+            "find_previous_snapshot",
+            "load_snapshot_from_dir",
+        ):
+            monkeypatch.setattr(f"snapshot_fetch.{name}", boom)
+        snap_dir = str(tmp_path / "auto-fix-runs")
+        monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", snap_dir)
+        args = self._args(tmp_path, jql, type_name)
+        with pytest.raises(SystemExit) as exc:
+            cmd_fetch(args)
+        assert exc.value.code == 1
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert err == message + "\n"
+        assert not os.path.exists(snap_dir)
+        assert not os.path.exists(args.ids_file) and not os.path.exists(args.changed_file)
+
+    def test_passing_jql_keeps_the_output_byte_identical(self, tmp_path, monkeypatch, capsys):
+        # The production JQL under the default type: no new line anywhere — the stderr trace is
+        # the pre-3c one and stdout the five counters.
+        snap_dir = str(tmp_path / "auto-fix-runs")
+        monkeypatch.setattr("snapshot_fetch.require_env", lambda: ("http://x", "u", "t"))
+        monkeypatch.setattr(
+            "snapshot_fetch.fetch_all_issues",
+            lambda *a, **kw: {"RHAIRFE-1": {"content_hash": "aaa", "labels": []}},
+        )
+        monkeypatch.setattr("snapshot_fetch.find_previous_snapshot", lambda **kw: (None, None))
+        monkeypatch.setattr("snapshot_fetch.SNAPSHOT_DIR", snap_dir)
+        args = self._args(tmp_path, "project = RHAIRFE AND issuetype = 'Feature Request'", "rfe")
+        args.data_dir = None
+        cmd_fetch(args)
+        out, err = capsys.readouterr()
+        assert out == "TOTAL=1\nCHANGED=0\nNEW=1\nUNCHANGED_SELECTED=0\nUNCHANGED_SKIPPED=0\n"
+        assert err == (
+            "Previous snapshot: none (first run)\n"
+            "JQL=(project = RHAIRFE AND issuetype = 'Feature Request') AND statusCategory != Done "
+            "AND (labels not in (rfe-creator-ignore, rfe-creator-split-quarantine) "
+            "OR labels is EMPTY)\n"
+            "Fetched 1 issues\n"
+        )
+        assert read_id_file(args.ids_file) == ["RHAIRFE-1"]
+
+    def test_cli_conflict_needs_no_credentials(self, tmp_path):
+        # The default --type is rfe: a JQL naming the initiative project fails before the
+        # credential check, with the one ERROR line and nothing written.
+        env = _clean_env()
+        for var in ("JIRA_SERVER", "JIRA_USER", "JIRA_TOKEN"):
+            env.pop(var, None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "fetch",
+                "project = RHOAIENG AND issuetype = Initiative",
+                "--ids-file",
+                str(tmp_path / "ids.txt"),
+                "--changed-file",
+                str(tmp_path / "changed.txt"),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert (
+            result.stderr == "ERROR: --jql names project RHOAIENG but the rfe binding is RHAIRFE\n"
+        )
+        assert sorted(os.listdir(tmp_path)) == []
+
+    def test_reprocess_without_jql_is_not_checked(self, tmp_path):
+        # No JQL, nothing to compare: the prior-ids shortcut is untouched.
+        import argparse
+
+        ids_file = str(tmp_path / "all-ids.txt")
+        changed_file = str(tmp_path / "changed-ids.txt")
+        write_id_file(ids_file, ["RHOAIENG-1"])
+        cmd_fetch(
+            argparse.Namespace(
+                reprocess=True,
+                jql=None,
+                random=None,
+                type="rfe",
+                ids_file=ids_file,
+                changed_file=changed_file,
+            )
+        )
+        assert read_id_file(changed_file) == ["RHOAIENG-1"]
 
 
 class TestHardFilterJqlWrapperIsByteStable:

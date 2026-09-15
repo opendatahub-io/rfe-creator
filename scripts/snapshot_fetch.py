@@ -35,6 +35,7 @@ import glob
 import hashlib
 import os
 import random
+import re
 import sys
 import urllib.parse
 from collections import OrderedDict
@@ -75,6 +76,138 @@ SNAPSHOT_CONFIG = {
 # holds "" as a sentinel for it), and a third type must always pass prefix= explicitly.
 # Bound once at import, so the signatures' defaults keep the value they always had.
 _RFE_SNAPSHOT_PREFIX = _TYPES.get("rfe").get("snapshot.prefix")
+
+
+# The JQL clauses the binding check reads (PR-3c): the POSITIVE `project` / `issuetype`
+# assertions — `type` is Jira's documented alias of `issuetype` and is read as it — in the two
+# forms that name members, the equality `<field> = X` and the membership `<field> in (X, Y)`,
+# keyword case-insensitive, each value double-quoted, single-quoted or bare. A clause negated
+# with `NOT` asserts nothing about the binding and is skipped: `NOT <field> = X` is the optional
+# first group below, and a `NOT ( ... )` group is blanked by _blank_negated_groups before the
+# scan. `!=`, `not in (...)`, `~`, `is` and every other operator and field are ignored on
+# purpose (no JQL lexer here; a value quoted inside a text search would be read).
+_JQL_VALUE = r"""(?:"([^"]*)"|'([^']*)'|([^\s()"',]+))"""
+_JQL_CLAUSE_RE = re.compile(
+    r"""\b(?:(not)\s+)?(project|issuetype|type)(?:\s*=\s*"""
+    + _JQL_VALUE
+    + r"""|\s+in\s*\(([^)]*)\))""",
+    re.IGNORECASE,
+)
+_JQL_MEMBER_RE = re.compile(_JQL_VALUE)
+_JQL_NOT_GROUP_RE = re.compile(r"\bnot\s*\(", re.IGNORECASE)
+_JQL_KEYWORD_ALIASES = {"type": "issuetype"}
+
+# A Jira project KEY — the registry's override grammar (type_registry._PROJECT_KEY_RE, equality
+# pinned by tests/test_snapshot_fetch.py). Jira also accepts a project's NAME
+# (`project = "Red Hat AI RFE project"`) and its numeric id in the same clause; the binding
+# carries the key only, so a value that is not key-shaped is left to Jira, which alone can map
+# it (the check cannot refuse what it cannot compare).
+_JQL_PROJECT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def _blank_negated_groups(jql):
+    """``jql`` with every ``NOT ( ... )`` group removed — balanced parentheses, quotes respected,
+    an unbalanced group dropped to the end of the string. A negated group asserts nothing
+    positive about the binding, so none of the clauses inside it is read."""
+    out = []
+    i = 0
+    outer_quote = None
+    while i < len(jql):
+        ch = jql[i]
+        # A quoted literal is copied verbatim: a ``not (`` inside ``summary ~ "not (a"`` is
+        # text, not a group, and must not swallow the clauses that follow it.
+        if outer_quote is not None:
+            if ch == outer_quote:
+                outer_quote = None
+            out.append(ch)
+            i += 1
+            continue
+        if ch in "\"'":
+            outer_quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        match = _JQL_NOT_GROUP_RE.match(jql, i)
+        if match is None:
+            out.append(ch)
+            i += 1
+            continue
+        depth, quote, j = 0, None, match.end() - 1
+        while j < len(jql):
+            ch = jql[j]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append(" ")
+        i = j + 1
+    return "".join(out)
+
+
+def jql_binding_clauses(jql):
+    """``{"project": [...], "issuetype": [...]}`` — the values every POSITIVE ``project`` /
+    ``issuetype`` clause of ``jql`` asserts: the ``X`` of ``<field> = X`` and each member of
+    ``<field> in (X, Y)`` (``type``, the alias, is listed under ``issuetype``; keyword
+    case-insensitive; quoted or bare values, quotes stripped, in order of appearance). A clause
+    negated with ``NOT`` — ``NOT <field> = X``, or any clause inside a ``NOT ( ... )`` group —
+    is skipped, and so are ``!=``, ``not in (...)`` and the other operators. A JQL that names
+    neither field yields two empty lists."""
+    found = {"project": [], "issuetype": []}
+    for match in _JQL_CLAUSE_RE.finditer(_blank_negated_groups(jql or "")):
+        negated, keyword, members = match.group(1), match.group(2).lower(), match.group(6)
+        if negated:
+            continue
+        keyword = _JQL_KEYWORD_ALIASES.get(keyword, keyword)
+        if members is None:
+            found[keyword].append(next(g for g in match.group(3, 4, 5) if g is not None))
+        else:
+            for member in _JQL_MEMBER_RE.finditer(members):
+                found[keyword].append(next(g for g in member.groups() if g is not None))
+    return found
+
+
+def _jql_value_is_comparable(keyword, value):
+    """Whether a ``keyword = value`` clause can be compared with the binding offline: a purely
+    numeric value is a Jira id (either field), and a ``project`` value that is not key-shaped
+    is a project NAME; neither has a counterpart in the binding, so both are left to Jira."""
+    if value.isdigit():
+        return False
+    if keyword == "project" and not _JQL_PROJECT_KEY_RE.match(value.upper()):
+        return False
+    return True
+
+
+def jql_binding_conflict(jql, binding, type_name):
+    """The first conflict between the JQL's positive ``project`` / ``issuetype`` clauses
+    (``jql_binding_clauses``: ``= X`` and every member of ``in (X, Y)``; negated clauses are
+    not read) and ``type_name``'s effective binding, as the stderr line ``ERROR: --jql names
+    project X but the <t> binding is <P>`` (same shape for ``issuetype``, which a ``type``
+    clause is reported as), or ``None`` when every named value matches the binding (compared
+    case-insensitively, as Jira compares them) or the JQL names neither field. A value the
+    binding has no counterpart for — a numeric Jira id, or a project given by NAME rather than
+    key — is skipped (``_jql_value_is_comparable``): Jira resolves it, the check neither accepts
+    nor refuses it.
+    """
+    clauses = jql_binding_clauses(jql)
+    for keyword, field in (("project", "project"), ("issuetype", "issue_type")):
+        expected = binding.get(field)
+        for value in clauses[keyword]:
+            if not _jql_value_is_comparable(keyword, value):
+                continue
+            if expected is None or value.casefold() != str(expected).casefold():
+                return (
+                    f"ERROR: --jql names {keyword} {value} but the {type_name} binding is "
+                    f"{expected}"
+                )
+    return None
 
 
 def normalize_for_hash(text):
@@ -355,6 +488,20 @@ def cmd_fetch(args):
 
     if not args.jql:
         print("Error: JQL query required (or use --reprocess)", file=sys.stderr)
+        sys.exit(1)
+
+    # PR-3c: the JQL's own positive `project` / `issuetype` clauses (`= X`, `in (X, Y)`) must
+    # agree with the resolved type's EFFECTIVE binding (design §3.2.1) — decided here, before
+    # any snapshot is read and before anything is fetched or written; a JQL that names neither
+    # is not checked. bootstrap_snapshot.main runs the same check over the same positional.
+    try:
+        resolution = type_registry.resolve(_TYPES, explicit_type=args.type, env=os.environ)
+    except type_registry.RegistryError as exc:
+        print(f"Error: {exc.args[0] if exc.args else exc}", file=sys.stderr)
+        sys.exit(1)
+    conflict = jql_binding_conflict(args.jql, resolution.binding, resolution.type_name)
+    if conflict is not None:
+        print(conflict, file=sys.stderr)
         sys.exit(1)
 
     server, user, token = require_env()

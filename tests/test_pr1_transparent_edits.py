@@ -580,6 +580,8 @@ ISSUE = {
         "status": {"name": "New"},
         # Present in the response from now on; must leave every artifact untouched.
         "issuetype": {"name": "Feature Request", "id": "10700"},
+        # PR-3c (D9): the project witness of the post-fetch verification — request-only too.
+        "project": {"key": "RHAIRFE", "id": "10001", "name": "RHAI RFEs"},
     },
 }
 
@@ -628,9 +630,11 @@ GOLDEN_COMMENTS = (
 ).encode("utf-8")
 
 DEFAULT_FIELDS = ["summary", "description", "priority", "labels", "status", "issuetype"]
-# The explicit list the initiative fetch agent passes
-# (.claude/skills/initiative-review/prompts/fetch-agent.md:10) — untouched by PR-1.
-INITIATIVE_AGENT_FIELDS = "summary,description,priority,labels,status"
+# The explicit --fields list of the JSON mode, as the initiative fetch agent passed it before
+# D10 (.claude/skills/initiative-review/prompts/fetch-agent.md:10 on main c1df503; since PR-3c
+# the agent runs `--fetch-all artifacts --type initiative` and no skill issues this form). The
+# pin stays: --fields is a public mode and PR-1 left it untouched.
+FIELDS_MODE_FIELDS = "summary,description,priority,labels,status"
 
 
 @pytest.fixture
@@ -659,7 +663,9 @@ class TestFetchIssueIssuetype:
         with redirect_stdout(io.StringIO()):
             rc = fetch_issue._fetch_all("RHAIRFE-1595", str(artifacts), "http://x", "u", "t")
         assert rc == 0
-        assert fake_jira["fields"] == DEFAULT_FIELDS
+        # PR-3c (D9) widens the --fetch-all request by the project witness; the JSON modes
+        # below keep DEFAULT_FIELDS.
+        assert fake_jira["fields"] == DEFAULT_FIELDS + ["project"]
         task = (artifacts / "rfe-tasks" / "RHAIRFE-1595.md").read_bytes()
         assert task == GOLDEN_TASK
         # issuetype is requested only; the artifact differs from the c1df503 bytes by the
@@ -689,18 +695,20 @@ class TestFetchIssueIssuetype:
         assert out["fields"]["issuetype"] == {"name": "Feature Request", "id": "10700"}
 
     def test_explicit_fields_output_unchanged(self, monkeypatch, fake_jira):
-        """The initiative fetch agent's exact invocation still emits exactly its 5 fields."""
+        """An explicit --fields list (the pre-D10 initiative fetch agent's exact invocation; no
+        skill issues it since PR-3c) still emits exactly its 5 fields — request-only widening
+        touches the default list alone."""
         monkeypatch.setattr(
             sys,
             "argv",
-            ["fetch_issue.py", "RHAIRFE-1595", "--fields", INITIATIVE_AGENT_FIELDS, "--markdown"],
+            ["fetch_issue.py", "RHAIRFE-1595", "--fields", FIELDS_MODE_FIELDS, "--markdown"],
         )
         buf = io.StringIO()
         with redirect_stdout(buf):
             fetch_issue.main()
-        assert fake_jira["fields"] == INITIATIVE_AGENT_FIELDS.split(",")
+        assert fake_jira["fields"] == FIELDS_MODE_FIELDS.split(",")
         out = json.loads(buf.getvalue())
-        assert list(out["fields"]) == INITIATIVE_AGENT_FIELDS.split(",")
+        assert list(out["fields"]) == FIELDS_MODE_FIELDS.split(",")
         assert "issuetype" not in out["fields"]
         assert out["fields"]["description"] == DESC_MD.rstrip("\n")
 
