@@ -137,23 +137,35 @@ def check_id(phase, rfe_id):
             return "pending"
         return "completed"
     if base == "review":
+        # A half-written review is "pending", exactly as the create phase treats its
+        # half-written task file: the review agent writes the body first and sets the
+        # frontmatter in a later tool call, so for a moment the file exists with no (or an
+        # unparseable, or a score-less) frontmatter block. Classifying that moment "error"
+        # released the barrier on a file the agent was still writing: post_verify stubbed
+        # the unfinished review as review_failed and the item took a spurious ERROR_COLLECT
+        # retry batch while the real review landed underneath (seen on RHAIRFE-3333 in three
+        # stage dry runs and RHAIRFE-3080 in production, 2026-09-15). 7f3cc47 (CI #122/#128)
+        # had chosen "error" so a review agent that never writes frontmatter could not hang
+        # the barrier forever; the wave stall guard (PIPELINE_WAVE_STALL_SECS, docs/
+        # wave-stall-guard.md) now bounds that case, so only an explicit error field is an
+        # error here.
         try:
             data, _ = read_frontmatter(path)
         except Exception:
-            return "error"
-        if not data:
-            return "error"
-        if data.get("score") is None:
+            return "pending"
+        if not data or data.get("score") is None:
             return "pending"
         if data.get("error"):
             return "error"
     if base == "revise":
+        # Same rule: the revise agent rewrites an existing review; a moment without a
+        # readable frontmatter block is not-yet-good, not failed (bounded by the stall guard).
         try:
             data, _ = read_frontmatter(path)
         except Exception:
-            return "error"
+            return "pending"
         if not data:
-            return "error"
+            return "pending"
         if data.get("auto_revised"):
             return "completed"
         if data.get("recommendation") == "split":

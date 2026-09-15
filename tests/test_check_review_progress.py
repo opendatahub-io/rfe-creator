@@ -70,13 +70,32 @@ class TestCheckId:
             assert check_id("review", "RHAIRFE-1") == "error"
 
     def test_review_phase_unparseable(self, tmp_path):
-        """Review phase: unparseable frontmatter → error."""
+        """Review phase: unparseable frontmatter → pending (a write in flight; the stall
+        guard bounds an agent that never repairs it — reverses 7f3cc47's "error")."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n: bad yaml [[\n---\nBody\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"review": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
+            assert check_id("review", "RHAIRFE-1") == "pending"
+
+    def test_review_written_body_first_is_pending_until_the_frontmatter_lands(self, tmp_path):
+        """The review agent's real write sequence: body via Write, then frontmatter.py set.
+        The body-only moment must not release the barrier (it used to read as "error", which
+        stubbed the unfinished review and sent the item through a spurious retry batch)."""
+        f = tmp_path / "RHAIRFE-1-review.md"
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"review": lambda id: str(tmp_path / f"{id}-review.md")},
+        ):
+            f.write_text("## Assessor Feedback\n\nTITLE: x\n")  # body only, no block yet
+            assert check_id("review", "RHAIRFE-1") == "pending"
+            f.write_text("---\nrfe_id: RHAIRFE-1\n---\n## Assessor Feedback\n")  # block, no score
+            assert check_id("review", "RHAIRFE-1") == "pending"
+            f.write_text("---\nrfe_id: RHAIRFE-1\nscore: 8\n---\n## Assessor Feedback\n")
+            assert check_id("review", "RHAIRFE-1") == "completed"
+            f.write_text("---\nrfe_id: RHAIRFE-1\nscore: 0\nerror: review_failed\n---\nx\n")
             assert check_id("review", "RHAIRFE-1") == "error"
 
     def test_revise_phase_auto_revised_true(self, tmp_path):
@@ -110,17 +129,20 @@ class TestCheckId:
             assert check_id("revise", "RHAIRFE-1") == "completed"
 
     def test_revise_phase_bad_frontmatter(self, tmp_path):
-        """Revise phase: unparseable frontmatter → error."""
+        """Revise phase: unparseable frontmatter → pending (a rewrite in flight; the stall
+        guard bounds a broken agent — was "error")."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n: bad [[\n---\nBody\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"revise": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("revise", "RHAIRFE-1") == "error"
+            assert check_id("revise", "RHAIRFE-1") == "pending"
 
     def test_review_phase_missing_closing_delimiter(self, tmp_path):
-        """Review phase: missing closing --- → error (CI #128 regression)."""
+        """Review phase: missing closing --- → pending. The closing delimiter is among the
+        last bytes the agent writes; CI #128 made this "error" to avoid a hang the stall
+        guard now bounds."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text(
             "---\nscore: 7\npass: true\nrecommendation: submit\n"
@@ -130,27 +152,29 @@ class TestCheckId:
             "check_review_progress.PHASE_CHECKS",
             {"review": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("review", "RHAIRFE-1") == "error"
+            assert check_id("review", "RHAIRFE-1") == "pending"
 
     def test_review_phase_empty_frontmatter(self, tmp_path):
-        """Review phase: empty --- / --- → error (CI #122 regression)."""
+        """Review phase: empty --- / --- → pending. CI #122 made this "error" so a broken
+        agent could not hang the barrier; the wave stall guard bounds that now, and "pending"
+        keeps the barrier from releasing on a file that is still being written."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n---\nReview body with empty frontmatter.\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"review": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("review", "RHAIRFE-1") == "error"
+            assert check_id("review", "RHAIRFE-1") == "pending"
 
     def test_revise_phase_empty_frontmatter(self, tmp_path):
-        """Revise phase: empty frontmatter → error."""
+        """Revise phase: empty frontmatter → pending (same rule as review)."""
         f = tmp_path / "RHAIRFE-1-review.md"
         f.write_text("---\n---\nBody.\n")
         with patch.dict(
             "check_review_progress.PHASE_CHECKS",
             {"revise": lambda id: str(tmp_path / f"{id}-review.md")},
         ):
-            assert check_id("revise", "RHAIRFE-1") == "error"
+            assert check_id("revise", "RHAIRFE-1") == "pending"
 
 
 class TestCreatePhase:

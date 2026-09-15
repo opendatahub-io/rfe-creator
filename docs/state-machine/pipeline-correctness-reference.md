@@ -915,18 +915,24 @@ checks for file existence, review checks for file existence AND `score` field in
 frontmatter, revise checks for `auto_revised` field. Each phase has different
 completion semantics — important for anyone modifying the polling logic.
 
-**Known bug: `score=0` treated as pending.** The review-phase check uses
-`if not data.get("score")` (line 34), which is falsy for `score=0`. A review
-that legitimately scores 0 will never be detected as complete, causing the
-polling loop to hang until timeout.
-
 **Three-valued result model.** The script returns `completed`, `pending`, or
 `error` per ID. The output format is `COMPLETED=N/M, PENDING=N, ERRORS=N,
 NEXT_POLL=N`. Error IDs are neither completed nor pending — they form a third
 bucket. Polling terminates when `pending == 0`, so errors cause termination (not
-hang). The review-phase error check (`data.get("error")` at line 36) is gated
-on score being truthy — if score is falsy but error is set, the ID stays
-`pending` rather than being detected as `error`.
+hang). Review slot: `completed` once the frontmatter carries a `score`
+(`score: 0` counts — the test is `is None`), `error` only when a scored review
+also carries an `error` field, and `pending` otherwise — including a file with
+no readable or an empty frontmatter block. Revise slot: `completed` when the
+review carries `auto_revised: true` or `recommendation: split`, `pending`
+otherwise (it reads neither `score` nor `error`; a revise agent's failure
+surfaces through the review it leaves behind, not through this slot). The
+`pending` rule for an unreadable block exists because the review agent writes
+the body first and sets the frontmatter in a later tool call; classifying that
+moment `error` (as 7f3cc47 did after CI #122/#128, to keep a broken agent from
+hanging the barrier) released the barrier on a file still being written and
+sent the item through a spurious ERROR_COLLECT retry batch. An agent that never
+writes its frontmatter is now bounded by the wave stall guard
+(`docs/wave-stall-guard.md`) instead.
 
 **Known bug: revise polling ignores non-revised IDs.** The revise-phase check
 returns "completed" only when `auto_revised=true`. If the revise agent runs but
