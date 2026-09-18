@@ -320,6 +320,27 @@ class TestAutoRevisedLabel:
         assert rc == 0
         assert "rfe-creator-auto-revised" in stdout
 
+    def test_saved_review_state_is_reapplied_before_submit_reads(self, art_dir):
+        """AISDLC-33: a review agent that rewrote its review after the pipeline's last
+        reconcile lost auto_revised; the kept state file is re-applied at submit start-up,
+        so the label is derived from the restored flag, and the file is removed."""
+        _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review.md",
+            REVIEW_FM.format(rfe_id="RFE-001", auto_revised="false"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RFE-001-review-state.json",
+            '{"before_score": 6, "before_scores": {"what": 2, "why": 0, "open_to_how": 2,'
+            ' "not_a_task": 2, "right_sized": 0}, "auto_revised": true, "revision_history": ""}',
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Re-applied saved review state for 1 item(s): RFE-001" in stdout
+        assert "rfe-creator-auto-revised" in stdout
+        assert not os.path.exists(f"{art_dir}/rfe-reviews/RFE-001-review-state.json")
+
     def test_no_label_when_not_revised(self, art_dir):
         """auto_revised=false → no auto-revised label."""
         _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))
