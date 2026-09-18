@@ -236,6 +236,31 @@ def test_keep_state_leaves_the_state_file_for_the_final_reconcile(workdir):
     assert rr.main(["--type", "rfe", "--keep-state", item_id]) == 0
 
 
+def test_all_reconciles_every_id_with_a_state_file_under_an_artifacts_root(tmp_path, capsys):
+    root = tmp_path / "elsewhere"
+    reviews = root / "rfe-reviews"
+    reviews.mkdir(parents=True)
+    passing = {k: 2 for k in RFE_ZERO_WHY}
+    late = {"pass": True, "recommendation": "submit", "auto_revised": False}
+    for rid in ("RHAIRFE-1", "RHAIRFE-2"):
+        (reviews / f"{rid}-review.md").write_text(_review("rfe_id", rid, passing, **late))
+    (reviews / "RHAIRFE-1-review-state.json").write_text(
+        json.dumps({"before_score": 6, "before_scores": RFE_ZERO_WHY, "auto_revised": True})
+    )
+    assert rr.ids_with_state("rfe", str(root)) == ["RHAIRFE-1"]
+    assert rr.main(["--type", "rfe", "--all", "--artifacts-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "RESTORED=RHAIRFE-1\n" in out
+    assert read_frontmatter(str(reviews / "RHAIRFE-1-review.md"))[0]["auto_revised"] is True
+    assert read_frontmatter(str(reviews / "RHAIRFE-2-review.md"))[0]["auto_revised"] is False
+    assert not (reviews / "RHAIRFE-1-review-state.json").exists()
+    prs.set_artifacts_root(None)
+    with pytest.raises(SystemExit):
+        rr.main(["--type", "rfe"])  # neither ids nor --all
+    with pytest.raises(SystemExit):
+        rr.main(["--type", "rfe", "--all", "RHAIRFE-1"])  # both
+
+
 def test_cli(workdir, capsys):
     type_name, item_id, id_field, _ = RFE
     _write(prs.review_path(item_id), _review(id_field, item_id, RFE_ZERO_WHY))

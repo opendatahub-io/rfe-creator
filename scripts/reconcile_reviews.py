@@ -20,6 +20,12 @@ Two deterministic repairs that close the gaps the reassess loop leaves open:
 
 Usage:
     python3 scripts/reconcile_reviews.py --type <t> [--cycles N] [--keep-state] <ID> [<ID> ...]
+    python3 scripts/reconcile_reviews.py --type <t> --all [--artifacts-dir DIR]
+
+``--all`` reconciles every id that has a state file (submit.py runs this form
+at start-up: it is production's last reader of the reviews and runs after the
+agent process is torn down, so nothing can write after it). ``--artifacts-dir``
+resolves the review and state paths under that root instead of the workspace.
 
 ``--keep-state`` leaves the state files in place after re-applying them: the
 COLLECT and SPLIT_CORRECTION_CHECK reconciles use it, because a review agent can
@@ -78,9 +84,27 @@ def failure_reason(data, desc, cycles):
     return f"Failing and not auto-revised: {what}."
 
 
-def reconcile(ids, type_name, cycles=0, keep_state=False):
+def reviews_dir_for(type_name, artifacts_dir=None):
     desc = _TYPES.get(type_name)
-    reviews_dir = desc.dirs()["reviews"]
+    if artifacts_dir:
+        return os.path.join(artifacts_dir, desc.dirs(form="bare")["reviews"])
+    return desc.dirs()["reviews"]
+
+
+def ids_with_state(type_name, artifacts_dir=None):
+    """Ids that have a ``{ID}-review-state.json`` under the type's reviews directory."""
+    suffix = "-review-state.json"
+    try:
+        names = sorted(os.listdir(reviews_dir_for(type_name, artifacts_dir)))
+    except OSError:
+        return []
+    return [n[: -len(suffix)] for n in names if n.endswith(suffix)]
+
+
+def reconcile(ids, type_name, cycles=0, keep_state=False, artifacts_dir=None):
+    desc = _TYPES.get(type_name)
+    prs.set_artifacts_root(artifacts_dir)
+    reviews_dir = reviews_dir_for(type_name, artifacts_dir)
     schema = f"{type_name}-review"
     restored, flagged, errored = [], [], []
     for item_id in ids:
@@ -124,9 +148,20 @@ def main(argv=None):
         action="store_true",
         help="Leave the state files for a later reconcile (COLLECT); REPORT runs without it",
     )
-    parser.add_argument("ids", nargs="+", metavar="ID")
+    parser.add_argument(
+        "--all", action="store_true", help="Reconcile every id that has a state file"
+    )
+    parser.add_argument(
+        "--artifacts-dir", help="Resolve review and state paths under this root, not the cwd"
+    )
+    parser.add_argument("ids", nargs="*", metavar="ID")
     args = parser.parse_args(argv)
-    reconcile(args.ids, args.type, args.cycles, keep_state=args.keep_state)
+    if bool(args.all) == bool(args.ids):
+        parser.error("pass ids or --all, not both and not neither")
+    ids = ids_with_state(args.type, args.artifacts_dir) if args.all else args.ids
+    reconcile(
+        ids, args.type, args.cycles, keep_state=args.keep_state, artifacts_dir=args.artifacts_dir
+    )
     return 0
 
 

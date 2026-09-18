@@ -686,19 +686,28 @@ def _enter_phase(state, next_phase):
 
 def _final_reconcile(state, type_flag):
     """The run-level reconcile before REPORT (AISDLC-33): re-apply every kept review state
-    over all ids of the run and remove the state files. A review agent can keep writing for
-    minutes after its wave — past COLLECT — and the run report and submit read the reviews
-    only from here on."""
+    over all ids of the run. A review agent can keep writing for minutes after its wave —
+    past COLLECT — so the state files are kept once more: submit.py, production's last
+    reader, reconciles again at start-up (after the agent process is torn down) and removes
+    them. An id the reconcile could not repair gets the registry error stub, not a merged
+    error field: the run report treats a review with a generic ``error`` as readable and
+    would copy its stale scores."""
     all_ids = _read_ids("tmp/pipeline-all-ids.txt")
     if not all_ids:
         return ""
     out = _run_script(
-        f"python3 scripts/reconcile_reviews.py {type_flag}"
+        f"python3 scripts/reconcile_reviews.py {type_flag} --keep-state"
         f" --cycles {state.get('reassess_cycle', 0)} {' '.join(all_ids)}"
     )
     restored = _parse_line_ids(out, "RESTORED")
     flagged = _parse_line_ids(out, "FLAGGED")
     errored = _parse_line_ids(out, "RECONCILE_ERRORS")
+    if errored:
+        import verify_phase
+
+        verify_phase.write_error_stubs(
+            "review", errored, state.get("type", "rfe"), error="reconcile_failed"
+        )
     if restored or flagged or errored:
         return (
             f"REPORT reconcile: restored={len(restored)} flagged={len(flagged)}"

@@ -696,7 +696,8 @@ class TestBatchDone:
         next_phase, summary = ps.advance(state)
         assert next_phase == "REPORT"
         assert calls[-1] == (
-            "python3 scripts/reconcile_reviews.py --type rfe --cycles 1 RHAIRFE-1 RHAIRFE-2"
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 1"
+            " RHAIRFE-1 RHAIRFE-2"
         )
         assert "REPORT reconcile: restored=1 flagged=0 errors=0\nBATCH_DONE → REPORT" in summary
         calls.clear()
@@ -715,7 +716,35 @@ class TestBatchDone:
         state = make_state(phase="ERROR_COLLECT", batch=1, total_batches=1, retry_cycle=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "REPORT"
-        assert calls == ["python3 scripts/reconcile_reviews.py --type rfe --cycles 0 RHAIRFE-1"]
+        assert calls == [
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 0 RHAIRFE-1"
+        ]
+
+    def test_final_reconcile_stubs_the_ids_it_could_not_repair(self, tmp_dir, monkeypatch):
+        """A review with a merged generic error is still 'readable' to the run report, which
+        would copy its stale scores: the errored ids get the registry error stub instead."""
+        import verify_phase
+
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        stubbed = []
+        monkeypatch.setattr(
+            verify_phase,
+            "write_error_stubs",
+            lambda phase, ids, ptype, **kw: stubbed.append((phase, list(ids), ptype, kw)) or [],
+        )
+        monkeypatch.setattr(
+            ps,
+            "_run_script",
+            lambda cmd: (
+                "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS=RHAIRFE-2"
+                if "reconcile_reviews" in cmd
+                else ("TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=")
+            ),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert stubbed == [("review", ["RHAIRFE-2"], "rfe", {"error": "reconcile_failed"})]
+        assert "REPORT reconcile: restored=0 flagged=0 errors=1" in summary
 
     def test_no_retry_after_max(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
