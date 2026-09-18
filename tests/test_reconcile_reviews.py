@@ -218,6 +218,24 @@ def test_per_item_failures_are_reported_on_one_errors_line(workdir, capsys, monk
     assert out.count("RECONCILE_ERRORS=") == 1 and "RECONCILE_ERRORS=RHAIRFE-2,../evil\n" in out
 
 
+def test_keep_state_leaves_the_state_file_for_the_final_reconcile(workdir):
+    type_name, item_id, id_field, _ = RFE
+    passing = {k: 2 for k in RFE_ZERO_WHY}
+    late = {"pass": True, "recommendation": "submit", "auto_revised": False}
+    with open(prs.state_path(item_id), "w") as f:
+        json.dump({"before_score": 6, "before_scores": RFE_ZERO_WHY, "auto_revised": True}, f)
+    _write(prs.review_path(item_id), _review(id_field, item_id, passing, **late))
+    assert rr.reconcile([item_id], type_name, cycles=1, keep_state=True) == ([item_id], [])
+    assert os.path.exists(prs.state_path(item_id))
+    assert _fm(item_id)["auto_revised"] is True
+    # The late write lands again; the final reconcile (no flag) repairs and removes.
+    _write(prs.review_path(item_id), _review(id_field, item_id, passing, **late))
+    assert rr.reconcile([item_id], type_name, cycles=1) == ([item_id], [])
+    assert _fm(item_id)["auto_revised"] is True and _fm(item_id)["before_score"] == 6
+    assert not os.path.exists(prs.state_path(item_id))
+    assert rr.main(["--type", "rfe", "--keep-state", item_id]) == 0
+
+
 def test_cli(workdir, capsys):
     type_name, item_id, id_field, _ = RFE
     _write(prs.review_path(item_id), _review(id_field, item_id, RFE_ZERO_WHY))

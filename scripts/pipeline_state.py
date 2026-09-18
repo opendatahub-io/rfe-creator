@@ -684,6 +684,29 @@ def _enter_phase(state, next_phase):
         _write_phase_entry(next_phase)
 
 
+def _final_reconcile(state, type_flag):
+    """The run-level reconcile before REPORT (AISDLC-33): re-apply every kept review state
+    over all ids of the run and remove the state files. A review agent can keep writing for
+    minutes after its wave — past COLLECT — and the run report and submit read the reviews
+    only from here on."""
+    all_ids = _read_ids("tmp/pipeline-all-ids.txt")
+    if not all_ids:
+        return ""
+    out = _run_script(
+        f"python3 scripts/reconcile_reviews.py {type_flag}"
+        f" --cycles {state.get('reassess_cycle', 0)} {' '.join(all_ids)}"
+    )
+    restored = _parse_line_ids(out, "RESTORED")
+    flagged = _parse_line_ids(out, "FLAGGED")
+    errored = _parse_line_ids(out, "RECONCILE_ERRORS")
+    if restored or flagged or errored:
+        return (
+            f"REPORT reconcile: restored={len(restored)} flagged={len(flagged)}"
+            f" errors={len(errored)}\n"
+        )
+    return ""
+
+
 def _sweep_review_state(ids):
     """Remove leftover ``{ID}-review-state.json`` files before a batch starts.
 
@@ -890,7 +913,7 @@ def advance(state, dry_run=False):
         reconcile = ""
         if active_ids and not dry_run:
             out = _run_script(
-                f"python3 scripts/reconcile_reviews.py {type_flag}"
+                f"python3 scripts/reconcile_reviews.py {type_flag} --keep-state"
                 f" --cycles {state.get('reassess_cycle', 0)} {' '.join(active_ids)}"
             )
             restored = _parse_line_ids(out, "RESTORED")
@@ -954,7 +977,8 @@ def advance(state, dry_run=False):
             # The children's COLLECT equivalent (AISDLC-33): re-apply kept review state, flag
             # what still fails, before their sizes and recommendations are read.
             _run_script(
-                f"python3 scripts/reconcile_reviews.py {type_flag} --cycles 1 {' '.join(child_ids)}"
+                f"python3 scripts/reconcile_reviews.py {type_flag} --keep-state --cycles 1"
+                f" {' '.join(child_ids)}"
             )
         if child_ids:
             out = _run_script(
@@ -1009,7 +1033,8 @@ def advance(state, dry_run=False):
                         "ERROR_COLLECT",
                         f"{summary}\nBATCH_DONE → ERROR_COLLECT: errors={len(error_ids)}",
                     )
-        return "REPORT", f"{summary}\nBATCH_DONE → REPORT"
+        final = _final_reconcile(state, type_flag) if not dry_run else ""
+        return "REPORT", f"{summary}\n{final}BATCH_DONE → REPORT"
 
     # --- ERROR_COLLECT → BATCH_START (or REPORT when nothing is retryable) ---
     if phase == "ERROR_COLLECT":
@@ -1022,7 +1047,11 @@ def advance(state, dry_run=False):
             # with no IDs dead-ends the machine at a batch file that does not
             # exist, and the run's report never gets generated. Observed in
             # production 2026-08-24 (RHAIFIRST-581).
-            return ("REPORT", "ERROR_COLLECT: no retryable errors\nERROR_COLLECT → REPORT")
+            final = _final_reconcile(state, type_flag) if not dry_run else ""
+            return (
+                "REPORT",
+                f"ERROR_COLLECT: no retryable errors\n{final}ERROR_COLLECT → REPORT",
+            )
         batch = state.get("total_batches", 0)
         return (
             "BATCH_START",
