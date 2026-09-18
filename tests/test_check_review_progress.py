@@ -1405,7 +1405,7 @@ class TestReviseBaseline:
         self.review = f"artifacts/rfe-reviews/{self.RID}-review.md"
         with open(self.task, "w") as f:
             f.write("---\nrfe_id: RHAIRFE-1\n---\nbody\n")
-        self._write_review(auto_revised=True)
+        self._write_review(auto_revised=True)  # as REASSESS_RESTORE leaves it
         os.utime(self.review, (1_700_000_000, 1_700_000_000))
         self._baseline({self.RID: crp.revise_baseline_entry("rfe", self.RID)})
 
@@ -1422,10 +1422,12 @@ class TestReviseBaseline:
     def test_untouched_item_is_pending_despite_the_restored_flag(self):
         assert check_id("revise", self.RID) == "pending"
 
-    def test_task_change_completes(self):
+    def test_task_change_alone_keeps_pending(self):
+        # The revise agent edits the task first and writes the review last (Step 3); with the
+        # flag already true, a task edit must not release the slot mid-revision.
         with open(self.task, "a") as f:
             f.write("revised\n")
-        assert check_id("revise", self.RID) == "completed"
+        assert check_id("revise", self.RID) == "pending"
 
     def test_review_write_completes_even_with_identical_bytes(self):
         # A revise agent that could change nothing still re-sets the frontmatter; the write
@@ -1447,6 +1449,7 @@ class TestReviseBaseline:
             {},
             {"RHAIRFE-2": {"task": "x", "review_mtime_ns": 1}},
             {"RHAIRFE-1": {"task": "x", "review": "old shape"}},
+            {"RHAIRFE-1": {"review_mtime_ns": 1}},  # a write already moved it
             {"RHAIRFE-1": "garbage"},
         ],
     )

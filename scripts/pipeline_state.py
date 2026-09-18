@@ -686,11 +686,11 @@ def _enter_phase(state, next_phase):
 
 
 def _write_revise_baseline(ids, pipeline_type):
-    """Record each revise id's task and review digests (AISDLC-45, check_review_progress).
+    """Record each revise id's review write time (AISDLC-45, check_review_progress).
 
     Written every time tmp/pipeline-revise-ids.txt is written, so the revise slot of the wave
-    about to launch is pending until the revise agent has changed the task or the review —
-    the re-raised auto_revised flag no longer counts as this wave's revision.
+    about to launch is pending until the revise agent has written the review — the re-raised
+    auto_revised flag no longer counts as this wave's revision.
     """
     from check_review_progress import REVISE_BASELINE_FILE, revise_baseline_entry
 
@@ -842,7 +842,12 @@ def advance(state, dry_run=False):
         if not dry_run:
             cycle = state.get("reassess_cycle", 0)
             if cycle >= 2:
-                # Last cycle: skip revise to avoid unreviewed changes
+                # Last cycle: no further revision (it would go unreviewed), but the filter's
+                # regression rule must still run — a second revision that scored below
+                # before_score becomes autorevise_reject instead of shipping as revise.
+                reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
+                if reassess_ids:
+                    _run_script(f"python3 scripts/filter_for_revision.py {' '.join(reassess_ids)}")
                 _write_ids("tmp/pipeline-revise-ids.txt", [])
                 _write_revise_baseline([], pipeline_type)
             else:

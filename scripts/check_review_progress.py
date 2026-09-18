@@ -15,7 +15,9 @@ accepting it skipped the launch (pre-filter) or released the barrier before the
 wave's own agent had finished, and that agent's later write then clobbered the
 restored review (auto_revised and before_score lost). Dimension files
 (feasibility, alignment) are reused across cycles and are never subject to the
-rule; the revise slot keys on ``auto_revised`` and is left alone as well.
+rule; the revise slot is not subject to the time rule either: it completes on
+the revise baseline (``REVISE_BASELINE_FILE``, AISDLC-45) and only then on
+``auto_revised``.
 
 ``PHASE_CHECKS`` (poll phase -> expected output path) is a projection of
 ``types/<t>/type.yaml``: ``pipeline.poll_prefix`` + phase base -> ``dirs`` x the
@@ -25,7 +27,6 @@ phase tables from the same descriptors.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -72,32 +73,24 @@ ENGINE_PHASES = frozenset({"fetch", "create", "assess", "review", "revise", "spl
 # time is a stale write from an earlier cycle, never this wave's result. "revise" is not
 # here: its slot keys on auto_revised in a review the revise agent only edits, and the
 # review REASSESS_RESTORE writes just before REASSESS_REVISE is entered sits inside the clock
-# slack, so a time rule would be nondeterministic there (tracked separately).
+# slack, so a time rule would be nondeterministic there (the revise baseline below gates that
+# slot instead).
 FRESHNESS_BASES = frozenset({"assess", "review"})
 # Clock slack between the launch timestamp (time.time() in pipeline_state) and file mtimes.
 FRESHNESS_SLACK_SECS = 2
 # Epoch of the current wave's launch; None disables the freshness rule (legacy callers).
 WAVE_LAUNCHED_AT = None
 
-# Revise baseline (AISDLC-45): {id: {"task": sha256, "review_mtime_ns": int}} taken by
-# pipeline_state.advance() when it writes tmp/pipeline-revise-ids.txt. The revise slot used
-# to complete on auto_revised alone, but REASSESS_RESTORE re-raises that flag from the
-# previous cycle before the revise wave is even planned, so the second revision was never
-# launched. While an id's task is byte-identical to its baseline and its review has not been
-# written since, no revise agent has touched it and the slot stays pending; once either
-# moved, the auto_revised rule applies. The review side is the write time, not a digest: a
-# revise agent that can change nothing still re-sets the frontmatter, possibly to identical
-# bytes, and that write must complete the slot rather than run into the stall guard.
+# Revise baseline (AISDLC-45): {id: {"review_mtime_ns": int}} taken by pipeline_state.advance()
+# when it writes tmp/pipeline-revise-ids.txt. The revise slot used to complete on auto_revised
+# alone, but REASSESS_RESTORE re-raises that flag from the previous cycle before the revise
+# wave is even planned, so the second revision was never launched. The slot now stays pending
+# until the review has been written since the baseline — the revise agent's frontmatter step,
+# its last action — and only then applies the auto_revised rule. The review write is the one
+# signal: a task edit alone would release the slot mid-revision (the flag is already true in
+# REASSESS_REVISE), and a byte digest would miss an agent that can change nothing and re-sets
+# the frontmatter to identical bytes, sending it into the stall guard instead.
 REVISE_BASELINE_FILE = "tmp/pipeline-revise-baseline.json"
-
-
-def file_digest(path):
-    """sha256 of a file's bytes, or None when it cannot be read."""
-    try:
-        with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return None
 
 
 def read_revise_baseline():
@@ -118,13 +111,9 @@ def _mtime_ns(path):
 
 
 def revise_baseline_entry(type_name, item_id):
-    """The baseline an id would be recorded with now: the task file's digest and the review
-    file's last write time."""
+    """The baseline an id would be recorded with now: its review file's last write time."""
     dirs = _TYPES.get(type_name).dirs()
-    return {
-        "task": file_digest(f"{dirs['tasks']}/{item_id}.md"),
-        "review_mtime_ns": _mtime_ns(f"{dirs['reviews']}/{item_id}-review.md"),
-    }
+    return {"review_mtime_ns": _mtime_ns(f"{dirs['reviews']}/{item_id}-review.md")}
 
 
 def set_wave_launch(since):
@@ -191,8 +180,9 @@ PHASE_CHECKS, _PHASE_OWNER = _build_phase_table()
 def check_id(phase, rfe_id, since=None):
     """Check one ID. Returns 'completed', 'pending', or 'error'.
 
-    ``since`` (epoch seconds; defaults to WAVE_LAUNCHED_AT) makes an assess, review or
-    revise file older than the wave launch "pending": see the module docstring.
+    ``since`` (epoch seconds; defaults to WAVE_LAUNCHED_AT) makes an assess or review file
+    older than the wave launch "pending"; the revise slot is gated by the revise baseline
+    instead: see the module docstring.
     """
     path = PHASE_CHECKS[phase](rfe_id)
     if not os.path.exists(path):
@@ -250,13 +240,13 @@ def check_id(phase, rfe_id, since=None):
         if data.get("error"):
             return "error"
     if base == "revise":
-        # AISDLC-45: nothing the revise agent does has landed while the task is byte-identical
-        # to the baseline taken when the revise ids were written and the review has not been
-        # written since; the auto_revised flag alone cannot say so (REASSESS_RESTORE re-raises
-        # it). A baseline of another shape (older file, hand-edited) is ignored.
+        # AISDLC-45: the revise agent's last action is a frontmatter write on this review;
+        # until the review has been written since the baseline taken with the revise ids,
+        # nothing it did has landed — the auto_revised flag alone cannot say so
+        # (REASSESS_RESTORE re-raises it). A baseline of another shape is ignored.
         baseline = read_revise_baseline().get(rfe_id)
-        if isinstance(baseline, dict) and type_name and "review_mtime_ns" in baseline:
-            if revise_baseline_entry(type_name, rfe_id) == baseline:
+        if isinstance(baseline, dict) and "review_mtime_ns" in baseline:
+            if _mtime_ns(path) == baseline["review_mtime_ns"]:
                 return "pending"
         # Same rule: the revise agent rewrites an existing review; a moment without a
         # readable frontmatter block is not-yet-good, not failed (bounded by the stall guard).
@@ -382,7 +372,7 @@ def main():
     parser.add_argument(
         "--since",
         type=float,
-        help="Wave launch epoch: assess/review/revise files older than it stay pending",
+        help="Wave launch epoch: assess/review files older than it stay pending",
     )
     parser.add_argument("ids", nargs="*", metavar="ID", help="RFE IDs to check")
     args = parser.parse_args()
