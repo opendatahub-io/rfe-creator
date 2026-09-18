@@ -919,8 +919,10 @@ functional failure.
 
 `check_review_progress.py` uses different completion criteria per phase: assess
 checks for file existence, review checks for file existence AND `score` field in
-frontmatter, revise checks for `auto_revised` field. Each phase has different
-completion semantics — important for anyone modifying the polling logic.
+frontmatter, revise first requires a review write newer than the recorded
+baseline (AISDLC-45) and then checks the `auto_revised` field. Each phase has
+different completion semantics — important for anyone modifying the polling
+logic.
 
 **Three-valued result model.** The script returns `completed`, `pending`, or
 `error` per ID. The output format is `COMPLETED=N/M, PENDING=N, ERRORS=N,
@@ -929,10 +931,16 @@ bucket. Polling terminates when `pending == 0`, so errors cause termination (not
 hang). Review slot: `completed` once the frontmatter carries a `score`
 (`score: 0` counts — the test is `is None`), `error` only when a scored review
 also carries an `error` field, and `pending` otherwise — including a file with
-no readable or an empty frontmatter block. Revise slot: `completed` when the
-review carries `auto_revised: true` or `recommendation: split`, `pending`
-otherwise (it reads neither `score` nor `error`; a revise agent's failure
-surfaces through the review it leaves behind, not through this slot). The
+no readable or an empty frontmatter block. Revise slot: `pending` while the
+review file's modification time still equals the one recorded for the id in
+`tmp/pipeline-revise-baseline.json` when the revise ids were written (no revise
+agent has written the review yet — `REASSESS_RESTORE` re-raises `auto_revised`
+before the wave is planned, so the flag alone cannot say so); once the review
+has been written since, `completed` when it carries `auto_revised: true` or
+`recommendation: split`, `pending` otherwise (it reads neither `score` nor
+`error`; a revise agent's failure surfaces through the review it leaves behind,
+not through this slot). No baseline entry for the id means the flag rule alone
+(the interactive skills' direct polls). The
 `pending` rule for an unreadable block exists because the review agent writes
 the body first and sets the frontmatter in a later tool call; classifying that
 moment `error` (as 7f3cc47 did after CI #122/#128, to keep a broken agent from
