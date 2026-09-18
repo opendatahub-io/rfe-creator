@@ -1381,3 +1381,83 @@ class TestWaveFreshness:
         )
         assert fresh.returncode == 0 and "COMPLETED=1/1" in fresh.stdout
         assert stale.returncode == 0 and "PENDING=1" in stale.stdout
+
+
+# ── revise baseline (AISDLC-45) ──
+
+
+class TestReviseBaseline:
+    """The revise slot completes on the revise agent's own write, not on an auto_revised flag
+    REASSESS_RESTORE re-raised from the previous cycle."""
+
+    RID = "RHAIRFE-1"
+
+    @pytest.fixture(autouse=True)
+    def _workdir(self, tmp_path, monkeypatch):
+        import check_review_progress as crp
+
+        monkeypatch.chdir(tmp_path)
+        os.makedirs("artifacts/rfe-tasks")
+        os.makedirs("artifacts/rfe-reviews")
+        os.makedirs("tmp")
+        self.crp = crp
+        self.task = f"artifacts/rfe-tasks/{self.RID}.md"
+        self.review = f"artifacts/rfe-reviews/{self.RID}-review.md"
+        with open(self.task, "w") as f:
+            f.write("---\nrfe_id: RHAIRFE-1\n---\nbody\n")
+        self._write_review(auto_revised=True)  # as REASSESS_RESTORE leaves it
+        os.utime(self.review, (1_700_000_000, 1_700_000_000))
+        self._baseline({self.RID: crp.revise_baseline_entry("rfe", self.RID)})
+
+    def _write_review(self, auto_revised, extra=""):
+        with open(self.review, "w") as f:
+            f.write(f"---\nscore: 6\nauto_revised: {str(auto_revised).lower()}\n{extra}---\nBody\n")
+
+    def _baseline(self, mapping):
+        import json
+
+        with open(self.crp.REVISE_BASELINE_FILE, "w") as f:
+            json.dump(mapping, f)
+
+    def test_untouched_item_is_pending_despite_the_restored_flag(self):
+        assert check_id("revise", self.RID) == "pending"
+
+    def test_task_change_alone_keeps_pending(self):
+        # The revise agent edits the task first and writes the review last (Step 3); with the
+        # flag already true, a task edit must not release the slot mid-revision.
+        with open(self.task, "a") as f:
+            f.write("revised\n")
+        assert check_id("revise", self.RID) == "pending"
+
+    def test_review_write_completes_even_with_identical_bytes(self):
+        # A revise agent that could change nothing still re-sets the frontmatter; the write
+        # (not the bytes) is what must release the slot, or it would run into the stall guard.
+        self._write_review(auto_revised=True)
+        os.utime(self.review, (1_700_000_060, 1_700_000_060))
+        assert check_id("revise", self.RID) == "completed"
+
+    def test_legacy_rule_still_applies_after_the_write(self):
+        self._write_review(auto_revised=False)
+        os.utime(self.review, (1_700_000_060, 1_700_000_060))
+        assert check_id("revise", self.RID) == "pending"
+        self._write_review(auto_revised=False, extra="recommendation: split\n")
+        assert check_id("revise", self.RID) == "completed"
+
+    @pytest.mark.parametrize(
+        "mapping",
+        [
+            {},
+            {"RHAIRFE-2": {"task": "x", "review_mtime_ns": 1}},
+            {"RHAIRFE-1": {"task": "x", "review": "old shape"}},
+            {"RHAIRFE-1": {"review_mtime_ns": 1}},  # a write already moved it
+            {"RHAIRFE-1": "garbage"},
+        ],
+    )
+    def test_no_usable_baseline_means_the_legacy_rule(self, mapping):
+        self._baseline(mapping)
+        assert check_id("revise", self.RID) == "completed"
+
+    def test_unreadable_baseline_file_means_the_legacy_rule(self):
+        with open(self.crp.REVISE_BASELINE_FILE, "w") as f:
+            f.write("{not json")
+        assert check_id("revise", self.RID) == "completed"

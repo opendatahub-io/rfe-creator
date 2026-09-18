@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import glob
+import json
 import os
 import re
 import shlex
@@ -684,6 +685,21 @@ def _enter_phase(state, next_phase):
         _write_phase_entry(next_phase)
 
 
+def _write_revise_baseline(ids, pipeline_type):
+    """Record each revise id's review write time (AISDLC-45, check_review_progress).
+
+    Written every time tmp/pipeline-revise-ids.txt is written, so the revise slot of the wave
+    about to launch is pending until the revise agent has written the review — the re-raised
+    auto_revised flag no longer counts as this wave's revision.
+    """
+    from check_review_progress import REVISE_BASELINE_FILE, revise_baseline_entry
+
+    os.makedirs("tmp", exist_ok=True)
+    baseline = {rid: revise_baseline_entry(pipeline_type, rid) for rid in ids}
+    with open(REVISE_BASELINE_FILE, "w") as f:
+        json.dump(baseline, f, indent=2)
+
+
 def _sweep_review_state(ids):
     """Remove leftover ``{ID}-review-state.json`` files before a batch starts.
 
@@ -819,14 +835,21 @@ def advance(state, dry_run=False):
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             if revise_ids:
                 _save_originals(revise_ids, pipeline_type)
+            _write_revise_baseline(revise_ids, pipeline_type)
         return "REVISE", "REVIEW → REVISE"
 
     if phase == "REASSESS_RESTORE":
         if not dry_run:
             cycle = state.get("reassess_cycle", 0)
             if cycle >= 2:
-                # Last cycle: skip revise to avoid unreviewed changes
+                # Last cycle: no further revision (it would go unreviewed), but the filter's
+                # regression rule must still run — a second revision that scored below
+                # before_score becomes autorevise_reject instead of shipping as revise.
+                reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
+                if reassess_ids:
+                    _run_script(f"python3 scripts/filter_for_revision.py {' '.join(reassess_ids)}")
                 _write_ids("tmp/pipeline-revise-ids.txt", [])
+                _write_revise_baseline([], pipeline_type)
             else:
                 reassess_ids = _read_ids("tmp/pipeline-reassess-ids.txt")
                 out = _run_script(
@@ -836,6 +859,9 @@ def advance(state, dry_run=False):
                 _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
                 if revise_ids:
                     _save_originals(revise_ids, pipeline_type)
+                # Taken after REASSESS_RESTORE rewrote the review: the re-raised flag is in
+                # the baseline, so only this wave's revise agent can move the slot.
+                _write_revise_baseline(revise_ids, pipeline_type)
         return "REASSESS_REVISE", "REASSESS_RESTORE → REASSESS_REVISE"
 
     if phase == "SPLIT_REVIEW":
@@ -846,6 +872,7 @@ def advance(state, dry_run=False):
             _write_ids("tmp/pipeline-revise-ids.txt", revise_ids)
             if revise_ids:
                 _save_originals(revise_ids, pipeline_type)
+            _write_revise_baseline(revise_ids, pipeline_type)
         return "SPLIT_REVISE", "SPLIT_REVIEW → SPLIT_REVISE"
 
     # --- Linear sequences ---

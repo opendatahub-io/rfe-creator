@@ -41,6 +41,13 @@ counts as this phase's output:
   its own slot counts), so a file older than the wave's launch cannot release
   the barrier.
 
+A third file, `tmp/pipeline-revise-baseline.json` (AISDLC-45), serves the
+revise slot the same way: written with the revise id list, it holds each id's
+review write time, and the slot stays pending until the revise agent has
+written the review (its frontmatter step, its last action) — the `auto_revised`
+flag alone cannot tell this wave's revision from the one `REASSESS_RESTORE`
+re-raised, and a task edit alone would release the slot mid-revision.
+
 `REASSESS_SAVE` deletes the review and result files before a reassess phase is
 entered, so a file older than either reference can only be a late write by a
 previous cycle's agent. Before the rule, such a file made the pre-filter skip
@@ -49,9 +56,9 @@ the barrier before the wave's own agent had finished, whose later write then
 clobbered the review the orchestrator had just restored (`auto_revised` and
 `before_score` lost, observed twice on 2026-09-17). Dimension files
 (feasibility, alignment) are reused across cycles by design and are exempt;
-the revise slot keys on `auto_revised` and is exempt too. Without a recorded
-entry or launch the legacy rule applies (interactive skills call
-`check_review_progress.py` directly).
+the revise slot is exempt from the time rule too and is gated by the revise
+baseline below instead. Without a recorded entry or launch the legacy rule
+applies (interactive skills call `check_review_progress.py` directly).
 
 The companion repair is the reconcile (`scripts/reconcile_reviews.py`):
 `REASSESS_RESTORE` and `SPLIT_RESTORE` keep each item's `*-review-state.json`
@@ -125,7 +132,7 @@ phase kind:
 | Phase kind | Marker | Downstream |
 |---|---|---|
 | fetch / assess / review-class | The registry error-stub review (`verify_phase.write_error_stubs`, the same shape `validate_types.build_error_stub` checks), with `error: <phase base>_stalled` naming the agent that never finished: the stuck poll phase with the type's `pipeline.poll_prefix` stripped, so `assess_stalled` for `assess` and `initiative-assess` alike (`fetch_stalled`, `assess_stalled`, `feasibility_stalled`, `alignment_stalled`, `review_stalled`). When the stub cannot be merged into a half-written review (a `scores` member the schema does not know), the review's frontmatter is replaced with the stub and one `verify_phase: <id>: ...` stderr line says why. | Retryable: `error_collect.py` cleans the stub and queues the id. |
-| revise | `error: revise_stalled`, `needs_attention: true` on the real review; score and recommendation kept, `auto_revised` untouched (no revision is claimed). `check_id`'s revise row keys on `auto_revised`, so the slot is released by the id leaving the ids file, not by the marker. | Retryable: `error_collect.py`'s revise path restores the task file from its original (undoing a half-finished edit) and deletes the removed-context companion before the retry. `collect_recommendations --reassess` does not reassess it. |
+| revise | `error: revise_stalled`, `needs_attention: true` on the real review; score and recommendation kept, `auto_revised` untouched (no revision is claimed). `check_id`'s revise row holds the slot pending until the review has been written since `tmp/pipeline-revise-baseline.json` was taken, then keys on `auto_revised`; the marker write itself moves the write time, so in `REASSESS_REVISE` (flag already re-raised) the marker completes the slot while in `REVISE` / `SPLIT_REVISE` it stays pending — either way the id is retired by leaving the wave and ids files, which `_escalate_stuck` does right after the marker. | Retryable: `error_collect.py`'s revise path restores the task file from its original (undoing a half-finished edit) and deletes the removed-context companion before the retry. `collect_recommendations --reassess` does not reassess it. |
 | split | `error: split_not_attempted: wave stalled ...` (the non-retryable class `submit.py` records for parents a split pass skipped) and `needs_attention: true` on the real review, plus `<reviews>/<id>-split-status.yaml` with `status: failed`, `action: no-split`, which makes the split slot terminal and routes the parent to `split_collect`'s R8 no-split branch if anything reads it. Nothing is cleaned up: the agent may still be alive. | Non-retryable: `error_collect.py` excludes it from the retry batch; `generate_run_report.py` counts it failed, not split. The parent is still `status: Ready` with no children, so `submit.py` does not see it as a Phase 1 split parent: it reaches Phase 2 as a regular item and is disposed there — needs-attention label and comment (that is what the flag buys), then `processed: true` in the snapshot — so it is **not** re-selected until its Jira content changes. It gets no feasibility label and is never auto-approved: a review carrying an `error` has no verdict (see [What submit.py does with the markers](#what-submitpy-does-with-the-markers)). This differs from `submit.py`'s own `split_not_attempted:` path, which exits before Phase 2 and leaves the parent unprocessed; teaching Phase 2 to leave `split_not_attempted:` / `*_stalled` reviews unprocessed is a follow-up in `submit.py`. If the agent was slow rather than dead and archives the parent and mints children later in the job, Phase 1 skips the split-submit (same section). |
 
 The revise and split markers update the review in place. When that is
