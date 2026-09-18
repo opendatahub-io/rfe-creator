@@ -19,7 +19,14 @@ Two deterministic repairs that close the gaps the reassess loop leaves open:
    reason naming the criteria scored 0.
 
 Usage:
-    python3 scripts/reconcile_reviews.py --type <t> [--cycles N] <ID> [<ID> ...]
+    python3 scripts/reconcile_reviews.py --type <t> [--cycles N] [--keep-state] <ID> [<ID> ...]
+
+``--keep-state`` leaves the state files in place after re-applying them: the
+COLLECT and SPLIT_CORRECTION_CHECK reconciles use it, because a review agent can
+keep writing for minutes after its wave (seen after COLLECT on 2026-09-18), and
+the final reconcile at REPORT — over every id of the run, without the flag —
+re-applies once more and removes them, so any write that lands before the run
+report is generated is undone.
 
 Prints ``RESTORED=<ids>``, ``FLAGGED=<ids>`` and ``RECONCILE_ERRORS=<ids>`` (one
 line each; a ``RECONCILE_ERROR <id>: <why>`` detail line per failed item). Never
@@ -71,7 +78,7 @@ def failure_reason(data, desc, cycles):
     return f"Failing and not auto-revised: {what}."
 
 
-def reconcile(ids, type_name, cycles=0):
+def reconcile(ids, type_name, cycles=0, keep_state=False):
     desc = _TYPES.get(type_name)
     reviews_dir = desc.dirs()["reviews"]
     schema = f"{type_name}-review"
@@ -84,7 +91,7 @@ def reconcile(ids, type_name, cycles=0):
                 # restore() prints its own RESTORED=<id>; only this script's summary line
                 # may reach pipeline_state's line parser.
                 with contextlib.redirect_stdout(io.StringIO()):
-                    prs.restore(item_id)  # idempotent; removes the state file
+                    prs.restore(item_id, keep_state=keep_state)  # idempotent
                 restored.append(item_id)
             data = _read_review(review)
             if data is None or data.get("error"):
@@ -112,9 +119,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--type", choices=_TYPES.choices(), default="rfe", help="Work item type")
     parser.add_argument("--cycles", type=int, default=0, help="Reassess cycles the batch ran")
+    parser.add_argument(
+        "--keep-state",
+        action="store_true",
+        help="Leave the state files for a later reconcile (COLLECT); REPORT runs without it",
+    )
     parser.add_argument("ids", nargs="+", metavar="ID")
     args = parser.parse_args(argv)
-    reconcile(args.ids, args.type, args.cycles)
+    reconcile(args.ids, args.type, args.cycles, keep_state=args.keep_state)
     return 0
 
 
