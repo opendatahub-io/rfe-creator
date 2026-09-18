@@ -25,6 +25,8 @@ phase tables from the same descriptors.
 """
 
 import argparse
+import hashlib
+import json
 import os
 import sys
 import time
@@ -76,6 +78,53 @@ FRESHNESS_BASES = frozenset({"assess", "review"})
 FRESHNESS_SLACK_SECS = 2
 # Epoch of the current wave's launch; None disables the freshness rule (legacy callers).
 WAVE_LAUNCHED_AT = None
+
+# Revise baseline (AISDLC-45): {id: {"task": sha256, "review_mtime_ns": int}} taken by
+# pipeline_state.advance() when it writes tmp/pipeline-revise-ids.txt. The revise slot used
+# to complete on auto_revised alone, but REASSESS_RESTORE re-raises that flag from the
+# previous cycle before the revise wave is even planned, so the second revision was never
+# launched. While an id's task is byte-identical to its baseline and its review has not been
+# written since, no revise agent has touched it and the slot stays pending; once either
+# moved, the auto_revised rule applies. The review side is the write time, not a digest: a
+# revise agent that can change nothing still re-sets the frontmatter, possibly to identical
+# bytes, and that write must complete the slot rather than run into the stall guard.
+REVISE_BASELINE_FILE = "tmp/pipeline-revise-baseline.json"
+
+
+def file_digest(path):
+    """sha256 of a file's bytes, or None when it cannot be read."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def read_revise_baseline():
+    """The revise baseline mapping, or {} when there is none or it is unreadable."""
+    try:
+        with open(REVISE_BASELINE_FILE) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _mtime_ns(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+def revise_baseline_entry(type_name, item_id):
+    """The baseline an id would be recorded with now: the task file's digest and the review
+    file's last write time."""
+    dirs = _TYPES.get(type_name).dirs()
+    return {
+        "task": file_digest(f"{dirs['tasks']}/{item_id}.md"),
+        "review_mtime_ns": _mtime_ns(f"{dirs['reviews']}/{item_id}-review.md"),
+    }
 
 
 def set_wave_launch(since):
@@ -201,6 +250,14 @@ def check_id(phase, rfe_id, since=None):
         if data.get("error"):
             return "error"
     if base == "revise":
+        # AISDLC-45: nothing the revise agent does has landed while the task is byte-identical
+        # to the baseline taken when the revise ids were written and the review has not been
+        # written since; the auto_revised flag alone cannot say so (REASSESS_RESTORE re-raises
+        # it). A baseline of another shape (older file, hand-edited) is ignored.
+        baseline = read_revise_baseline().get(rfe_id)
+        if isinstance(baseline, dict) and type_name and "review_mtime_ns" in baseline:
+            if revise_baseline_entry(type_name, rfe_id) == baseline:
+                return "pending"
         # Same rule: the revise agent rewrites an existing review; a moment without a
         # readable frontmatter block is not-yet-good, not failed (bounded by the stall guard).
         try:

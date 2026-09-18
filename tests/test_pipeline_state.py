@@ -4179,3 +4179,78 @@ class TestReviewStateLifetime:
         assert os.path.exists(stale)  # a preview touches nothing
         assert ps.advance(state)[0] == "FETCH"
         assert not os.path.exists(stale)
+
+
+# ---------- AISDLC-45: revise baseline at the three revise transitions ----------
+
+
+class TestReviseBaseline:
+    def _files(self, rid):
+        with open(f"artifacts/rfe-tasks/{rid}.md", "w") as f:
+            f.write(f"---\nrfe_id: {rid}\n---\nbody\n")
+        _scored_review(rid, 1_700_000_000.0, auto_revised=True)
+
+    def _baseline(self):
+        import json
+
+        from check_review_progress import REVISE_BASELINE_FILE
+
+        return json.load(open(REVISE_BASELINE_FILE))
+
+    def test_review_to_revise_records_task_digest_and_review_mtime(self, tmp_dir, monkeypatch):
+        from check_review_progress import file_digest
+
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        self._files("RHAIRFE-1")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RHAIRFE-1")
+        monkeypatch.setattr(ps, "_save_originals", lambda ids, ptype: None)
+        assert ps.advance(make_state(phase="REVIEW"))[0] == "REVISE"
+        base = self._baseline()
+        assert list(base) == ["RHAIRFE-1"]
+        assert base["RHAIRFE-1"]["task"] == file_digest("artifacts/rfe-tasks/RHAIRFE-1.md")
+        assert base["RHAIRFE-1"]["review_mtime_ns"] == 1_700_000_000 * 10**9
+
+    def test_reassess_restore_records_after_the_restore_and_empties_at_the_cap(
+        self, tmp_dir, monkeypatch
+    ):
+        write_ids("tmp/pipeline-reassess-ids.txt", ["RHAIRFE-1"])
+        self._files("RHAIRFE-1")
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RHAIRFE-1")
+        monkeypatch.setattr(ps, "_save_originals", lambda ids, ptype: None)
+        assert ps.advance(make_state(phase="REASSESS_RESTORE", reassess_cycle=1))[0] == (
+            "REASSESS_REVISE"
+        )
+        assert list(self._baseline()) == ["RHAIRFE-1"]
+        assert ps.advance(make_state(phase="REASSESS_RESTORE", reassess_cycle=2))[0] == (
+            "REASSESS_REVISE"
+        )
+        assert self._baseline() == {}
+
+    def test_split_review_records_and_dry_run_writes_nothing(self, tmp_dir, monkeypatch):
+        from check_review_progress import REVISE_BASELINE_FILE
+
+        write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-002"])
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "RFE-002")
+        monkeypatch.setattr(ps, "_save_originals", lambda ids, ptype: None)
+        ps.advance(make_state(phase="SPLIT_REVIEW"), dry_run=True)
+        assert not os.path.exists(REVISE_BASELINE_FILE)
+        assert ps.advance(make_state(phase="SPLIT_REVIEW"))[0] == "SPLIT_REVISE"
+        assert list(self._baseline()) == ["RFE-002"]
+
+    def test_second_revision_is_launched(self, tmp_dir, monkeypatch, capsys):
+        """The AISDLC-45 reproduction: REASSESS_RESTORE re-raised auto_revised, the item still
+        fails, and the pre-filter used to read the flag as a finished revision."""
+        write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        self._files("RHAIRFE-1")
+        ps._write_revise_baseline(["RHAIRFE-1"], "rfe")
+        ps._save_state(make_state(phase="REASSESS_REVISE", batch=1, reassess_cycle=1))
+        monkeypatch.setattr(ps, "_run_script", lambda cmd: "")
+        result = _run_next_action()
+        assert result["action"] == "launch_wave" and result["phase"] == "REASSESS_REVISE"
+        assert "RHAIRFE-1" in result["agents"][0]["vars"]
+        # The revise agent's frontmatter step is a write; the slot completes.
+        _scored_review("RHAIRFE-1", 1_700_000_300.0, auto_revised=True)
+        result = _run_next_action()
+        assert result["action"] == "run_script" and result["phase"] == "REASSESS_FIXUP"
+        assert "REASSESS_REVISE → REASSESS_FIXUP" in capsys.readouterr().err

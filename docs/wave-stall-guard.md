@@ -41,6 +41,12 @@ counts as this phase's output:
   its own slot counts), so a file older than the wave's launch cannot release
   the barrier.
 
+A third file, `tmp/pipeline-revise-baseline.json` (AISDLC-45), serves the
+revise slot the same way: written with the revise id list, it holds each id's
+task digest and review write time, and the slot stays pending until the revise
+agent has moved one of them — the `auto_revised` flag alone cannot tell this
+wave's revision from the one `REASSESS_RESTORE` re-raised.
+
 `REASSESS_SAVE` deletes the review and result files before a reassess phase is
 entered, so a file older than either reference can only be a late write by a
 previous cycle's agent. Before the rule, such a file made the pre-filter skip
