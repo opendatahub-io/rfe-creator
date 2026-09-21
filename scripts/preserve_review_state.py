@@ -41,8 +41,22 @@ def _is_initiative(item_id):
     return _descriptor(item_id).name == "initiative"
 
 
+# Artifacts root for callers that do not run from the workspace (submit.py --artifacts-dir);
+# None keeps the workspace-relative "artifacts/<reviews>" paths every pipeline step uses.
+ARTIFACTS_ROOT = None
+
+
+def set_artifacts_root(root):
+    """Resolve review and state paths under ``root`` instead of the workspace (None resets)."""
+    global ARTIFACTS_ROOT
+    ARTIFACTS_ROOT = root
+
+
 def _reviews_dir(item_id):
-    return _descriptor(item_id).dirs()["reviews"]
+    desc = _descriptor(item_id)
+    if ARTIFACTS_ROOT:
+        return os.path.join(ARTIFACTS_ROOT, desc.dirs(form="bare")["reviews"])
+    return desc.dirs()["reviews"]
 
 
 def _schema(item_id):
