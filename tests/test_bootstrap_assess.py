@@ -305,3 +305,140 @@ class TestCallersDeclareType:
             # SETUP runs its bootstrap steps as a concurrent "commands" list.
             commands = setup.get("commands") or [setup["command"]]
             assert any(f"bootstrap-assess-rfe.sh --type {ptype}" in c for c in commands)
+
+
+class TestRubricPin:
+    """The checkout sits at the descriptor's pipeline.rubric.ref (design §7.3 / Q9) unless
+    ASSESS_RFE_REF overrides it, and the script verifies where it landed."""
+
+    @staticmethod
+    def _git(repo, *args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    @pytest.fixture
+    def assess_repo(self, tmp_path):
+        """A local assess-rfe stand-in with two commits; returns (url, first_sha, second_sha)."""
+        repo = tmp_path / "assess-rfe-origin"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        env_args = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+        _touch(str(repo / RFE_RUBRIC))
+        _touch(str(repo / "skills" / "export-rubric" / "scripts" / "export_rubric.py"))
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), *env_args, "commit", "-q", "-m", "one"], check=True)
+        first = self._git(repo, "rev-parse", "HEAD")
+        with open(repo / RFE_RUBRIC, "a") as f:
+            f.write("second\n")
+        subprocess.run(
+            ["git", "-C", str(repo), *env_args, "commit", "-q", "-am", "two"], check=True
+        )
+        second = self._git(repo, "rev-parse", "HEAD")
+        return f"file://{repo}", first, second
+
+    @pytest.fixture
+    def workdir(self, tmp_path):
+        wd = tmp_path / "wd"
+        wd.mkdir()
+        orig = os.getcwd()
+        os.chdir(wd)
+        yield wd
+        os.chdir(orig)
+
+    def _env(self, drop_in_root, repo_url, pin, **extra):
+        from conftest import MEMO_OVERRIDES
+
+        root = drop_in_root.add("memo", overrides={**MEMO_OVERRIDES, "pipeline.rubric.ref": pin})
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("ASSESS_RFE_REF", "RFE_SKIP_BOOTSTRAP")
+        }
+        env.update(
+            {
+                "RFE_CREATOR_EXTRA_TYPES": root,
+                "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": root,
+                "ASSESS_RFE_REPO": repo_url,
+                **extra,
+            }
+        )
+        return env
+
+    def _run(self, env):
+        return subprocess.run(
+            ["bash", SCRIPT, "--type", "memo"], capture_output=True, text=True, env=env
+        )
+
+    def test_fresh_clone_lands_on_the_descriptor_pin(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        assert (
+            f"assess-rfe at {first[:12]} (types/memo/type.yaml pipeline.rubric.ref)"
+            in result.stdout
+        )
+
+    def test_cached_checkout_is_moved_to_the_pin(self, workdir, drop_in_root, assess_repo):
+        """The second run of the day: the clone exists at the other commit."""
+        url, first, second = assess_repo
+        subprocess.run(["git", "clone", "-q", url, ".context/assess-rfe"], check=True)
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_env_override_wins_over_the_pin(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, ASSESS_RFE_REF=second))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+        assert f"assess-rfe at {second[:12]} (ASSESS_RFE_REF)" in result.stdout
+
+    def test_branch_override_is_accepted_without_a_sha_check(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, ASSESS_RFE_REF="main"))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+
+    def test_unresolvable_pin_fails_loudly(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, "0" * 40))
+        assert result.returncode == 1
+        assert f"could not check out assess-rfe at {'0' * 40}" in result.stderr
+        assert "types/memo/type.yaml pipeline.rubric.ref" in result.stderr
+
+    def test_non_git_checkout_warns_and_continues(self, fake_checkout):
+        """A vendored copy (no .git) cannot be pinned; the script says so and keeps the
+        previous behaviour rather than failing an offline run."""
+        _add_rfe_assets(fake_checkout)
+        _, stderr, rc = _run()
+        assert rc == 0, stderr
+        assert "is not a git checkout; the rubric pin" in stderr
+        assert "types/rfe/type.yaml pipeline.rubric.ref" in stderr
+
+    def test_shipped_pins_match_the_fallback_parser(self):
+        """The no-Python fallback (the awk programme in the script) must read the same value
+        the registry serves; both shipped descriptors pin one full SHA."""
+        with open(SCRIPT) as f:
+            script = f.read()
+        m = re.search(r"awk '((?:[^']|\n)*?)' \"\$TYPES_ROOT", script)
+        assert m, "the rubric_ref_from_root awk programme moved"
+        programme = m.group(1)
+        registry_py = os.path.join(REPO_ROOT, "scripts", "type_registry.py")
+        for name in ("rfe", "initiative"):
+            registry = subprocess.run(
+                [sys.executable, registry_py, "get", name, "pipeline.rubric.ref"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            awk = subprocess.run(
+                ["awk", programme, os.path.join(REPO_ROOT, "types", name, "type.yaml")],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            assert registry == awk, (name, registry, awk)
+            assert re.fullmatch(r"[0-9a-f]{40}", registry), (name, registry)
