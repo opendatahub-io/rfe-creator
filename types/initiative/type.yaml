@@ -99,7 +99,7 @@ pipeline:
       skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
   rubric:
     repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 (verbatim URL; shared)
-    ref: "6602a12e"                                     # Q9: documentary at PR-1 — bootstrap-assess-rfe.sh:54-64 pins NO ref; the initiative rubric exists only at assess-rfe PR #10's head 6602a12e (skills/assess-initiative), not on the vendored e27d7ac; ref-pinning bootstrap is PR-2. Quoted: a digits-only ref would parse as a number
+    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # same commit as rfe (one shared checkout; validate_types cross rule 6): the assess-rfe PR #10 merge that brought skills/assess-initiative onto main. bootstrap-assess-rfe.sh checks it out and verifies it unless ASSESS_RFE_REF overrides. Quoted: a digits-only ref would parse as a number
     path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
     export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
   resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split

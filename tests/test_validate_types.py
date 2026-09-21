@@ -540,7 +540,46 @@ class TestPerTypeGate:
         assert len(hits) == 1
 
     def test_full_length_sha_is_accepted(self, types_copy):
+        # Both shipped types share the assess-rfe checkout, so a new pin moves both (rule 6).
+        for name in ("rfe", "initiative"):
+            _mutate(
+                types_copy, name, lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40)
+            )
+        assert _validate(types_copy).ok
+
+    def test_shipped_pins_are_one_full_sha(self):
+        """bootstrap-assess-rfe.sh checks out pipeline.rubric.ref and verifies the checkout,
+        so the shipped pins are the immutable full form (design §7.3) and, sharing one
+        repo, identical."""
+        refs = {
+            name: _read_yaml(TYPES_ROOT / name / "type.yaml")["pipeline"]["rubric"]["ref"]
+            for name in ("rfe", "initiative")
+        }
+        assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs.values()), refs
+        assert len(set(refs.values())) == 1, refs
+
+    def test_shared_repo_with_two_refs_is_a_cross_finding(self, types_copy):
+        """Rule 6: one checkout per external rubric repo — two pins cannot both be honoured."""
         _mutate(types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40))
+        report = _validate(types_copy)
+        hits = _assert_finding(
+            report, "pipeline.rubric.ref differs across the types sharing rubric repo", "*"
+        )
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+        assert hits[0].types == frozenset({"rfe", "initiative"})
+        assert "bootstrap-assess-rfe.sh keeps one checkout per repo" in hits[0].message
+
+    def test_shared_repo_rule_skips_malformed_refs_and_self_rubrics(self, types_copy):
+        """A malformed ref is the per-type finding only (never doubled by rule 6), and a D3
+        embedded rubric has no checkout to share."""
+        # A trailing newline passes the schema's `$` but fails the full-matching lint.
+        _mutate(
+            types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "e27d7ac\n")
+        )
+        report = _validate(types_copy)
+        assert len(report.findings) == 1, report.lines()
+        assert not _find(report, "differs across the types sharing")
+        _mutate(types_copy, "rfe", self._self_rubric())
         assert _validate(types_copy).ok
 
     def test_rubric_ref_regex_is_q9(self):

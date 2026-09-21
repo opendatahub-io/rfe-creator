@@ -19,10 +19,11 @@ design-proposals/work-item-types-unified.md §3.3:
     * schema.review.score_fields is non-empty
     * identity.local_id_pattern is an anchored, compilable regex
     * conventions.labels.alignment only when an alignment dimension is declared
-    * pipeline.rubric.ref is a 7-40 char lowercase hex commit SHA (documentary
-      until the bootstrap pins it in PR-2, Q9); for the D3 embedded rubric
-      (pipeline.rubric.repo: self) pipeline.rubric.rubric_version is a 7-64 char
-      lowercase hex content hash instead
+    * pipeline.rubric.ref is a 7-40 char lowercase hex commit SHA — the commit
+      bootstrap-assess-rfe.sh checks out and verifies when ASSESS_RFE_REF is
+      unset (Q9; the shipped descriptors pin the full 40-hex form); for the D3
+      embedded rubric (pipeline.rubric.repo: self) pipeline.rubric.rubric_version
+      is a 7-64 char lowercase hex content hash instead
     * no executable code under any descriptor root: *.py / *.sh / *.bash / *.zsh
       or a shebang file (types/ is data only — design §3.5.1, PR1-21)
     * the review error stub verify_phase.py:105-127 writes after a failed
@@ -44,7 +45,10 @@ design-proposals/work-item-types-unified.md §3.3:
       f"{prefix}*.yaml"); no local_prefix stem equal to any effective project key;
       no type's effective local_prefix mints an id (f"{prefix}1") that another
       type's effective local_id_pattern full-matches (PR-3 D13 — detect() tries
-      every type's pattern first, so such an id would be routed to the other type)
+      every type's pattern first, so such an id would be routed to the other type);
+      descriptors sharing one external pipeline.rubric.repo pin the same
+      pipeline.rubric.ref (the bootstrap keeps ONE checkout per repo, so two
+      pins cannot both be honoured)
     * a binding the registry refuses to compute (a malformed identity block, an
       invalid or D13-inconsistent RFE_CREATOR_BINDING_* override) is a finding
       for that type, never a traceback
@@ -682,6 +686,30 @@ def cross_type_findings(registry, env):
                     "f'{prefix}*.yaml' glob would select both types' snapshots",
                     [name_a, name_b],
                 )
+
+    # (6) one checkout per external rubric repo: bootstrap-assess-rfe.sh clones
+    #     pipeline.rubric.repo once into .context/assess-rfe and checks out ONE
+    #     pipeline.rubric.ref, so descriptors sharing the repo must pin the same
+    #     commit. Only well-formed refs take part (a malformed one is already a
+    #     per-type finding); the D3 embedded rubric (repo: self) has no checkout.
+    refs_by_repo = {}
+    for name, desc in descs.items():
+        repo, ref = _opt(desc, "pipeline.rubric.repo"), _opt(desc, "pipeline.rubric.ref")
+        if repo == "self" or not isinstance(repo, str) or not isinstance(ref, str):
+            continue
+        if not RUBRIC_REF_RE.fullmatch(ref):
+            continue
+        refs_by_repo.setdefault(repo, {}).setdefault(ref, []).append(name)
+    for repo, by_ref in sorted(refs_by_repo.items()):
+        if len(by_ref) < 2:
+            continue
+        detail = "; ".join(f"{ref} ({_fmt_types(names)})" for ref, names in sorted(by_ref.items()))
+        cross(
+            f"pipeline.rubric.ref differs across the types sharing rubric repo {repo!r}: "
+            f"{detail} — bootstrap-assess-rfe.sh keeps one checkout per repo and can honour "
+            "one pin",
+            [n for names in by_ref.values() for n in names],
+        )
 
     # (5) no local_prefix stem may equal any effective project key (§3.2.1(b) —
     #     the collision PR #122 feared, enforced as a lint rather than a DRAFT- rename)
