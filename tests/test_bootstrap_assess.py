@@ -490,10 +490,38 @@ class TestRubricPin:
         GIT_TEST_ASSUME_DIFFERENT_OWNER git reports "dubious ownership" for every command on
         the checkout; the script must take the WARN-and-continue branch — vendored files
         copied, HEAD untouched, no fetch. A `safe.directory` override in the script would
-        make this test fail: git would then accept the checkout and move HEAD to the pin."""
+        make this test fail: git would then accept the checkout and move HEAD to the pin.
+
+        Not every git build or config honours the hook (the GitHub ubuntu runner does not:
+        lint.yml run 35604448686 saw rev-parse and checkout succeed and only the fetch fail),
+        so the test probes git first and skips itself, with the reason, where the premise
+        does not hold. The mode-000 test above is the unconditional unopenable-checkout guard.
+        """
         url, first, second = assess_repo
         self._clone_at(url, second)
-        result = self._run(self._env(drop_in_root, url, first, GIT_TEST_ASSUME_DIFFERENT_OWNER="1"))
+        env = self._env(drop_in_root, url, first, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
+        probe = subprocess.run(
+            ["git", "-C", ".context/assess-rfe", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if probe.returncode == 0 or "dubious ownership" not in probe.stderr:
+            version = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+            safe_dirs = {
+                scope: subprocess.run(
+                    ["git", "config", scope, "--get-all", "safe.directory"],
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                for scope in ("--system", "--global")
+            }
+            pytest.skip(
+                "this git does not refuse the checkout under GIT_TEST_ASSUME_DIFFERENT_OWNER=1: "
+                f"{version.strip()}; probe rc={probe.returncode} stderr={probe.stderr.strip()!r}; "
+                f"safe.directory system={safe_dirs['--system']!r} global={safe_dirs['--global']!r}"
+            )
+        result = self._run(env)
         assert result.returncode == 0, result.stderr
         assert "WARN: git cannot operate on .context/assess-rfe" in result.stderr
         assert "dubious ownership" in result.stderr
