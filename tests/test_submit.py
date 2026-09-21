@@ -341,6 +341,32 @@ class TestAutoRevisedLabel:
         assert "rfe-creator-auto-revised" in stdout
         assert not os.path.exists(f"{art_dir}/rfe-reviews/RFE-001-review-state.json")
 
+    def test_guard_failure_is_a_warning_without_the_child_stderr(self, art_dir):
+        """A review whose frontmatter does not parse makes check_revised.py fail; the guard
+        reports the exit status only — the child's error quotes the offending source line,
+        email included — and the submit goes on."""
+        body = "## Problem\n\nSame content.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            "---\nrfe_id: RHAIRFE-1234\nauto_revised: true\n"
+            "score: [unclosed owner: jane.doe@example.com\n---\nbody\n",
+        )
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        guard = [ln for ln in stderr.splitlines() if "auto_revised content guard" in ln]
+        assert guard == [
+            "Warning: auto_revised content guard failed (check_revised.py exit 1);"
+            " flags left as written"
+        ]
+        assert "jane.doe@example.com" not in "\n".join(guard)
+        assert "Traceback" not in stderr
+
     def test_set_flag_on_unchanged_text_is_lowered_before_labels(self, art_dir):
         """2026-09-21 stage dry run (RHAIRFE-3444): the revise agent's last write restored
         auto_revised after FIXUP had lowered it on an unchanged task, and the dry-run submit

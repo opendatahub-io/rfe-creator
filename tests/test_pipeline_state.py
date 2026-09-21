@@ -697,6 +697,7 @@ class TestBatchDone:
             return "ERRORS="
 
         monkeypatch.setattr(ps, "_run_script", mock_run)
+        monkeypatch.setattr(ps, "_run_script_soft", lambda cmd: (0, mock_run(cmd)))
         state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, reassess_cycle=1)
         next_phase, summary = ps.advance(state)
         assert next_phase == "REPORT"
@@ -721,6 +722,9 @@ class TestBatchDone:
             ps,
             "_run_script",
             lambda cmd: calls.append(cmd) or "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS=",
+        )
+        monkeypatch.setattr(
+            ps, "_run_script_soft", lambda cmd: (0, calls.append(cmd) or "LOWERED=")
         )
         state = make_state(phase="ERROR_COLLECT", batch=1, total_batches=1, retry_cycle=1)
         next_phase, _ = ps.advance(state)
@@ -749,6 +753,7 @@ class TestBatchDone:
             return "ERRORS="
 
         monkeypatch.setattr(ps, "_run_script", mock_run)
+        monkeypatch.setattr(ps, "_run_script_soft", lambda cmd: (0, mock_run(cmd)))
         next_phase, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
         assert next_phase == "REPORT"
         assert "REPORT flag guard: lowered=1\nBATCH_DONE → REPORT" in summary
@@ -757,6 +762,46 @@ class TestBatchDone:
         assert guard == [
             "python3 scripts/check_revised.py --type rfe --batch --lower-only RHAIRFE-1 RHAIRFE-2"
         ]
+
+    def test_final_guard_failure_does_not_abort_report_or_echo_stderr(
+        self, tmp_dir, monkeypatch, capsys
+    ):
+        """The guard is best-effort: a check_revised.py failure (here a frontmatter parse
+        error whose message quotes the offending source line, email included) leaves the
+        flags as written, logs the exit status only, and REPORT still happens."""
+        import subprocess
+
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1"])
+
+        def mock_run(cmd):
+            if "batch_summary" in cmd:
+                return "TOTAL=1 PASSED=1"
+            if "reconcile_reviews" in cmd:
+                return "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS="
+            return "ERRORS="
+
+        monkeypatch.setattr(ps, "_run_script", mock_run)
+        real_run = subprocess.run
+
+        def failing_guard(argv, **kwargs):
+            assert argv[1] == "scripts/check_revised.py" and "--lower-only" in argv
+            return subprocess.CompletedProcess(
+                argv, 1, stdout="", stderr="ValidationError: near 'owner: jane.doe@example.com'"
+            )
+
+        monkeypatch.setattr(ps.subprocess, "run", failing_guard)
+        try:
+            next_phase, summary = ps.advance(
+                make_state(phase="BATCH_DONE", batch=1, total_batches=1)
+            )
+        finally:
+            monkeypatch.setattr(ps.subprocess, "run", real_run)
+        assert next_phase == "REPORT"
+        assert "flag guard" not in summary
+        err = capsys.readouterr().err
+        assert "REPORT flag guard: skipped (check_revised.py exit 1)" in err
+        assert "jane.doe@example.com" not in err
 
     def test_final_reconcile_stubs_the_ids_it_could_not_repair(self, tmp_dir, monkeypatch):
         """A review with a merged generic error is still 'readable' to the run report, which
@@ -864,7 +909,10 @@ class TestRunPhase:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                calls.append(cmd),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         import io
         from contextlib import redirect_stdout
@@ -884,7 +932,10 @@ class TestRunPhase:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                calls.append(cmd),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         import io
         from contextlib import redirect_stdout
@@ -901,7 +952,10 @@ class TestRunPhase:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                calls.append(cmd),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         import io
         from contextlib import redirect_stdout
@@ -930,7 +984,11 @@ class TestRunPhase:
         """run-phase writes dispatch marker on success."""
         ps._save_state(make_state(phase="FIXUP"))
         write_ids("tmp/pipeline-revise-ids.txt", ["RHAIRFE-1001"])
-        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": 0})())
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda cmd, **kw: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+        )
         import io
         from contextlib import redirect_stdout
 
@@ -1388,7 +1446,7 @@ class TestDispatchLoopE2E:
 
         # Mock subprocess.run for run-phase (script phases)
         def subprocess_mock(cmd, **kw):
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1447,7 +1505,7 @@ class TestDispatchLoopE2E:
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1522,7 +1580,7 @@ class TestDispatchLoopE2E:
         def subprocess_mock(cmd, **kw):
             if "split_collect.py" in cmd:
                 write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1558,7 +1616,7 @@ class TestDispatchLoopE2E:
 
         def subprocess_mock(cmd, **kw):
             run_phase_calls.append(cmd)
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         def mock_run_script(cmd):
             if "filter_for_revision.py" in cmd:
@@ -1628,7 +1686,7 @@ class TestDispatchLoopE2E:
                     write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-001", "RFE-002"])
                 else:
                     write_ids("tmp/pipeline-split-children-ids.txt", ["RFE-003", "RFE-004"])
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1682,7 +1740,7 @@ class TestDispatchLoopE2E:
                 ps._save_state(state)
                 write_ids("tmp/pipeline-batch-2-ids.txt", ["RHAIRFE-1002"])
                 write_ids("tmp/pipeline-retry-ids.txt", ["RHAIRFE-1002"])
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1723,7 +1781,7 @@ class TestDispatchLoopE2E:
             if "split_collect.py" in cmd:
                 # No children produced — empty file
                 write_ids("tmp/pipeline-split-children-ids.txt", [])
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -1771,13 +1829,16 @@ class TestDispatchLoopE2E:
 
         # Track what run-phase sees for REASSESS_FIXUP on last cycle
         fixup_commands = []
+        guard_commands = []
 
         def subprocess_mock(cmd, **kw):
             if "check_revised.py" in cmd:
-                fixup_commands.append(cmd)
-            return type("R", (), {"returncode": 0})()
+                # The REPORT-transition content guard (lower-only) is not a FIXUP pass.
+                (guard_commands if "--lower-only" in cmd else fixup_commands).append(cmd)
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
+        assert len(guard_commands) == 1
 
         # Should see 3 REASSESS_CHECK (enter cycle 1, enter cycle 2, exit)
         assert phases.count("REASSESS_CHECK") == 3
@@ -1852,7 +1913,7 @@ class TestDispatchLoopE2E:
         monkeypatch.setattr(ps, "_run_script", mock_run_script)
 
         def subprocess_mock(cmd, **kw):
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         phases = self._run_loop(monkeypatch, subprocess_mock)
 
@@ -2257,7 +2318,7 @@ class TestWaitForWave:
 
         def mock_subprocess_run(cmd_parts, **kw):
             captured_cmd["parts"] = cmd_parts
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         ps.cmd_wait_for_wave([])
@@ -2281,7 +2342,7 @@ class TestWaitForWave:
 
         def mock_subprocess_run(cmd_parts, **kw):
             captured_cmd["parts"] = cmd_parts
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         ps.cmd_wait_for_wave([])
@@ -2322,7 +2383,7 @@ class TestWaitForWave:
         def mock_subprocess_run(cmd_parts, **kw):
             captured_cmd["parts"] = cmd_parts
             captured_cmd["module_since"] = crp.WAVE_LAUNCHED_AT
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         try:
@@ -2342,7 +2403,7 @@ class TestWaitForWave:
 
         def mock_subprocess_run(cmd_parts, **kw):
             captured_cmd["parts"] = cmd_parts
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         ps.cmd_wait_for_wave([])
@@ -2366,7 +2427,7 @@ class TestWaitForWave:
 
         def mock_subprocess_run(cmd_parts, **kw):
             captured_cmd["parts"] = cmd_parts
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         ps.cmd_wait_for_wave([])
@@ -2525,7 +2586,10 @@ class TestValidateIds:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                calls.append(cmd),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         with pytest.raises(SystemExit) as exc_info:
             ps.cmd_run_phase([])
@@ -2593,7 +2657,7 @@ class TestReassessFixupIds:
 
         def fake_run(argv, **kw):
             calls.append(argv)
-            return type("R", (), {"returncode": 0})()
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         ps.cmd_run_phase([])
@@ -2616,7 +2680,10 @@ class TestValidateStateValues:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (calls.append(cmd), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                calls.append(cmd),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         import io
         from contextlib import redirect_stdout
@@ -2692,7 +2759,10 @@ class TestNoShell:
         monkeypatch.setattr(
             subprocess,
             "run",
-            lambda cmd, **kw: (seen.update(cmd=cmd, kw=kw), type("R", (), {"returncode": 0})())[1],
+            lambda cmd, **kw: (
+                seen.update(cmd=cmd, kw=kw),
+                type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            )[1],
         )
         import io
         from contextlib import redirect_stdout

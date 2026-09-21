@@ -380,7 +380,12 @@ def _reconcile_saved_review_state(artifacts_dir, type_name):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Warning: review state reconcile failed: {result.stderr.strip()}", file=sys.stderr)
+        # Exit status only: the child's stderr can quote a frontmatter source line.
+        print(
+            "Warning: review state reconcile failed"
+            f" (reconcile_reviews.py exit {result.returncode}); saved state not re-applied",
+            file=sys.stderr,
+        )
         return
     for line in result.stdout.splitlines():
         if line.startswith("RESTORED=") and line[len("RESTORED=") :]:
@@ -409,8 +414,10 @@ def _lower_unrevised_flags(artifacts_dir, type_name):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        # Exit status only: the child's stderr can quote a frontmatter source line.
         print(
-            f"Warning: auto_revised content guard failed: {result.stderr.strip()}",
+            "Warning: auto_revised content guard failed"
+            f" (check_revised.py exit {result.returncode}); flags left as written",
             file=sys.stderr,
         )
         return
