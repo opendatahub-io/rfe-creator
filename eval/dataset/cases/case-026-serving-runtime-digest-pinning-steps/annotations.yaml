@@ -9,11 +9,14 @@ expected_scores:
   what: null
   why: 0
 expected_total: null
-known_issues: []
+known_issues:
+- 'A maintenance checklist with no business evidence and a do-not-pad anchor: first review 5/10
+  on the 2026-09-21 calibration run (WHY 0, not_a_task 0, open_to_how 1). One revision reframed
+  the steps as an outcome and padded WHY to 1 with a generic segment despite the anchor -> 9/10,
+  pass, needs_attention true. Expect one revision, not two.'
 score_tolerance: 1
 tags:
 - weak-draft
 - revision-expected
-- second-revision-expected
 - why-missing
 - engineering-chore

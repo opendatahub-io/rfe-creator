@@ -180,25 +180,22 @@ def test_threshold_arithmetic():
     assert (n_init - 2) / n_init < 0.92  # 5 of 7 revised -> 2 failures -> fail
 
 
-def test_second_revision_cases_are_tagged_weak_drafts_with_two_zeros():
-    """The cycle-2 cases (AISDLC-45 coverage) are ordinary revision-expected drafts to the
-    gate; the extra tag documents the pairing of an unfixable WHY with one fixable zero."""
+def test_2026_09_21_cases_are_why_missing_revision_expected_drafts():
+    """case-026 / initiative case-021 calibrated (2026-09-21) as one-revision passes: they are
+    ordinary revision-expected drafts failing first review on WHY, and no case claims a
+    second revision (the reviser pads WHY to 1, so an unfixable WHY cannot be engineered)."""
     expected = {
-        "eval/dataset/cases": ("case-026-serving-runtime-digest-pinning-steps", "not_a_task"),
-        "eval/initiative-dataset/cases": (
-            "case-021-model-card-generation-vendor-lock",
-            "open_to_how",
-        ),
+        "eval/dataset/cases": "case-026-serving-runtime-digest-pinning-steps",
+        "eval/initiative-dataset/cases": "case-021-model-card-generation-vendor-lock",
     }
-    for path, (case, fixable) in expected.items():
+    for path, case in expected.items():
         _, tagged, rows = _dataset(path)
         ann = dict(rows)[case]
         assert case in tagged
-        assert "second-revision-expected" in ann["tags"]
+        assert "why-missing" in ann["tags"]
         assert ann["expected_scores"]["why"] == 0
-        assert ann["expected_scores"][fixable] == 0
-        others = [c for c, a in rows if "second-revision-expected" in (a.get("tags") or [])]
-        assert others == [case], others
+        assert ann["known_issues"], case
+        assert not [c for c, a in rows if "second-revision-expected" in (a.get("tags") or [])]
 
 
 def test_tagged_cases_are_annotated_as_weak_drafts():

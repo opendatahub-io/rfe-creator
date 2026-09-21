@@ -89,11 +89,14 @@ threshold_notes:
     and case-017 to case-021, each carrying a gap the create step cannot
     repair: a circular WHY, a dictated technology stack, or no boundaries),
     6 of 7 revised leaves 1 failure -> 20/21 = 0.952 (pass); 5 of 7 revised
-    leaves 2 failures -> 19/21 = 0.905 (fail). case-021 also carries
-    second-revision-expected: a circular WHY next to a dictated vendor stack,
-    so the first revision fixes HOW, the re-review still fails on WHY and
-    cycle 2 launches the second revise agent (AISDLC-45) — for this gate it is
-    one more tagged draft with ordinary revision evidence. The 1-failure slack is shared
+    leaves 2 failures -> 19/21 = 0.905 (fail). case-021 (a circular WHY next
+    to a dictated vendor stack) calibrated on 2026-09-21 as a one-revision
+    pass: the create step drafted the stack open, first review 8/10 on WHY 0
+    alone, revised once to 9/10. Second-revision coverage (AISDLC-45) comes
+    from drafts whose first revision does not pass: in the same run INIT-012
+    reached cycle 2, stayed at 5/10 and was flagged at COLLECT (restored=1
+    flagged=1) — the first live proof of #194's second revision and of the
+    #192 flag path. The 1-failure slack is shared
     with any case without a review file. Calibrated on 2026-09-18 (#193): all
     six failed first review on the targeted criterion and were revised (007
     HOW 0, 013 WHY 0, 017 WHY 0, 018 HOW 0, 019 HOW 0, 020 WHY 0). Until 2026-09-16
