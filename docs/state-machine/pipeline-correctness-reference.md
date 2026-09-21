@@ -261,6 +261,8 @@ corrupt one).
 
 **COLLECT reconcile (AISDLC-33).** Before `collect_recommendations.py` runs at COLLECT, `pipeline_state.py` runs `scripts/reconcile_reviews.py --type <t> --cycles <reassess_cycle> <active ids>`: it re-applies every `{ID}-review-state.json` that `REASSESS_RESTORE` kept (`restore --keep-state`), undoing a review-agent write that landed after the restore, and sets `needs_attention` (with a reason naming the criteria scored 0) on every review still at `revise`/`pass: false`, since nothing revises it again in this batch. `SPLIT_CORRECTION_CHECK` does the same for split children (`--cycles 1`, before `check_right_sized.py`); all of them run with `--keep-state`: the transition into `REPORT` (from `BATCH_DONE`, or from `ERROR_COLLECT` when nothing is retryable) runs the reconcile once more over every id of the run, and `submit.py` runs `reconcile_reviews.py --all --artifacts-dir <dir>` at start-up, re-applying and removing the state files — a review agent can keep writing for minutes after its wave, past COLLECT (case-019 on 2026-09-18), and submit is the last reader, in CI after the agent process is torn down. An id the REPORT-transition reconcile could not repair gets the registry error stub (`error: reconcile_failed`) rather than a merged error field, since the run report treats a review with a generic `error` as readable and would copy its stale scores. `BATCH_START` removes any leftover state file for the batch's ids so nothing from an interrupted earlier run is re-applied. The script prints one `RESTORED=`, one `FLAGGED=` and one `RECONCILE_ERRORS=` line and never exits non-zero for a per-item problem; the ids on the last line are marked `error: reconcile_failed` (retryable) so they route to ERRORS rather than being submitted on a review the reconcile could not repair. The phase-entry freshness rule (`docs/wave-stall-guard.md`, "Wave freshness") is the other half of the same fix.
 
+**Revise slot completion (AISDLC-45).** Whenever `advance()` writes `tmp/pipeline-revise-ids.txt` (REVIEW → REVISE, REASSESS_RESTORE → REASSESS_REVISE, SPLIT_REVIEW → SPLIT_REVISE) it also writes `tmp/pipeline-revise-baseline.json`: per id, the review file's last write time. `check_review_progress.check_id` keeps the `revise` slot *pending* until the review has been written since (the revise agent's frontmatter step, its last action) and only then applies the `auto_revised` / `split` rule. Before this, `REASSESS_RESTORE`'s re-raised `auto_revised` (#173) made `next-action`'s pre-filter read every still-failing item as already revised, so the second revision the loop is designed around was never launched. The signal is the review write, not a task digest (a task edit alone would release the slot mid-revision while the flag is already true) and a write time, not a byte digest (an agent that can change nothing re-sets the frontmatter, possibly to identical bytes, and must not run into the stall guard). With the second revision running again, the last cycle's `REASSESS_RESTORE` still runs `filter_for_revision.py` for its regression rule (F1/R6: a re-review scoring below `before_score` becomes `autorevise_reject`) and then discards the revise list.
+
 ### 1.17 Revision Filter: `filter_for_revision.py` Skip Conditions
 
 Applied in order; first match wins. Side effects occur during filtering.
@@ -917,8 +919,10 @@ functional failure.
 
 `check_review_progress.py` uses different completion criteria per phase: assess
 checks for file existence, review checks for file existence AND `score` field in
-frontmatter, revise checks for `auto_revised` field. Each phase has different
-completion semantics — important for anyone modifying the polling logic.
+frontmatter, revise first requires a review write newer than the recorded
+baseline (AISDLC-45) and then completes on `auto_revised: true` or
+`recommendation: split`. Each phase has different completion semantics —
+important for anyone modifying the polling logic.
 
 **Three-valued result model.** The script returns `completed`, `pending`, or
 `error` per ID. The output format is `COMPLETED=N/M, PENDING=N, ERRORS=N,
@@ -927,10 +931,19 @@ bucket. Polling terminates when `pending == 0`, so errors cause termination (not
 hang). Review slot: `completed` once the frontmatter carries a `score`
 (`score: 0` counts — the test is `is None`), `error` only when a scored review
 also carries an `error` field, and `pending` otherwise — including a file with
-no readable or an empty frontmatter block. Revise slot: `completed` when the
-review carries `auto_revised: true` or `recommendation: split`, `pending`
-otherwise (it reads neither `score` nor `error`; a revise agent's failure
-surfaces through the review it leaves behind, not through this slot). The
+no readable or an empty frontmatter block. Revise slot: `pending` while the
+review file's modification time still equals the one recorded for the id in
+`tmp/pipeline-revise-baseline.json` when the revise ids were written (no revise
+agent has written the review yet — `REASSESS_RESTORE` re-raises `auto_revised`
+before the wave is planned, so the flag alone cannot say so); once the review
+has been written since, `completed` when it carries `auto_revised: true` or
+`recommendation: split`, `pending` otherwise (it reads neither `score` nor
+`error`; a revise agent's failure surfaces through the review it leaves behind,
+not through this slot). The flag rule alone applies when the id has no
+baseline entry, when the entry has another shape, or when
+`tmp/pipeline-revise-baseline.json` is missing, unreadable or not a mapping
+(`read_revise_baseline()` returns `{}` for all three) — the interactive skills'
+direct polls never have one. The
 `pending` rule for an unreadable block exists because the review agent writes
 the body first and sets the frontmatter in a later tool call; classifying that
 moment `error` (as 7f3cc47 did after CI #122/#128, to keep a broken agent from
