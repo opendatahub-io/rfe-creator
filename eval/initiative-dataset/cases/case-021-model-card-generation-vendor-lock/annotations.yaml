@@ -1,0 +1,20 @@
+difficulty: hard
+expected_alignment: not_assessed
+expected_feasibility: null
+expected_pass: false
+expected_recommendation: revise
+expected_scores:
+  what: null
+  why: 0
+  scope: null
+  open_to_how: 0
+  right_sized: null
+expected_total: null
+known_issues: []
+score_tolerance: 1
+tags:
+- weak-draft
+- revision-expected
+- second-revision-expected
+- why-missing
+- prescriptive-how

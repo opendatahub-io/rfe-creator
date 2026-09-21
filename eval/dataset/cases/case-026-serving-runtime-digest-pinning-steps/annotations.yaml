@@ -1,0 +1,19 @@
+difficulty: hard
+expected_feasibility: null
+expected_pass: false
+expected_recommendation: revise
+expected_scores:
+  not_a_task: 0
+  open_to_how: null
+  right_sized: null
+  what: null
+  why: 0
+expected_total: null
+known_issues: []
+score_tolerance: 1
+tags:
+- weak-draft
+- revision-expected
+- second-revision-expected
+- why-missing
+- engineering-chore

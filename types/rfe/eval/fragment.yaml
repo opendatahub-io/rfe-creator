@@ -64,9 +64,13 @@ revision:
     Or was it simply deleted without reframing the underlying need?
 threshold_notes:
   revision_coverage: |
-    with 25 cases of which 5 are tagged revision-expected,
-    3 of 5 revised leaves 2 failures -> 23/25 = 0.92 (pass); 2 of 5 revised
-    leaves 3 failures -> 22/25 = 0.88 (fail). The 2-failure slack is shared:
+    with 26 cases of which 6 are tagged revision-expected (case-021 to
+    case-026), 4 of 6 revised leaves 2 failures -> 24/26 = 0.923 (pass); 3 of 6
+    revised leaves 3 failures -> 23/26 = 0.885 (fail). case-026 also carries
+    second-revision-expected: an unfixable WHY next to a fixable not_a_task, so
+    the first revision moves the score, the re-review still fails on WHY and
+    cycle 2 launches the second revise agent (AISDLC-45) — for this gate it is
+    one more tagged draft with ordinary revision evidence. The 2-failure slack is shared:
     a tagged draft the create step repairs on its own, a tagged draft the
     first review rejects or splits instead of revising (correct pipeline
     behaviour, but it never enters the revise path and leaves no evidence),
