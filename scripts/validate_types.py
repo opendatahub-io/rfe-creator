@@ -46,7 +46,8 @@ design-proposals/work-item-types-unified.md §3.3:
       no type's effective local_prefix mints an id (f"{prefix}1") that another
       type's effective local_id_pattern full-matches (PR-3 D13 — detect() tries
       every type's pattern first, so such an id would be routed to the other type);
-      descriptors sharing one external pipeline.rubric.repo pin the same
+      descriptors sharing one external pipeline.rubric.repo (compared as the
+      canonical owner/repo, whatever the spelling) pin the same
       pipeline.rubric.ref (the bootstrap keeps ONE checkout per repo, so two
       pins cannot both be honoured)
     * a binding the registry refuses to compute (a malformed identity block, an
@@ -106,6 +107,28 @@ DEFAULT_ASSESS_DIR = Path(".context") / "assess-rfe"
 # checks it out and verifies the checkout (ASSESS_RFE_REF overrides). Matched with
 # fullmatch so a trailing newline (which `$` alone tolerates) is rejected.
 RUBRIC_REF_RE = re.compile(r"^[0-9a-f]{7,40}$")
+# Cross rule 6 keys descriptors by repository identity, not by the spelling the schema
+# accepts: `owner/repo`, `https://github.com/owner/repo[.git][/]`, and for robustness the
+# `git@github.com:owner/repo.git` / `ssh://git@github.com/...` forms.
+_GITHUB_PREFIX_RE = re.compile(r"^(?:https?://|ssh://git@|git@)?(?:www\.)?github\.com[:/]+", re.I)
+
+
+def canonical_rubric_repo(repo):
+    """The identity key of pipeline.rubric.repo for cross rule 6: the lowercased
+    ``owner/repo`` for any GitHub spelling (slug, https URL, git@ / ssh URL, with or
+    without ``.git`` or a trailing slash); any other URL lowercased with the same
+    suffixes stripped. None for a non-string or ``self`` (the D3 embedded rubric)."""
+    if not isinstance(repo, str) or repo == "self":
+        return None
+    value = repo.strip().rstrip("/")
+    if value.lower().endswith(".git"):
+        value = value[:-4].rstrip("/")
+    m = _GITHUB_PREFIX_RE.match(value)
+    if m:
+        value = value[m.end() :]
+    return value.strip("/").lower() or None
+
+
 # D3 (design §11): an embedded rubric (`repo: self`) is pinned by a content hash
 # instead of a commit — sha256 hex is 64 chars, a truncated prefix is accepted.
 RUBRIC_VERSION_RE = re.compile(r"^[0-9a-f]{7,64}$")
@@ -696,10 +719,14 @@ def cross_type_findings(registry, env):
     #     bootstrap work (a checkout per repo) before the rule could mean anything
     #     for it. Only well-formed refs take part (a malformed one is already a
     #     per-type finding); the D3 embedded rubric (repo: self) has no checkout.
+    #     The key is the canonical repository identity (canonical_rubric_repo), so
+    #     `opendatahub-io/assess-rfe`, `https://github.com/opendatahub-io/assess-rfe`
+    #     and `...assess-rfe.git` group together.
     refs_by_repo = {}
     for name, desc in descs.items():
-        repo, ref = _opt(desc, "pipeline.rubric.repo"), _opt(desc, "pipeline.rubric.ref")
-        if repo == "self" or not isinstance(repo, str) or not isinstance(ref, str):
+        repo = canonical_rubric_repo(_opt(desc, "pipeline.rubric.repo"))
+        ref = _opt(desc, "pipeline.rubric.ref")
+        if repo is None or not isinstance(ref, str):
             continue
         if not RUBRIC_REF_RE.fullmatch(ref):
             continue

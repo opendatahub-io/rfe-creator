@@ -569,6 +569,48 @@ class TestPerTypeGate:
         assert hits[0].types == frozenset({"rfe", "initiative"})
         assert "bootstrap-assess-rfe.sh keeps one checkout per repo" in hits[0].message
 
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "opendatahub-io/assess-rfe",
+            "https://github.com/OpenDataHub-io/Assess-RFE",
+            "https://github.com/opendatahub-io/assess-rfe.git",
+            "opendatahub-io/assess-rfe.git",
+        ],
+    )
+    def test_shared_repo_rule_canonicalizes_the_repo_spelling(self, types_copy, spelling):
+        """The schema accepts a slug or the https URL, with or without .git: the same
+        repository in two spellings is still one checkout, so two refs are a finding and
+        one ref is clean."""
+
+        def respell(d):
+            d["pipeline"]["rubric"]["repo"] = spelling
+
+        _mutate(types_copy, "rfe", respell)
+        assert _validate(types_copy).ok, _validate(types_copy).lines()
+        _mutate(types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40))
+        report = _validate(types_copy)
+        hits = _assert_finding(report, "sharing rubric repo 'opendatahub-io/assess-rfe'", "*")
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+
+    @pytest.mark.parametrize(
+        "repo, key",
+        [
+            ("opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),
+            ("https://github.com/OpenDataHub-IO/Assess-RFE.git/", "opendatahub-io/assess-rfe"),
+            ("git@github.com:opendatahub-io/assess-rfe.git", "opendatahub-io/assess-rfe"),
+            ("ssh://git@github.com/opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),
+            (
+                "https://gitlab.example.com/Group/Rubrics.git/",
+                "https://gitlab.example.com/group/rubrics",
+            ),
+            ("self", None),
+            (None, None),
+        ],
+    )
+    def test_canonical_rubric_repo(self, repo, key):
+        assert validate_types.canonical_rubric_repo(repo) == key
+
     def test_shared_repo_rule_skips_malformed_refs_and_self_rubrics(self, types_copy):
         """A malformed ref is the per-type finding only (never doubled by rule 6), and a D3
         embedded rubric has no checkout to share."""

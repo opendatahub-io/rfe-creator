@@ -57,7 +57,7 @@ The evaluation runs the `rfe.speedrun` skill headlessly against 26 test cases: 2
 
 ### Dataset
 
-`eval/dataset/cases/` contains 25 test cases, each with:
+`eval/dataset/cases/` contains 26 test cases, each with:
 
 | File | Purpose |
 |------|---------|
@@ -145,7 +145,7 @@ The evaluation runs the `initiative-speedrun` skill headlessly against 21 test c
 
 ### Dataset
 
-`eval/initiative-dataset/cases/` contains 20 test cases, each with:
+`eval/initiative-dataset/cases/` contains 21 test cases, each with:
 
 | File | Purpose |
 |------|---------|

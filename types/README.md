@@ -564,8 +564,9 @@ first two changed no verdict and the third removed exactly two false positives.
    pairwise not prefix-of-each-other, `report_prefix` non-empty except `rfe`, no `local_prefix`
    stem equal to an effective project key, `rubric.ref` a 7–40-char hex SHA (or, for the D3
    embedded rubric `rubric.repo: self`, `rubric.rubric_version` a 7–64-char hex content hash),
-   one `rubric.ref` per shared external `rubric.repo` (the bootstrap keeps one checkout, of one
-   fixed repo, in `.context/assess-rfe`; a second external rubric repo needs bootstrap work first).
+   one `rubric.ref` per shared external `rubric.repo`, compared as the canonical `owner/repo`
+   whatever the spelling (the bootstrap keeps one checkout, of one fixed repo, in
+   `.context/assess-rfe`; a second external rubric repo needs bootstrap work first).
 2. **Gate 2 — `--with-deps`** (after bootstrap): `rubric.path` exists under `--assess-dir` (under
    the repo root when `rubric.repo` is `self`) and the agent file `agents/<scorer_agent>.md` is
    present in the assess checkout.

@@ -462,7 +462,9 @@ class TestRubricPin:
     @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 directory")
     def test_unoperable_checkout_warns_and_continues(self, workdir, drop_in_root, assess_repo):
         """Review finding 1(b): git cannot open the checkout (here an unreadable .git; in
-        production a checkout owned by another UID) — warn, keep the vendored files, exit 0."""
+        production a checkout owned by another UID, which git refuses as "dubious ownership"
+        and this script never overrides) — warn, keep the vendored files as found, no git
+        write, exit 0."""
         url, first, second = assess_repo
         self._clone_at(url, second)
         git_dir = workdir / ".context" / "assess-rfe" / ".git"
@@ -474,6 +476,8 @@ class TestRubricPin:
         assert result.returncode == 0, result.stderr
         assert "WARN: git cannot operate on .context/assess-rfe" in result.stderr
         assert "is not enforced, using the checkout as is" in result.stderr
+        # Nothing was checked out: HEAD is where the (untrusted) checkout left it.
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
         # The skills were still vendored from the checkout as found.
         assert (
             workdir / ".claude" / "skills" / "assess-rfe" / "scripts" / "agent_prompt.md"

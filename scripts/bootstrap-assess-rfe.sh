@@ -136,18 +136,13 @@ fi
 
 # A git checkout is whatever `rev-parse --git-dir` accepts: a clone (.git is a
 # directory), a worktree or a submodule (.git is a file). A checkout owned by
-# another user is refused ("dubious ownership") until it is trusted; trust
-# exactly this directory for this run and try again.
-GIT_TRUST=""
-if [ -e "$CONTEXT_DIR/.git" ] && ! git -C "$CONTEXT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  GIT_TRUST="$(cd "$CONTEXT_DIR" && pwd -P)"
-fi
+# another user is refused by git ("dubious ownership") and that refusal is
+# respected — never overridden with safe.directory: a foreign-owned repository
+# can carry hooks a checkout would run with this account's privileges. Such a
+# checkout is one git cannot operate on, and its vendored files are used as
+# found (the WARN branch below).
 gitc() {
-  if [ -n "$GIT_TRUST" ]; then
-    git -c "safe.directory=$GIT_TRUST" -C "$CONTEXT_DIR" "$@"
-  else
-    git -C "$CONTEXT_DIR" "$@"
-  fi
+  git -C "$CONTEXT_DIR" "$@"
 }
 pin_is_commit() {
   # A commit pin is all-hex, at least 7 characters, and resolves to a commit
