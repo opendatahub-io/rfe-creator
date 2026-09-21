@@ -707,7 +707,11 @@ def _final_reconcile(state, type_flag):
     reader, reconciles again at start-up (after the agent process is torn down) and removes
     them. An id the reconcile could not repair gets the registry error stub, not a merged
     error field: the run report treats a review with a generic ``error`` as readable and
-    would copy its stale scores."""
+    would copy its stale scores. After the reconcile, the content guard
+    (``check_revised.py --batch --lower-only``) lowers a set ``auto_revised`` on every task
+    whose body still equals its original: a revise agent's last write can land after FIXUP
+    (2026-09-21 stage dry run), and the run report must agree with what submit will
+    label. Lower-only — raising stays FIXUP's job over the revise ids."""
     all_ids = _read_ids("tmp/pipeline-all-ids.txt")
     if not all_ids:
         return ""
@@ -724,12 +728,21 @@ def _final_reconcile(state, type_flag):
         verify_phase.write_error_stubs(
             "review", errored, state.get("type", "rfe"), error="reconcile_failed"
         )
+    lowered = _parse_line_ids(
+        _run_script(
+            f"python3 scripts/check_revised.py {type_flag} --batch --lower-only {' '.join(all_ids)}"
+        ),
+        "LOWERED",
+    )
+    lines = ""
     if restored or flagged or errored:
-        return (
+        lines += (
             f"REPORT reconcile: restored={len(restored)} flagged={len(flagged)}"
             f" errors={len(errored)}\n"
         )
-    return ""
+    if lowered:
+        lines += f"REPORT flag guard: lowered={len(lowered)}\n"
+    return lines
 
 
 def _sweep_review_state(ids):

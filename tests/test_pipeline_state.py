@@ -700,9 +700,13 @@ class TestBatchDone:
         state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, reassess_cycle=1)
         next_phase, summary = ps.advance(state)
         assert next_phase == "REPORT"
-        assert calls[-1] == (
+        assert calls[-2] == (
             "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 1"
             " RHAIRFE-1 RHAIRFE-2"
+        )
+        # The content guard runs after the reconcile (a restore may re-raise a flag first).
+        assert calls[-1] == (
+            "python3 scripts/check_revised.py --type rfe --batch --lower-only RHAIRFE-1 RHAIRFE-2"
         )
         assert "REPORT reconcile: restored=1 flagged=0 errors=0\nBATCH_DONE → REPORT" in summary
         calls.clear()
@@ -722,7 +726,36 @@ class TestBatchDone:
         next_phase, _ = ps.advance(state)
         assert next_phase == "REPORT"
         assert calls == [
-            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 0 RHAIRFE-1"
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 0 RHAIRFE-1",
+            "python3 scripts/check_revised.py --type rfe --batch --lower-only RHAIRFE-1",
+        ]
+
+    def test_final_guard_lowers_a_set_flag_on_an_unchanged_task(self, tmp_dir, monkeypatch):
+        """2026-09-21 stage dry run: a revise agent's last write restored auto_revised after
+        FIXUP had lowered it on an unchanged task. The REPORT transition re-derives the flag
+        from the content (lower-only) so the run report agrees with what submit labels."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        calls = []
+
+        def mock_run(cmd):
+            calls.append(cmd)
+            if "batch_summary" in cmd:
+                return "TOTAL=2 PASSED=2"
+            if "reconcile_reviews" in cmd:
+                return "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS="
+            if "check_revised" in cmd:
+                return "RHAIRFE-2: auto_revised True -> False\nLOWERED=RHAIRFE-2\nUPDATED=1"
+            return "ERRORS="
+
+        monkeypatch.setattr(ps, "_run_script", mock_run)
+        next_phase, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert next_phase == "REPORT"
+        assert "REPORT flag guard: lowered=1\nBATCH_DONE → REPORT" in summary
+        assert "REPORT reconcile:" not in summary  # nothing restored, flagged or errored
+        guard = [c for c in calls if "check_revised" in c]
+        assert guard == [
+            "python3 scripts/check_revised.py --type rfe --batch --lower-only RHAIRFE-1 RHAIRFE-2"
         ]
 
     def test_final_reconcile_stubs_the_ids_it_could_not_repair(self, tmp_dir, monkeypatch):

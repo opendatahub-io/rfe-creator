@@ -341,6 +341,51 @@ class TestAutoRevisedLabel:
         assert "rfe-creator-auto-revised" in stdout
         assert not os.path.exists(f"{art_dir}/rfe-reviews/RFE-001-review-state.json")
 
+    def test_set_flag_on_unchanged_text_is_lowered_before_labels(self, art_dir):
+        """2026-09-21 stage dry run (RHAIRFE-3444): the revise agent's last write restored
+        auto_revised after FIXUP had lowered it on an unchanged task, and the dry-run submit
+        would have applied the auto-revised label. The content guard at start-up lowers a set
+        flag whose task body equals its original; the label follows the corrected flag."""
+        body = "## Problem\n\nSame content.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert (
+            "Lowered auto_revised on 1 item(s) whose text equals the original: RHAIRFE-1234"
+            in stdout
+        )
+        assert "rfe-creator-auto-revised" not in stdout
+        assert "Label only" in stdout
+
+    def test_set_flag_on_changed_text_keeps_the_label(self, art_dir):
+        """The guard is lower-only: a genuine revision keeps its flag and label."""
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "## Problem\n\nOriginal content.\n")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\n"
+            "## Problem\n\nRevised content with improvements.\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Lowered auto_revised" not in stdout
+        assert "rfe-creator-auto-revised" in stdout
+
     def test_no_label_when_not_revised(self, art_dir):
         """auto_revised=false → no auto-revised label."""
         _write(f"{art_dir}/rfe-tasks/RFE-001.md", TASK_FM.format(rfe_id="RFE-001"))

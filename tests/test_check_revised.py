@@ -403,3 +403,96 @@ class TestTypeArg:
         )
         assert result.returncode == 0
         assert result.stdout.strip() == "REVISED=true"
+
+
+class TestLowerOnly:
+    """--lower-only is the last-reader guard (REPORT transition, submit.py start-up): a set
+    flag on an unchanged task is lowered; nothing is ever raised (a removed-context companion
+    can make task != original without a revision, so raising stays FIXUP's job)."""
+
+    def _run(self, tmp_path, *args, cwd=None):
+        return subprocess.run(
+            ["python3", SCRIPT, "--batch", "--lower-only", *args],
+            capture_output=True,
+            text=True,
+            cwd=cwd or tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+
+    def test_lowers_a_set_flag_when_content_is_identical(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3001", "Same content.", "Same content.", auto_revised=True)
+        result = self._run(tmp_path, "RHAIRFE-3001")
+        assert result.returncode == 0
+        assert "RHAIRFE-3001: auto_revised True -> False (task body equals the original)" in (
+            result.stdout
+        )
+        assert "LOWERED=RHAIRFE-3001" in result.stdout
+        assert "UPDATED=1" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3001-review.md")
+        assert fm["auto_revised"] is False
+
+    def test_leaves_a_set_flag_when_content_differs(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3002", "Original.", "Revised.", auto_revised=True)
+        result = self._run(tmp_path, "RHAIRFE-3002")
+        assert result.returncode == 0
+        assert "LOWERED=\n" in result.stdout
+        assert "UPDATED=0" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3002-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_never_raises_an_unset_flag(self, tmp_path):
+        """Differing content with the flag unset is FIXUP's call, not the guard's."""
+        _setup_batch(tmp_path, "RHAIRFE-3003", "Original.", "Revised.", auto_revised=False)
+        result = self._run(tmp_path, "RHAIRFE-3003")
+        assert result.returncode == 0
+        assert "LOWERED=\n" in result.stdout
+        assert "UPDATED=0" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3003-review.md")
+        assert fm["auto_revised"] is False
+
+    def test_skips_an_id_without_an_original(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3004", "x", "x", auto_revised=True)
+        os.remove(tmp_path / "artifacts/rfe-originals/RHAIRFE-3004.md")
+        result = self._run(tmp_path, "RHAIRFE-3004")
+        assert result.returncode == 0
+        assert "LOWERED=\n" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3004-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_artifacts_dir_resolves_the_type_dirs_elsewhere(self, tmp_path):
+        """submit.py runs the guard with --artifacts-dir from a cwd that has no artifacts/."""
+        _setup_batch(tmp_path, "RHAIRFE-3005", "Same.", "Same.", auto_revised=True)
+        _setup_batch(tmp_path, "RHAIRFE-3006", "Same.", "Same.", auto_revised=True)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        result = self._run(
+            tmp_path, "--artifacts-dir", str(tmp_path / "artifacts"), cwd=elsewhere
+        )  # no ids: discovered from the originals dir under --artifacts-dir
+        assert result.returncode == 0
+        assert "LOWERED=RHAIRFE-3005,RHAIRFE-3006" in result.stdout
+        assert "UPDATED=2" in result.stdout
+
+    def test_missing_originals_dir_is_empty_not_an_error(self, tmp_path):
+        (tmp_path / "artifacts" / "rfe-reviews").mkdir(parents=True)
+        result = self._run(tmp_path)
+        assert result.returncode == 0
+        assert "LOWERED=\n" in result.stdout
+        assert "UPDATED=0" in result.stdout
+
+    def test_artifacts_dir_requires_a_value(self, tmp_path):
+        result = self._run(tmp_path, "--artifacts-dir")
+        assert result.returncode == 2
+        assert "--artifacts-dir requires a value" in result.stderr
+
+    def test_default_batch_mode_still_raises_and_lowers(self, tmp_path):
+        """Without --lower-only the FIXUP behaviour is unchanged (raises on a diff)."""
+        _setup_batch(tmp_path, "RHAIRFE-3007", "Original.", "Revised.", auto_revised=False)
+        result = subprocess.run(
+            ["python3", SCRIPT, "--batch", "RHAIRFE-3007"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+        assert "RHAIRFE-3007: auto_revised False -> True" in result.stdout
+        assert "LOWERED=" not in result.stdout
