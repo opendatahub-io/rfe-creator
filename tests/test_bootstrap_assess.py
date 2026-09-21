@@ -483,6 +483,62 @@ class TestRubricPin:
             workdir / ".claude" / "skills" / "assess-rfe" / "scripts" / "agent_prompt.md"
         ).is_file()
 
+    def test_dubious_ownership_is_respected_not_overridden(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """CodeRabbit on #198: git's own ownership refusal, not a filesystem permission. With
+        GIT_TEST_ASSUME_DIFFERENT_OWNER git reports "dubious ownership" for every command on
+        the checkout; the script must take the WARN-and-continue branch — vendored files
+        copied, HEAD untouched, no fetch. A `safe.directory` override in the script would
+        make this test fail: git would then accept the checkout and move HEAD to the pin."""
+        url, first, second = assess_repo
+        self._clone_at(url, second)
+        result = self._run(self._env(drop_in_root, url, first, GIT_TEST_ASSUME_DIFFERENT_OWNER="1"))
+        assert result.returncode == 0, result.stderr
+        assert "WARN: git cannot operate on .context/assess-rfe" in result.stderr
+        assert "dubious ownership" in result.stderr
+        assert "fetch failed" not in result.stderr
+        assert (
+            workdir / ".claude" / "skills" / "assess-rfe" / "scripts" / "agent_prompt.md"
+        ).is_file()
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+
+    def test_long_hex_tag_that_is_not_its_targets_prefix_is_a_ref(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """pin_is_commit boundary (CodeRabbit on #198): `deadbeef0` passes the all-hex and
+        length checks, so only the resolves-to-itself check makes it a ref name; drop that
+        check and the HEAD verification fails here."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        assert not first.startswith("deadbeef0")
+        subprocess.run(["git", "-C", repo, "tag", "deadbeef0", first], check=True)
+        result = self._run(self._env(drop_in_root, url, second, ASSESS_RFE_REF="deadbeef0"))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        assert f"assess-rfe at {first[:12]} (ASSESS_RFE_REF)" in result.stdout
+
+    def test_short_hex_tag_that_is_its_targets_prefix_is_still_a_ref(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """The length check alone: a 4-hex tag named after its target's first four characters
+        resolves to a commit that starts with it, so only `>= 7` keeps it a ref name. With the
+        checkout already at the target, dropping the length check would report the
+        "already checked out" shortcut instead of checking the ref out normally."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        tag = first[:4]
+        subprocess.run(["git", "-C", repo, "tag", tag, first], check=True)
+        subprocess.run(["git", "clone", "-q", url, ".context/assess-rfe"], check=True)
+        subprocess.run(
+            ["git", "-C", ".context/assess-rfe", "checkout", "-q", "--detach", first], check=True
+        )
+        result = self._run(self._env(drop_in_root, url, second, ASSESS_RFE_REF=tag))
+        assert result.returncode == 0, result.stderr
+        assert "already checked out" not in result.stdout
+        assert f"assess-rfe at {first[:12]} (ASSESS_RFE_REF)" in result.stdout
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
     def test_hex_named_tag_override_is_a_ref_not_a_sha(self, workdir, drop_in_root, assess_repo):
         """Review finding 2: `cafe` is all-hex but resolves to a commit that does not start
         with it, so it is a ref name and HEAD is not checked against it."""
