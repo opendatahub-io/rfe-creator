@@ -341,9 +341,10 @@ class TestAutoRevisedLabel:
         assert "rfe-creator-auto-revised" in stdout
         assert not os.path.exists(f"{art_dir}/rfe-reviews/RFE-001-review-state.json")
 
-    def test_guard_failure_is_a_warning_without_the_child_stderr(self, art_dir):
-        """A review whose frontmatter does not parse makes check_revised.py fail; the guard
-        reports the exit status only — the child's error quotes the offending source line,
+    def test_guard_skips_an_unreadable_review_and_names_it_only(self, art_dir):
+        """A review whose frontmatter does not parse is skipped by check_revised.py (per-id
+        isolation, exit 0); the guard warns with the id only — the child's per-id line
+        carries the exception class, and its message quotes the offending source line,
         email included — and the submit goes on."""
         body = "## Problem\n\nSame content.\n"
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
@@ -361,11 +362,76 @@ class TestAutoRevisedLabel:
         stdout, stderr, rc = _run_submit(art_dir)
         guard = [ln for ln in stderr.splitlines() if "auto_revised content guard" in ln]
         assert guard == [
-            "Warning: auto_revised content guard failed (check_revised.py exit 1);"
-            " flags left as written"
+            "Warning: auto_revised content guard skipped 1 item(s) it could not read or"
+            " update: RHAIRFE-1234"
         ]
-        assert "jane.doe@example.com" not in "\n".join(guard)
+        assert "jane.doe@example.com" not in stderr
         assert "Traceback" not in stderr
+
+    def test_guard_lowers_the_ids_after_an_unreadable_review(self, art_dir):
+        """Mixed batch: the unreadable review sorts first; the id after it is still lowered
+        and does not get the label (the skip must not abort the pass)."""
+        body = "## Problem\n\nSame content.\n"
+        for rid in ("RHAIRFE-1000", "RHAIRFE-1234"):
+            _write(f"{art_dir}/rfe-originals/{rid}.md", body)
+            _write(
+                f"{art_dir}/rfe-tasks/{rid}.md",
+                f"---\nrfe_id: {rid}\ntitle: Test RFE\npriority: Major\nstatus: Ready\n---\n{body}",
+            )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md",
+            "---\nrfe_id: RHAIRFE-1000\nauto_revised: true\n"
+            "score: [unclosed owner: jane.doe@example.com\n---\nbody\n",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
+
+        stdout, stderr, rc = _run_submit(art_dir)
+        assert (
+            "Lowered auto_revised on 1 item(s) whose text equals the original: RHAIRFE-1234"
+            in stdout
+        )
+        assert (
+            "Warning: auto_revised content guard skipped 1 item(s) it could not read or"
+            " update: RHAIRFE-1000"
+        ) in stderr
+        assert "rfe-creator-auto-revised" not in stdout
+        assert "jane.doe@example.com" not in stderr
+
+    def test_saved_state_is_reapplied_before_the_content_guard(self, art_dir):
+        """The order of the two start-up passes is load-bearing: the state reconcile may
+        re-raise auto_revised from a kept state file, and the content guard must run after
+        it so an unchanged task still ends up unflagged. Swapping the calls would re-raise
+        the flag after the guard and apply the label."""
+        body = "## Problem\n\nSame content.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="false"),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review-state.json",
+            '{"before_score": 6, "before_scores": {"what": 2, "why": 0, "open_to_how": 2,'
+            ' "not_a_task": 2, "right_sized": 0}, "auto_revised": true, "revision_history": ""}',
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "Re-applied saved review state for 1 item(s): RHAIRFE-1234" in stdout
+        assert (
+            "Lowered auto_revised on 1 item(s) whose text equals the original: RHAIRFE-1234"
+            in stdout
+        )
+        assert "rfe-creator-auto-revised" not in stdout
+        review = open(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md").read()
+        assert "auto_revised: false" in review
 
     def test_set_flag_on_unchanged_text_is_lowered_before_labels(self, art_dir):
         """2026-09-21 stage dry run (RHAIRFE-3444): the revise agent's last write restored

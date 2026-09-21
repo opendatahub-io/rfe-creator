@@ -78,6 +78,17 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
     land after FIXUP (2026-09-21 stage dry run: the wave released at 09:36:43, FIXUP
     lowered the flag at 09:36:46, the agent's last write restored it at 09:37:06), and
     the last reader must not trust a flag the content contradicts.
+
+    The equality test is ``strip_frontmatter`` + whitespace strip — narrower than submit's
+    ``jira_utils.strip_metadata`` (HTML comments, "### Revision Notes" blocks, the
+    "# KEY: Title" heading), so a task that differs from its original only by those keeps
+    its flag: conservative, the guard never lowers when unsure.
+
+    Per-id isolation (both modes): one review that cannot be read or updated is skipped —
+    ``check_revised: skipped <id> (<ExceptionClass>)`` on stderr, class name only, since the
+    message can quote frontmatter — and reported on the ``SKIPPED=<ids>`` line; the rest of
+    the batch proceeds and the exit status stays 0. One bad item must not abort the batch:
+    every id sorted after it would otherwise keep a stale flag.
     """
     # --type is validated against the registry in main() (type_registry.parse_type_arg), so
     # the lookup cannot miss for a CLI caller; the dict's keys ARE the registry names.
@@ -94,35 +105,41 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
 
     changed = 0
     lowered = []
+    skipped = []
     for rfe_id in sorted(ids):
-        original = os.path.join(originals_dir, f"{rfe_id}.md")
-        task = os.path.join(tasks_dir, f"{rfe_id}.md")
-        review = find_review_file(artifacts_dir, rfe_id)
-        if not review:
-            continue
+        try:
+            original = os.path.join(originals_dir, f"{rfe_id}.md")
+            task = os.path.join(tasks_dir, f"{rfe_id}.md")
+            review = find_review_file(artifacts_dir, rfe_id)
+            if not review:
+                continue
 
-        revised = check_pair(original, task)
-        if revised is None:
-            continue
+            revised = check_pair(original, task)
+            if revised is None:
+                continue
 
-        data, _ = read_frontmatter(review)
-        current = data.get("auto_revised", False)
-        if lower_only:
-            if current and not revised:
-                update_frontmatter(review, {"auto_revised": False}, tc["review_schema"])
+            data, _ = read_frontmatter(review)
+            current = data.get("auto_revised", False)
+            if lower_only:
+                if current and not revised:
+                    update_frontmatter(review, {"auto_revised": False}, tc["review_schema"])
+                    changed += 1
+                    lowered.append(rfe_id)
+                    print(f"{rfe_id}: auto_revised True -> False (task body equals the original)")
+                continue
+            if revised != current:
+                update_frontmatter(review, {"auto_revised": revised}, tc["review_schema"])
                 changed += 1
-                lowered.append(rfe_id)
-                print(f"{rfe_id}: auto_revised True -> False (task body equals the original)")
-            continue
-        if revised != current:
-            update_frontmatter(review, {"auto_revised": revised}, tc["review_schema"])
-            changed += 1
-            print(f"{rfe_id}: auto_revised {current} -> {revised}")
-        else:
-            print(f"{rfe_id}: auto_revised={current} (correct)")
+                print(f"{rfe_id}: auto_revised {current} -> {revised}")
+            else:
+                print(f"{rfe_id}: auto_revised={current} (correct)")
+        except Exception as exc:  # one bad item must not abort the batch
+            skipped.append(rfe_id)
+            print(f"check_revised: skipped {rfe_id} ({type(exc).__name__})", file=sys.stderr)
 
     if lower_only:
         print(f"LOWERED={','.join(lowered)}")
+    print(f"SKIPPED={','.join(skipped)}")
     print(f"UPDATED={changed}")
 
 

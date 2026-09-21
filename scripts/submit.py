@@ -428,6 +428,15 @@ def _lower_unrevised_flags(artifacts_dir, type_name):
                 f"Lowered auto_revised on {len(ids)} item(s) whose text equals the original:"
                 f" {', '.join(ids)}"
             )
+        elif line.startswith("SKIPPED=") and line[len("SKIPPED=") :]:
+            # Ids only: the child's per-id stderr line carries the exception class, and its
+            # message could have quoted frontmatter.
+            ids = line[len("SKIPPED=") :].split(",")
+            print(
+                f"Warning: auto_revised content guard skipped {len(ids)} item(s) it could not"
+                f" read or update: {', '.join(ids)}",
+                file=sys.stderr,
+            )
 
 
 def _record_not_attempted(args, cfg, parent_keys, error):

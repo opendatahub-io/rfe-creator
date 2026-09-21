@@ -738,17 +738,22 @@ def _final_reconcile(state, type_flag):
             f"REPORT flag guard: skipped (check_revised.py exit {rc}); flags left as written",
             file=sys.stderr,
         )
-        lowered = []
+        lowered, skipped = [], []
     else:
         lowered = _parse_line_ids(guard_out, "LOWERED")
+        # Ids the guard could not read or update (per-id isolation; the rest were checked).
+        skipped = _parse_line_ids(guard_out, "SKIPPED")
     lines = ""
     if restored or flagged or errored:
         lines += (
             f"REPORT reconcile: restored={len(restored)} flagged={len(flagged)}"
             f" errors={len(errored)}\n"
         )
-    if lowered:
-        lines += f"REPORT flag guard: lowered={len(lowered)}\n"
+    if lowered or skipped:
+        lines += f"REPORT flag guard: lowered={len(lowered)}"
+        if skipped:
+            lines += f" skipped={len(skipped)}"
+        lines += "\n"
     return lines
 
 

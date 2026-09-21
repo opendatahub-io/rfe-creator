@@ -763,6 +763,39 @@ class TestBatchDone:
             "python3 scripts/check_revised.py --type rfe --batch --lower-only RHAIRFE-1 RHAIRFE-2"
         ]
 
+    def test_final_guard_reports_the_ids_it_skipped(self, tmp_dir, monkeypatch):
+        """Per-id isolation: check_revised.py names the reviews it could not read or update
+        on SKIPPED= and exits 0; the REPORT summary carries the count next to lowered=."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        monkeypatch.setattr(
+            ps,
+            "_run_script",
+            lambda cmd: (
+                "TOTAL=2 PASSED=2"
+                if "batch_summary" in cmd
+                else (
+                    "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS="
+                    if "reconcile_reviews" in cmd
+                    else "ERRORS="
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            ps,
+            "_run_script_soft",
+            lambda cmd: (0, "LOWERED=RHAIRFE-2\nSKIPPED=RHAIRFE-1\nUPDATED=1"),
+        )
+        next_phase, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert next_phase == "REPORT"
+        assert "REPORT flag guard: lowered=1 skipped=1\nBATCH_DONE → REPORT" in summary
+        # Nothing lowered but something skipped still surfaces.
+        monkeypatch.setattr(
+            ps, "_run_script_soft", lambda cmd: (0, "LOWERED=\nSKIPPED=RHAIRFE-1\nUPDATED=0")
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert "REPORT flag guard: lowered=0 skipped=1\n" in summary
+
     def test_final_guard_failure_does_not_abort_report_or_echo_stderr(
         self, tmp_dir, monkeypatch, capsys
     ):
