@@ -364,6 +364,32 @@ def _generate_reports(args, type_name):
         print(f"Warning: HTML report generation failed: {result.stderr}", file=sys.stderr)
 
 
+def _reconcile_saved_review_state(artifacts_dir, type_name):
+    """Run ``reconcile_reviews.py --all`` over the artifacts (see main). Local-only and
+    best-effort: a failure is reported, never fatal, so a repair problem cannot block the
+    submit of everything else."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cmd = [
+        sys.executable,
+        os.path.join(script_dir, "reconcile_reviews.py"),
+        "--type",
+        type_name,
+        "--artifacts-dir",
+        artifacts_dir,
+        "--all",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Warning: review state reconcile failed: {result.stderr.strip()}", file=sys.stderr)
+        return
+    for line in result.stdout.splitlines():
+        if line.startswith("RESTORED=") and line[len("RESTORED=") :]:
+            ids = line[len("RESTORED=") :].split(",")
+            print(f"Re-applied saved review state for {len(ids)} item(s): {', '.join(ids)}")
+        elif line.startswith("RECONCILE_ERROR "):
+            print(f"Warning: {line}", file=sys.stderr)
+
+
 def _record_not_attempted(args, cfg, parent_keys, error):
     """Local-only record for split parents a phase abort skipped.
 
@@ -593,6 +619,11 @@ def main():
         print("Error: JIRA_SERVER, JIRA_USER, and JIRA_TOKEN env vars required.", file=sys.stderr)
         print("Set these or use --dry-run for local-only validation.", file=sys.stderr)
         sys.exit(1)
+
+    # Re-apply any saved review state before the first review is read (AISDLC-33): a
+    # review agent can rewrite its review minutes after its wave, past COLLECT and REPORT;
+    # this is the last reader, and in CI it runs after the agent process is torn down.
+    _reconcile_saved_review_state(args.artifacts_dir, type_name)
 
     # Scan task files
     tasks = scan_tasks(args.artifacts_dir, desc)

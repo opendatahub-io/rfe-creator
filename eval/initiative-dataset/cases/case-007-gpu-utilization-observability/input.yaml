@@ -1,22 +1,27 @@
 clarifying_context: 'We are spending a lot on GPU clusters and have almost no visibility
-  into how well they are actually being used. People request nodes for KServe inference
-  endpoints or training operator jobs, saturate them for an hour, and then the hardware
-  sits idle until someone else comes along. We do not even have basic utilization
-  dashboards, so nobody can answer simple questions like which vLLM deployments are
-  over-provisioned or whether we could consolidate training workloads onto fewer nodes.
+  into how well they are actually being used. The last three months of billing put GPU
+  nodes at 61 percent of platform cloud spend, and the two spot checks we ran found
+  average utilization under 20 percent on the training pool. People request nodes for
+  KServe inference endpoints or training operator jobs, saturate them for an hour, and
+  then the hardware sits idle until someone else comes along. Four capacity escalations
+  last quarter ended the same way -- we bought more nodes because nobody could show that
+  the ones we had were free.
 
-  The idea is to build an observability layer that collects GPU metrics at the pod and
-  node level, feeds them into our existing monitoring stack, and surfaces dashboards that
-  show utilization trends over time. We also want alerting for sustained low utilization
-  so we can right-size allocations. The implementation should use Prometheus with DCGM
-  Exporter for GPU metric collection, Grafana for the dashboards, and TimescaleDB as
-  the long-term metrics store for historical trend analysis. Eventually we would like
-  to tie this into the scheduling layer so the platform can bin-pack more aggressively,
-  but that is a follow-on -- the first milestone is just getting the data flowing and
-  visible. We think this could save us a meaningful chunk of our cloud bill once teams
-  can actually see what they are using.'
+  What we want to deliver is an observability layer that collects GPU metrics at the pod
+  and node level, retains them long enough for trend analysis, and surfaces dashboards
+  that answer the questions we cannot answer today: which deployments are over-provisioned,
+  which pools sit idle overnight, and where we could consolidate. It also needs alerting
+  on sustained low utilization so teams get told to right-size instead of finding out at
+  the next bill review. In scope: metric collection, retention, the dashboards, and the
+  low-utilization alerts. Out of scope: acting on the data automatically -- feeding it to
+  the scheduler for tighter bin-packing is a follow-on initiative -- and CPU or memory
+  accounting, which is already covered elsewhere. The technical decisions here are made
+  and closed: Telegraf runs as the collection agent on every node, InfluxDB is the metrics
+  store, Superset renders the dashboards, and Kapacitor evaluates the alerting rules.
+  Engineering should build against those four choices rather than reopen the evaluation.'
 priority: Critical
 prompt: We need real visibility into GPU utilization across our clusters. Right now
   nobody can tell which workloads are wasting capacity, and we are spending a lot of
-  money on hardware that sits idle between jobs. We want to implement this using
-  Prometheus with DCGM Exporter and Grafana dashboards for the observability layer.
+  money on hardware that sits idle between jobs. The stack for this is already settled --
+  Telegraf for collection, InfluxDB for storage, Superset for dashboards, Kapacitor for
+  alerting -- so the work is to build it out on those components.

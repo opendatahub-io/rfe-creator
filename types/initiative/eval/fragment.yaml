@@ -85,11 +85,14 @@ revision:
     prescriptive choices.
 threshold_notes:
   revision_coverage: |
-    with 20 cases of which 4 are tagged revision-expected (case-017 to
-    case-020, each carrying an honest evidence or scope gap the create step
-    cannot repair), 3 of 4 revised leaves 1 failure -> 19/20 = 0.95 (pass);
-    2 of 4 revised leaves 2 failures -> 18/20 = 0.90 (fail). The 1-failure
-    slack is shared with any case without a review file. Until 2026-09-16
+    with 20 cases of which 6 are tagged revision-expected (case-007, case-013
+    and case-017 to case-020, each carrying a gap the create step cannot
+    repair: a circular WHY, a dictated technology stack, or no boundaries),
+    5 of 6 revised leaves 1 failure -> 19/20 = 0.95 (pass); 4 of 6 revised
+    leaves 2 failures -> 18/20 = 0.90 (fail). The 1-failure slack is shared
+    with any case without a review file. Calibrated on 2026-09-18 (#193): all
+    six failed first review on the targeted criterion and were revised (007
+    HOW 0, 013 WHY 0, 017 WHY 0, 018 HOW 0, 019 HOW 0, 020 WHY 0). Until 2026-09-16
     the dataset had no tagged case and the gate passed only through the
     run-level rule on incidental revisions (5 of 16 on 2026-09-04, 1 of 16 on
     2026-09-15 — always case-012, whose sparse draft failed first review

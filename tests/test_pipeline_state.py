@@ -538,7 +538,8 @@ class TestCollect:
         next_phase, summary = ps.advance(state)
         assert next_phase == "BATCH_DONE"
         assert calls[0] == (
-            "python3 scripts/reconcile_reviews.py --type rfe --cycles 2 RHAIRFE-1 RHAIRFE-2"
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 2"
+            " RHAIRFE-1 RHAIRFE-2"
         )
         assert "collect_recommendations.py" in calls[1]
         assert summary.startswith("COLLECT reconcile: restored=1 flagged=1 errors=0\n")
@@ -679,6 +680,76 @@ class TestBatchDone:
         state = make_state(phase="BATCH_DONE", batch=1, total_batches=1)
         next_phase, _ = ps.advance(state)
         assert next_phase == "REPORT"
+
+    def test_transition_to_report_runs_the_final_reconcile(self, tmp_dir, monkeypatch):
+        """AISDLC-33: the last reconcile covers every id of the run, without --keep-state,
+        right before REPORT — a review agent may have written after COLLECT."""
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-2"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        calls = []
+
+        def mock_run(cmd):
+            calls.append(cmd)
+            if "batch_summary" in cmd:
+                return "TOTAL=1 PASSED=1"
+            if "reconcile_reviews" in cmd:
+                return "RESTORED=RHAIRFE-1\nFLAGGED=\nRECONCILE_ERRORS="
+            return "ERRORS="
+
+        monkeypatch.setattr(ps, "_run_script", mock_run)
+        state = make_state(phase="BATCH_DONE", batch=2, total_batches=2, reassess_cycle=1)
+        next_phase, summary = ps.advance(state)
+        assert next_phase == "REPORT"
+        assert calls[-1] == (
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 1"
+            " RHAIRFE-1 RHAIRFE-2"
+        )
+        assert "REPORT reconcile: restored=1 flagged=0 errors=0\nBATCH_DONE → REPORT" in summary
+        calls.clear()
+        ps.advance(make_state(phase="BATCH_DONE", batch=2, total_batches=2), dry_run=True)
+        assert not any("reconcile_reviews" in c for c in calls)
+
+    def test_error_collect_to_report_runs_the_final_reconcile(self, tmp_dir, monkeypatch):
+        write_ids("tmp/pipeline-retry-ids.txt", [])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1"])
+        calls = []
+        monkeypatch.setattr(
+            ps,
+            "_run_script",
+            lambda cmd: calls.append(cmd) or "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS=",
+        )
+        state = make_state(phase="ERROR_COLLECT", batch=1, total_batches=1, retry_cycle=1)
+        next_phase, _ = ps.advance(state)
+        assert next_phase == "REPORT"
+        assert calls == [
+            "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 0 RHAIRFE-1"
+        ]
+
+    def test_final_reconcile_stubs_the_ids_it_could_not_repair(self, tmp_dir, monkeypatch):
+        """A review with a merged generic error is still 'readable' to the run report, which
+        would copy its stale scores: the errored ids get the registry error stub instead."""
+        import verify_phase
+
+        write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
+        write_ids("tmp/pipeline-all-ids.txt", ["RHAIRFE-1", "RHAIRFE-2"])
+        stubbed = []
+        monkeypatch.setattr(
+            verify_phase,
+            "write_error_stubs",
+            lambda phase, ids, ptype, **kw: stubbed.append((phase, list(ids), ptype, kw)) or [],
+        )
+        monkeypatch.setattr(
+            ps,
+            "_run_script",
+            lambda cmd: (
+                "RESTORED=\nFLAGGED=\nRECONCILE_ERRORS=RHAIRFE-2"
+                if "reconcile_reviews" in cmd
+                else ("TOTAL=1 PASSED=1" if "batch_summary" in cmd else "ERRORS=")
+            ),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert stubbed == [("review", ["RHAIRFE-2"], "rfe", {"error": "reconcile_failed"})]
+        assert "REPORT reconcile: restored=0 flagged=0 errors=1" in summary
 
     def test_no_retry_after_max(self, tmp_dir, monkeypatch):
         write_ids("tmp/pipeline-active-ids.txt", ["RHAIRFE-1"])
@@ -4169,7 +4240,8 @@ class TestReviewStateLifetime:
         next_phase, _ = ps.advance(make_state(phase="SPLIT_CORRECTION_CHECK"))
         assert next_phase == "BATCH_DONE"
         assert (
-            calls[0] == "python3 scripts/reconcile_reviews.py --type rfe --cycles 1 RFE-002 RFE-003"
+            calls[0] == "python3 scripts/reconcile_reviews.py --type rfe --keep-state --cycles 1"
+            " RFE-002 RFE-003"
         )
         assert "check_right_sized" in calls[1]
         calls.clear()

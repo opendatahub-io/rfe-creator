@@ -1,20 +1,21 @@
-clarifying_context: 'Idea from a hallway conversation after a demo, so please treat everything below as thin and keep it
-  thin in the write-up. The gist: some kind of periodic digest — an email or a dashboard card — telling a project owner how
-  their part of the platform is doing. Which signals go into it, we have not decided: could be failed pipeline runs, could be
-  serving errors, could be quota use, could be stale workbenches, could be all of those or two of them. Whether it is per
-  project, per user or per cluster is also undecided, as is whether admins get a roll-up. I am not going to guess at an in
-  and out of scope list and I do not want one invented for me; the honest state is that the boundaries do not exist yet.
+clarifying_context: 'What the dashboard team would deliver is concrete: a weekly digest per project, sent as an email to the
+  project owners and shown as a card on the project page, listing that week''s failed pipeline runs, model-server errors and
+  the project''s quota headroom, each with a link to the object. Owners can mute the email. It is read-only — it reports, it
+  does not act — and it is one piece of work owned by one team.
 
 
-  On why: we have nothing to cite. No one has asked for this, we have no data on how project owners find out about problems
-  today, no incident that this would have prevented, and no competitor feature we are chasing. If the problem statement ends
-  up saying that the motivation is anecdotal and unmeasured, that is accurate. Do not pad it with "teams struggle to" or
-  "visibility is a common request" — nobody has established either.
+  On why, there is nothing, and I would like the write-up to say so rather than fill it in. No project owner has asked for
+  this, we have no data on how owners find out about failures today, no incident that a digest would have prevented, no
+  support ticket, and no competitor feature we are chasing. The only honest problem statement is that the platform has no
+  digest. If a problem statement is required, write that sentence — "The platform sends project owners no summary of their
+  project''s health." — and stop. Do not add "owners struggle to", "visibility is a common request" or a belief about missed
+  failures; nobody has established any of it, and a reviewer should see the gap rather than prose written to cover it.
 
 
-  The only firm things: it is one piece of work owned by the dashboard team, it is read-only (it reports, it does not act),
-  and we have no opinion on how it is built or delivered.'
+  We have not drawn the edges beyond the three signals above: whether admins get a cluster roll-up, whether stale workbenches
+  join the list, or whether it should ever page anyone are all open, and I do not want an in/out list invented for me.
+  We have no opinion on how it is built or delivered.'
 priority: Minor
-prompt: A periodic health digest for project owners summarising what is going on in their projects. Which signals, which
-  audience and what boundaries are all undecided, and we have no evidence anyone needs it — filing it so the idea is not
-  lost.
+prompt: A weekly health digest for project owners — an email and a project-page card listing that week's failed pipeline
+  runs, model-server errors and quota headroom. Nobody has asked for it and there is no evidence of a problem; filing it so
+  the idea is not lost.

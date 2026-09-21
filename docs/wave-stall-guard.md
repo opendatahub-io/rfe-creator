@@ -63,10 +63,14 @@ applies (interactive skills call `check_review_progress.py` directly).
 The companion repair is the reconcile (`scripts/reconcile_reviews.py`):
 `REASSESS_RESTORE` and `SPLIT_RESTORE` keep each item's `*-review-state.json`
 (`restore --keep-state`), COLLECT (and `SPLIT_CORRECTION_CHECK` for split
-children) re-applies it idempotently before routing and removes it, so a write
-that lands after the restore is undone whatever released the barrier; the same
-step flags every review still failing once no revision can follow. `BATCH_START`
-sweeps leftover state files for the batch's ids.
+children) re-applies it idempotently before routing and keeps it, the
+transition into `REPORT` re-applies it once more over every id of the run, and
+`submit.py` — the last reader, in CI after the agent process is torn down —
+re-applies it at start-up and removes it, so a write that lands any time before
+submit — a review agent was seen writing twice more after COLLECT — is undone
+whatever released the barrier; the COLLECT step also flags every review still
+failing once no revision can follow. `BATCH_START` sweeps leftover state files
+for the batch's ids.
 
 ## Reset-on-progress
 

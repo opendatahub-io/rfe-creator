@@ -156,16 +156,18 @@ def test_threshold_arithmetic():
     # Same value in both configs, different denominators, derived from the shipped
     # datasets so the calibration notes cannot drift from the case counts. RFE: 25
     # cases, 5 tagged revision-expected, 3 of 5 revised must pass and 2 of 5 must
-    # fail. Initiative: 20 cases, 4 tagged (case-017..020, since the gate had passed
-    # only on incidental revisions), 3 of 4 must pass and 2 of 4 must fail. Guard
-    # the float boundary as well as the configured value.
+    # fail. Initiative: 20 cases, 6 tagged (case-007, case-013, case-017..020, since
+    # the gate had passed only on incidental revisions), 5 of 6 must pass and 4 of 6
+    # must fail. Guard the float boundary as well as the configured value.
     for path in (EVAL_YAML, EVAL_INITIATIVE_YAML):
         assert _config(path)["thresholds"][JUDGE]["min_pass_rate"] == 0.92
     n_rfe, tagged_rfe, _ = _dataset("eval/dataset/cases")
     n_init, tagged_init, _ = _dataset("eval/initiative-dataset/cases")
     assert (n_rfe, len(tagged_rfe)) == (25, 5)
-    assert (n_init, len(tagged_init)) == (20, 4)
+    assert (n_init, len(tagged_init)) == (20, 6)
     assert tagged_init == [
+        "case-007-gpu-utilization-observability",
+        "case-013-scaleup-test-matrix-dynamic",
         "case-017-workbench-idle-culling",
         "case-018-pipeline-artifact-retention",
         "case-019-serving-cold-start-baseline",
@@ -173,8 +175,8 @@ def test_threshold_arithmetic():
     ]
     assert (n_rfe - 2) / n_rfe >= 0.92  # 3 of 5 revised -> 2 failures -> pass
     assert (n_rfe - 3) / n_rfe < 0.92  # 2 of 5 revised -> 3 failures -> fail
-    assert (n_init - 1) / n_init >= 0.92  # 3 of 4 revised -> 1 failure -> pass
-    assert (n_init - 2) / n_init < 0.92  # 2 of 4 revised -> 2 failures -> fail
+    assert (n_init - 1) / n_init >= 0.92  # 5 of 6 revised -> 1 failure -> pass
+    assert (n_init - 2) / n_init < 0.92  # 4 of 6 revised -> 2 failures -> fail
 
 
 def test_tagged_cases_are_annotated_as_weak_drafts():
