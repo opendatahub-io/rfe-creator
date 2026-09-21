@@ -134,39 +134,82 @@ if [ ! -d "$CONTEXT_DIR" ]; then
   git clone "$ASSESS_REPO" "$CONTEXT_DIR" 2>&1
 fi
 
-if [ -d "$CONTEXT_DIR/.git" ]; then
-  # Refresh the objects (a detached checkout cannot `pull`); offline, the
-  # cached objects may already hold the pin.
-  git -C "$CONTEXT_DIR" fetch --quiet origin 2>&1 || echo "WARN: assess-rfe fetch failed, using cached objects" >&2
-  # A full SHA (GitHub serves reachable commits by name) or a branch/tag
-  # override lands in FETCH_HEAD; an abbreviated SHA only resolves locally.
-  if git -C "$CONTEXT_DIR" fetch --quiet origin "$ASSESS_REF" 2>/dev/null; then
-    CHECKOUT_TARGET="FETCH_HEAD"
+# A git checkout is whatever `rev-parse --git-dir` accepts: a clone (.git is a
+# directory), a worktree or a submodule (.git is a file). A checkout owned by
+# another user is refused ("dubious ownership") until it is trusted; trust
+# exactly this directory for this run and try again.
+GIT_TRUST=""
+if [ -e "$CONTEXT_DIR/.git" ] && ! git -C "$CONTEXT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  GIT_TRUST="$(cd "$CONTEXT_DIR" && pwd -P)"
+fi
+gitc() {
+  if [ -n "$GIT_TRUST" ]; then
+    git -c "safe.directory=$GIT_TRUST" -C "$CONTEXT_DIR" "$@"
   else
-    CHECKOUT_TARGET="$ASSESS_REF"
+    git -C "$CONTEXT_DIR" "$@"
   fi
-  if ! git -C "$CONTEXT_DIR" checkout --quiet --detach "$CHECKOUT_TARGET" 2>/dev/null; then
-    echo "ERROR: could not check out assess-rfe at $ASSESS_REF ($REF_SOURCE) in $CONTEXT_DIR" >&2
-    exit 1
-  fi
-  HEAD_SHA="$(git -C "$CONTEXT_DIR" rev-parse HEAD 2>/dev/null)"
-  # Verify a commit pin resolved to itself (a branch or tag name has nothing to
-  # compare against).
-  case "$ASSESS_REF" in
-    *[!0-9a-f]*) ;;
-    *)
-      case "$HEAD_SHA" in
-        "$ASSESS_REF"*) ;;
-        *)
-          echo "ERROR: assess-rfe checkout is at $HEAD_SHA, not the pinned $ASSESS_REF ($REF_SOURCE)" >&2
-          exit 1
-          ;;
-      esac
-      ;;
-  esac
-  echo "assess-rfe at ${HEAD_SHA:0:12} ($REF_SOURCE)"
-else
+}
+pin_is_commit() {
+  # A commit pin is all-hex, at least 7 characters, and resolves to a commit
+  # whose id starts with it. Anything else — a branch, a tag, even a hex-named
+  # one like `cafe` — is a ref name with nothing to compare HEAD against.
+  case "$1" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -ge 7 ] || return 1
+  local id
+  id="$(gitc rev-parse --verify -q "$1^{commit}" 2>/dev/null)" || return 1
+  case "$id" in "$1"*) return 0 ;; *) return 1 ;; esac
+}
+
+GIT_ERR="$(gitc rev-parse --git-dir 2>&1 >/dev/null)"
+if [ -e "$CONTEXT_DIR/.git" ] && ! gitc rev-parse --git-dir >/dev/null 2>&1; then
+  # Present but unusable (another UID, an unreadable .git): the vendored files
+  # are still there, so keep the pre-pin behaviour — use them, say why.
+  echo "WARN: git cannot operate on $CONTEXT_DIR (${GIT_ERR:-unknown error}); the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced, using the checkout as is" >&2
+elif ! gitc rev-parse --git-dir >/dev/null 2>&1; then
   echo "WARN: $CONTEXT_DIR is not a git checkout; the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced" >&2
+else
+  HEAD_SHA="$(gitc rev-parse HEAD 2>/dev/null)" || HEAD_SHA=""
+  AT_PIN=0
+  if [ -n "$HEAD_SHA" ] && pin_is_commit "$ASSESS_REF"; then
+    case "$HEAD_SHA" in "$ASSESS_REF"*) AT_PIN=1 ;; esac
+  fi
+  if [ "$AT_PIN" -eq 1 ]; then
+    # Already where the pin says: no network, nothing to move.
+    echo "assess-rfe at ${HEAD_SHA:0:12} ($REF_SOURCE, already checked out)"
+  else
+    # Refresh the objects (a detached checkout cannot `pull`); offline, the
+    # cached objects may already hold the pin.
+    gitc fetch --quiet origin 2>&1 || echo "WARN: assess-rfe fetch failed, using cached objects" >&2
+    # A full SHA (GitHub serves reachable commits by name) or a branch/tag
+    # override lands in FETCH_HEAD; an abbreviated SHA only resolves locally.
+    if gitc fetch --quiet origin "$ASSESS_REF" 2>/dev/null; then
+      CHECKOUT_TARGET="FETCH_HEAD"
+    else
+      CHECKOUT_TARGET="$ASSESS_REF"
+    fi
+    if CHECKOUT_ERR="$(gitc checkout --quiet --detach "$CHECKOUT_TARGET" 2>&1 >/dev/null)"; then
+      HEAD_SHA="$(gitc rev-parse HEAD 2>/dev/null)"
+      if pin_is_commit "$ASSESS_REF"; then
+        case "$HEAD_SHA" in
+          "$ASSESS_REF"*) ;;
+          *)
+            echo "ERROR: assess-rfe checkout is at $HEAD_SHA, not the pinned $ASSESS_REF ($REF_SOURCE)" >&2
+            exit 1
+            ;;
+        esac
+      fi
+      echo "assess-rfe at ${HEAD_SHA:0:12} ($REF_SOURCE)"
+    elif [ -z "$HEAD_SHA" ]; then
+      # No readable HEAD and no way to move: git cannot operate here either.
+      echo "WARN: git cannot check out $CONTEXT_DIR (${CHECKOUT_ERR:-unknown error}); the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced, using the checkout as is" >&2
+    else
+      # A positive mismatch: HEAD is readable, is not the pin, and the pin
+      # cannot be reached. git's own message tells a commit the remote lacks
+      # from local modifications or a stale index.lock.
+      echo "ERROR: could not check out assess-rfe at $ASSESS_REF ($REF_SOURCE) in $CONTEXT_DIR (HEAD is ${HEAD_SHA:0:12}): ${CHECKOUT_ERR:-no error text}" >&2
+      exit 1
+    fi
+  fi
 fi
 
 # Validate that the rubric file exists after cloning
