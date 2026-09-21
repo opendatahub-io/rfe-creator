@@ -2090,7 +2090,11 @@ class TestSkillLayer:
         assert f'CONTEXT_DIR="{CONTEXT_DIR}"' in sh
         if ctx.t == "initiative":
             assert f'INITIATIVE_AGENT="{ctx.pipe["scorer_agent"]}.md"' in sh
-        assert rubric["ref"] not in sh, "Q9: rubric.ref is documentary — the bootstrap pins no ref"
+        # The bootstrap reads the pin through the registry (`type_registry.py get <type>
+        # pipeline.rubric.ref`, the descriptor's `ref:` line as the no-Python fallback) and
+        # checks it out; no literal SHA may live in the script or the pin could not move.
+        assert rubric["ref"] not in sh, "the bootstrap must read rubric.ref from the registry"
+        assert 'get "$PIPELINE_TYPE" pipeline.rubric.ref' in sh
         assert re.fullmatch(r"[0-9a-f]{7,40}", rubric["ref"])
         assert "skills/export-rubric/scripts/export_rubric.py" in sh
         if rubric["export"] is None:

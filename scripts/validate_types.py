@@ -102,9 +102,9 @@ SCHEMA_RELPATH = Path("_schema") / "type.schema.json"
 FRAGMENT_SCHEMA_RELPATH = "_schema/eval-fragment.schema.json"
 DEFAULT_ASSESS_DIR = Path(".context") / "assess-rfe"
 
-# Q9: lint only that the ref is a plausible commit SHA; the value is documentary
-# until scripts/bootstrap-assess-rfe.sh pins it (PR-2). Matched with fullmatch so a
-# trailing newline (which `$` alone tolerates) is rejected.
+# Q9: lint that the ref is a plausible commit SHA; scripts/bootstrap-assess-rfe.sh
+# checks it out and verifies the checkout (ASSESS_RFE_REF overrides). Matched with
+# fullmatch so a trailing newline (which `$` alone tolerates) is rejected.
 RUBRIC_REF_RE = re.compile(r"^[0-9a-f]{7,40}$")
 # D3 (design §11): an embedded rubric (`repo: self`) is pinned by a content hash
 # instead of a commit — sha256 hex is 64 chars, a truncated prefix is accepted.
@@ -688,9 +688,13 @@ def cross_type_findings(registry, env):
                 )
 
     # (6) one checkout per external rubric repo: bootstrap-assess-rfe.sh clones
-    #     pipeline.rubric.repo once into .context/assess-rfe and checks out ONE
-    #     pipeline.rubric.ref, so descriptors sharing the repo must pin the same
-    #     commit. Only well-formed refs take part (a malformed one is already a
+    #     ONE fixed repo (its ASSESS_RFE_REPO default) into ONE fixed dir,
+    #     .context/assess-rfe, and checks out ONE pipeline.rubric.ref, so
+    #     descriptors sharing the repo must pin the same commit. The grouping is
+    #     by the literal pipeline.rubric.repo string: today every external rubric
+    #     is that one repo, and a descriptor naming a second external repo needs
+    #     bootstrap work (a checkout per repo) before the rule could mean anything
+    #     for it. Only well-formed refs take part (a malformed one is already a
     #     per-type finding); the D3 embedded rubric (repo: self) has no checkout.
     refs_by_repo = {}
     for name, desc in descs.items():
