@@ -79,10 +79,16 @@ For each ID being reviewed:
 python3 scripts/prep_assess.py <ID>
 ```
 
+Resolve the rubric path from the type descriptor (context-relative; `{PROMPT_PATH}` below is `.context/assess-rfe/` + this value):
+
+```bash
+python3 scripts/type_registry.py get rfe pipeline.rubric.path
+```
+
 **Launch assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer):
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>
 ```
 
 **Launch feasibility agent** (model: opus, run_in_background: true) — one per ID:
@@ -221,10 +227,16 @@ rm tmp/rfe-assess/single/<ID>.result.md  # for each reassess ID
 python3 scripts/prep_assess.py <ID>
 ```
 
+Resolve the rubric path from the type descriptor as in Step 2 (`{PROMPT_PATH}` is `.context/assess-rfe/` + the value):
+
+```bash
+python3 scripts/type_registry.py get rfe pipeline.rubric.path
+```
+
 Launch an **assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer) for each reassess ID:
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>
 ```
 
 Launch all assess agents in parallel.

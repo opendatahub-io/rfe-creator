@@ -86,8 +86,9 @@ TYPES = REG.names()
 SKILL_PREFIX = {"rfe": "rfe.", "initiative": "initiative-"}
 # Interactive skills poll through a second, non-empty prefix the descriptor cannot express.
 POLL_FILE_PREFIX = {"rfe": "tmp/rfe-poll-", "initiative": "tmp/initiative-poll-"}
-# Design §10 PR-5: these sites still point at the pre-assess-rfe#5 rubric path.
-STALE_RFE_RUBRIC_PATH = ".context/assess-rfe/scripts/agent_prompt.md"
+# PR-5a: the rfe review skill resolves the rubric path from the descriptor at launch time.
+RUBRIC_PATH_GET = "python3 scripts/type_registry.py get rfe pipeline.rubric.path"
+RUBRIC_PATH_TOKEN = "{PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>"
 CONTEXT_DIR = ".context/assess-rfe"  # bootstrap-assess-rfe.sh:44
 ASSESS_STAGING = "tmp/rfe-assess/single"  # byte-stable staging dir (design §10 tail)
 PASS_THRESHOLD = 7  # Q15: scoring machinery, a constant — not per type
@@ -2053,21 +2054,47 @@ class TestSkillLayer:
             )
 
     def test_rubric_path_sites(self, ctx):
-        # rows: 192 — initiative sites == CONTEXT_DIR + rubric.path; the four rfe sites are STALE
-        # (design §10 PR-5) and are pinned as such so the fix is a visible pin change
+        # rows: 192 — every site composes CONTEXT_DIR + rubric.path (pipeline.rubric.path is
+        # context-relative). PR-5a: the rfe review skill's two launch sites resolve the value
+        # from the descriptor at launch time; the auto-fix example and the split prompt carry
+        # the composed literal, as the initiative twins do. The pre-assess-rfe#5 path is gone.
         live = f"{CONTEXT_DIR}/{ctx.pipe['rubric']['path']}"
-        sites = [
-            (skill(ctx.t, "review"), 2),
-            (skill(ctx.t, "auto-fix"), 1),
-            (skill(ctx.t, "split", "prompts/split-agent.md"), 1),
-        ]
+        stale = ".context/assess-rfe/scripts/agent_prompt.md"
+        review = skill(ctx.t, "review")
+        auto_fix = skill(ctx.t, "auto-fix")
+        split_prompt = skill(ctx.t, "split", "prompts/split-agent.md")
+        for text in (review, auto_fix, split_prompt):
+            assert stale not in text
+        assert auto_fix.count(live) == 1
+        assert split_prompt.count(live) == 1
         if ctx.t == "initiative":
-            for text, n in sites:
-                assert text.count(live) == n
+            assert review.count(live) == 2
         else:
-            assert STALE_RFE_RUBRIC_PATH != live
-            for text, n in sites:
-                assert text.count(STALE_RFE_RUBRIC_PATH) == n and live not in text
+            assert review.count(RUBRIC_PATH_GET) == 2
+            assert review.count(RUBRIC_PATH_TOKEN) == 2
+            assert live not in review
+
+    def test_auto_fix_example_wave_matches_the_phase_table(self, ctx):
+        # PR-5a: the illustrative launch_wave block in the auto-fix skill is derived from
+        # the ASSESS entry of the dispatcher's phase table, not hand-maintained.
+        if ctx.t != "rfe":
+            return
+        import pipeline_state
+
+        text = skill(ctx.t, "auto-fix")
+        block = text.split("### Example `launch_wave` output", 1)[1].split("```yaml", 1)[1]
+        example = yaml.safe_load(block.split("```", 1)[0])
+        cfg = pipeline_state._build_phase_config("rfe")["ASSESS"]
+        scorer, companion = example["agents"]
+        assert example["phase"] == "ASSESS"
+        assert scorer["subagent_type"] == cfg["subagent_type"]
+        assert scorer["prompt_file"] == cfg["prompt"]
+        rendered = {k: v.replace("{ID}", "RHAIRFE-1234") for k, v in cfg["vars"].items()}
+        for line in scorer["vars"].strip().splitlines():
+            key, value = line.split("=", 1)
+            assert rendered[key] == value, f"example {key}={value} != table {rendered[key]}"
+        assert companion["prompt_file"] == cfg["parallel"][0]["prompt"]
+        assert companion["vars"].strip() == "ID=RHAIRFE-1234"
 
     def test_bootstrap_script_text(self, ctx):
         # rows: 193, 194 — bootstrap-assess-rfe.sh:31-37 case arms (MIGRATED in PR-3a: the script
