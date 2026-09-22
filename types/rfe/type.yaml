@@ -78,15 +78,16 @@ pipeline:
   poll_prefix: ""                                       # pipeline_state.py:107; check_review_progress.py:19-27 unprefixed keys — grandfathered empty (rfe only); also REPORT_CONFIG.default_output "review-report.html" (generate_review_pdf.py:28, Q15)
   state_prefix: ""                                      # check_autofix_complete.py:18 tmp/speedrun-all-ids.txt; check_review_progress.py:135-138 tmp/{review,split,autofix,speedrun}-config.yaml — grandfathered empty (rfe only)
   scorer_agent: rfe-scorer                              # pipeline_state.py:100 scorer_type (subagent_type :240,:278,:345,:382); rfe.review/prompts/assess-agent.md:12
-  prompts:                                              # Q1: today's live paths; PIPELINE_TYPES["rfe"] pipeline_state.py:98-99; the types/<t>/prompts/* move is PR-5
-    create_guidance: .claude/skills/rfe.create/SKILL.md                 # Step 2 "Clarifying Questions" (:35); template .claude/skills/rfe.create/rfe-template.md (:54)
-    review_rules: .claude/skills/rfe.review/prompts/review-agent.md     # dirname == PIPELINE_TYPES["rfe"]["review_prompts"]
-    review_sections: .claude/skills/rfe.review/prompts/review-agent.md  # same file today (rules and body headings are not split)
-    revise_rules: .claude/skills/rfe.review/prompts/revise-agent.md
-    split_rules: .claude/skills/rfe.split/prompts/split-agent.md        # == PIPELINE_TYPES["rfe"]["split_prompt"]
+  prompts:                                            # PR-5b: the typed judgement files under types/<t>/ (design §4.2 tiers, §8.1 layout); rendered into every launch by `type_registry.py launch-vars` (RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH, TEMPLATE_PATH, CREATE_GUIDANCE_PATH); gate 1 checks each exists
+    template: types/rfe/template.md                 # Tier 3 — the create template (from .claude/skills/rfe.create/rfe-template.md); D16
+    create_guidance: types/rfe/prompts/create-guidance.md   # Tier 3 — questions, writing rules and don'ts of the generic rfe-create body
+    review_rules: types/rfe/prompts/review-rules.md         # Tier 2 slot of .claude/skills/rfe-review/prompts/review-agent.md
+    review_sections: types/rfe/prompts/review-sections.md   # Tier 2 slot — the typed body headings
+    revise_rules: types/rfe/prompts/revise-rules.md         # Tier 2 slot of .claude/skills/rfe-review/prompts/revise-agent.md
+    split_rules: types/rfe/prompts/split-rules.md           # Tier 3 — IS the split agent prompt (pipeline_state SPLIT.prompt_file)
   dimensions:
     - name: feasibility                                 # poll phase "feasibility" (check_review_progress.py:25; pipeline_state.py:198 f"{pp}feasibility")
-      prompt: .claude/skills/rfe-feasibility-review/SKILL.md   # pipeline_state.py:102 feasibility_skill
+      prompt: types/rfe/dimensions/feasibility.md   # pipeline_state.py:102 feasibility_skill
       blocking: true                                    # Q17: ASSESS wave waits on it (wait-for-wave --also-phase feasibility, pipeline_state.py:1193-1195); no script reads a blocking flag — unpinned
   rubric:
     repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 ASSESS_RFE_REPO default (verbatim URL)

@@ -544,13 +544,17 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "template": {
+              "$ref": "#/$defs/repo_path",
+              "description": "Tier-3 create template (types/<t>/template.md); rendered as TEMPLATE_PATH (PR-5 plan D16)."
+            },
             "create_guidance": { "$ref": "#/$defs/repo_path" },
             "review_rules": { "$ref": "#/$defs/repo_path" },
             "review_sections": { "$ref": "#/$defs/repo_path" },
             "revise_rules": { "$ref": "#/$defs/repo_path" },
             "split_rules": { "$ref": "#/$defs/repo_path" }
           },
-          "description": "Per-type judgement files consumed via launcher vars from PR-5 (design section 4.2). Optional at v1; at PR-1 they point at today's live skill paths (Q1) and gate 1 checks that each exists."
+          "description": "Per-type judgement files (design section 4.2 tiers, 8.1 layout), consumed through `type_registry.py launch-vars` (TEMPLATE_PATH, CREATE_GUIDANCE_PATH, RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH) by the generic rfe-* bodies and the dispatcher since PR-5b; gate 1 checks that each exists."
         },
         "dimensions": {
           "type": "array",
