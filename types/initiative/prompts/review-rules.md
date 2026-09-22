@@ -1,5 +1,7 @@
 # Initiative review rules
 
+Inputs: read the alignment file at `{ALIGNMENT_PATH}` if it exists. If missing, alignment was not assessed (no RHAISTRAT parent or agent did not complete).
+
 Determine recommendation:
 - submit: Initiative passes (7+ with no zeros)
 - revise: Initiative fails but can be improved

@@ -12,22 +12,43 @@ slot pending under the legacy rule), and say that nothing may follow the set.
 
 import os
 import re
+import sys
 
 import pytest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import type_registry  # noqa: E402
+
+# The legacy twins (deleted in PR-5c) and, since PR-5b, the shared Tier-2 skeleton rendered per
+# type with its launch block plus the typed revise rules it points at — the prompt the REVISE
+# waves actually launch.
 PROMPTS = {
     "rfe": ".claude/skills/rfe.review/prompts/revise-agent.md",
     "initiative": ".claude/skills/initiative-review/prompts/revise-agent.md",
 }
+SKELETON = ".claude/skills/rfe-review/prompts/revise-agent.md"
+REG = type_registry.load(extra_roots=[], env={})
+KINDS = sorted(PROMPTS) + [f"{t}-generic" for t in REG.names()]
 
 
 def _text(kind):
+    if kind.endswith("-generic"):
+        desc = REG.get(kind[: -len("-generic")])
+        with open(os.path.join(ROOT, SKELETON)) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(desc, "review"):
+            text = text.replace("{" + key + "}", value)
+        with open(os.path.join(ROOT, desc.get("pipeline.prompts.revise_rules"))) as f:
+            rules = f.read()
+        # The typed rules file carries no command; the skeleton's set stays the last one.
+        assert "python3 scripts/frontmatter.py set" not in rules
+        return text
     with open(os.path.join(ROOT, PROMPTS[kind])) as f:
         return f.read()
 
 
-@pytest.mark.parametrize("kind", sorted(PROMPTS))
+@pytest.mark.parametrize("kind", KINDS)
 class TestFrontmatterSetIsLast:
     def test_step_order(self, kind):
         text = _text(kind)
