@@ -324,9 +324,8 @@ python3 scripts/state.py read tmp/split-config.yaml
 A "State file not found" error just means that caller's config does not exist — continue with what was found.
 
 Check the `caller` field above:
-- **`split`**: Returning to **Split Step 3: Right-sizing Self-Correction** of `/rfe.split`. Re-read parent IDs from `tmp/split-all-ids.txt`. If the split config is not visible, re-read `/rfe.split` SKILL.md for the full flow.
-
-Do not summarize or stop.
+- **`split`**: Returning to **Split Step 3: Right-sizing Self-Correction** of `/rfe.split`. Re-read parent IDs from `tmp/split-all-ids.txt`. If the split config is not visible, re-read `/rfe.split` SKILL.md for the full flow. Do not summarize or stop.
+- **`none`** (a direct `/rfe.review --headless <IDs>` with no calling skill): output the text "rfe.review step completed." and stop.
 
 **If interactive (no `--headless`)**: Re-read ID list and present summary:
 

@@ -116,7 +116,7 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `AF_SNAPSHOT` | Run `snapshot_fetch.py` (JQL mode only) | Step 0 |
 | `AF_BOOTSTRAP` | Bootstrap assess-rfe (with 1 retry on failure) | Step 1 |
 | `AF_RESUME` | Run `check_resume.py` to filter already-processed IDs (see 1.20) | Step 2 |
-| `AF_BATCH_LOOP` | Per-batch: review -> collect (see 1.16) -> split (if needed) -> summary | Steps 3a-3d |
+| `AF_BATCH_LOOP` | Per-batch: review -> collect (see 1.16) -> split (if needed) -> summary | Dispatch Loop Step 1-2 (`pipeline_state.py next-action` / `wait-for-wave`) |
 | `AF_RETRY` | Scan for errors, cleanup split failures, clear errors, re-run pipeline | Step 4 |
 | `AF_REPORTS` | Generate run report YAML + HTML report | Step 5 |
 | `AF_SUMMARY` | Final summary + optional announce-complete | Step 6 |
@@ -424,7 +424,7 @@ if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E6 | null | split_refused (too many) | split_submit.py exit code 2 | > 6 leaf children | update_frontmatter() | submit.py:199 |
 | E7 | null | split_refused (jira conflict) | split_submit.py exit code 3 | Parent description changed | update_frontmatter() | submit.py:233 |
 | E8 | null | submit_failed | Jira API exception | Exception in submit loop | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
-| E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs Steps 3a-3c | frontmatter.py set error=null | rfe.auto-fix SKILL.md Step 4 |
+| E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
 
 ### 2.6 Label Transitions
 
@@ -567,7 +567,7 @@ stateDiagram-v2
             RT_Collect --> RT_Skip : ERRORS= empty
             RT_Collect --> RT_Cleanup : errors found
             RT_Cleanup --> RT_Clear : cleanup_partial_split.py\n(split_failed only)
-            RT_Clear --> RT_Rerun : clear error fields\nre-run Steps 3a-3c
+            RT_Clear --> RT_Rerun : clear error fields\nre-run the dispatch loop\nover the retry ids
             RT_Rerun --> RT_Done : permanent failures reported
         }
 
@@ -749,7 +749,7 @@ stateDiagram-v2
     BL_Review --> Rev_Parse : dispatch loop launches\nreview agents (launch_wave)
     BL_Review --> BL_Collect : wait-for-wave barrier
 
-    BL_Split --> Sp_Parse : auto-fix invokes split\n(--headless)
+    BL_Split --> Sp_Parse : dispatch loop launches\nsplit agents (launch_wave,\nsplit-agent prompt)
     BL_Split --> BL_Next : wait-for-wave barrier
 
     Sp_ReviewChildren --> Rev_Parse : split invokes review\n(--caller split)
@@ -842,7 +842,7 @@ failures that may not surface until production runs.
 - **Headless/caller protocol requires two reads:** the callee reads its OWN config first (to determine the `caller` field), THEN the caller's config (to find the resume point). The only caller left is `split`: review reads `tmp/review-config.yaml` for `caller=split`, then `tmp/split-config.yaml`. The auto-fix return path (`caller=autofix`, `tmp/autofix-config.yaml`) was removed in PR-5a — nothing ever wrote that file; the dispatcher owns the batch loop in `tmp/pipeline-state.yaml` and no skill returns to it.
 - **`state.py clean` at speedrun init destroys all nested skill state** — no resume possible across speedrun invocations. All `tmp/` files from prior runs are deleted.
 - **Revise polling can hang on split-recommended IDs** with only right-sizing failures — the revise agent cannot fix right-sizing issues (`"Do NOT split scope"`), so it may never set `auto_revised=true`, leaving the polling loop waiting. More broadly, `check_review_progress.py` revise-phase completion requires `auto_revised=true` (see Section 5.7), so any revise agent that runs but makes no changes causes a hang.
-- **File prefix namespacing** (`autofix-`, `review-`, `split-`, `speedrun-`) prevents collisions during nested skill calls.
+- **File prefix namespacing** (`pipeline-`, `review-`, `split-`, `speedrun-`) prevents collisions during nested skill calls.
 - **Jira API retry policy:** All Jira HTTP operations use `api_call_with_retry` (`jira_utils.py:51-82`): max 3 retries, 429 rate-limiting (respects `Retry-After` header), 502/503/504 server errors (exponential backoff: 1s, 4s, 16s), and `URLError` network errors (same backoff). After exhausting retries, last error is re-raised. All requests have a 60-second timeout (`jira_utils.py:36`).
 - **`scan_task_files()` is the sole discovery mechanism for submit** — no ID list is passed. Excludes companion files, skips validation failures.
 - **Split parent detection requires triple condition:** `status=Archived` AND `rfe_id.startswith("RHAIRFE-")` AND referenced by a child's `parent_key` (see 1.18).
@@ -1044,8 +1044,8 @@ the seam between subsystems.
 | Review Agent -> Filter | `artifacts/rfe-reviews/{ID}-review.md` (frontmatter) | review-agent prompt | `filter_for_revision.py` |
 | Revise Agent -> Reassess | Modified task file + auto_revised flag | revise-agent prompt | `collect_recommendations.py --reassess` |
 | Revise Agent -> Submit | `artifacts/rfe-tasks/{ID}-removed-context.yaml` | revise-agent prompt | `submit.py:_render_jira_comment()` |
-| Review -> Auto-Fix | Review frontmatter (via headless return) | `rfe.review` SKILL.md Step 5 | `rfe.auto-fix` SKILL.md Step 3 |
-| collect_recommendations -> Split | `SPLIT=` output line | `collect_recommendations.py` | `rfe.split` SKILL.md / `rfe.auto-fix` Step 3b |
+| Review agents -> Auto-Fix | Review frontmatter | review-agent prompt (REVIEW wave) | `pipeline_state.py` COLLECT via `collect_recommendations.py` |
+| collect_recommendations -> Split | `SPLIT=` output line | `collect_recommendations.py` | `rfe.split` SKILL.md (interactive) / `pipeline_state.py` SPLIT phase (headless) |
 | Split Agent -> Collect | Child task files (parent_key set), split-status.yaml | split-agent prompt | `collect_children.py` |
 | Split -> Review (children) | Child task files | `rfe.split` SKILL.md Step 2 | `rfe.review` SKILL.md |
 | Review -> Split (return) | Child review frontmatter | `rfe.review` SKILL.md Step 5 | `rfe.split` SKILL.md Step 3 |
@@ -1062,7 +1062,7 @@ the seam between subsystems.
 |---|---|---|---|
 | G1 | `--labels` flag in /rfe.create | Create flow | Mentioned in arg parsing but never consumed downstream |
 | G2 | Ready status never set by /rfe.create | Pipeline assumes Ready for existing | /rfe.create sets Draft, not Ready; submit.py filters by exclusion (not Archived, not Submitted) rather than requiring Ready |
-| G3 | `recommendation=split` after revise agent no-split | Auto-Fix Step 3b | When split-agent determines no-split, the recommendation changes to revise, but auto-fix's collect step already ran. The changed recommendation won't trigger a revision pass |
+| G3 | `recommendation=split` after revise agent no-split | Auto-Fix dispatch loop (COLLECT) | When split-agent determines no-split, the recommendation changes to revise, but auto-fix's collect step already ran. The changed recommendation won't trigger a revision pass |
 | G4 | Speedrun `tmp/speedrun-all-ids.txt` does not include split children | Submit discovers them via `scan_task_files()` anyway | Cosmetic (submit works, summary may undercount) |
 | G5 | `submit.py` ignores positional ID arguments | Speedrun passes IDs that have no effect | Documentation inconsistency; submit processes all local task files |
 | G6 | Feasibility not re-checked during reassessment | Stale feasibility if revision removed infeasible requirement | Intentional (feasibility is expensive, scope shouldn't change) |
