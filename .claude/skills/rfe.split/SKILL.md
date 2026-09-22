@@ -144,15 +144,7 @@ Re-read flags (in case context was compressed):
 python3 scripts/state.py read tmp/split-config.yaml
 ```
 
-**If `headless: true`**: Output the text "rfe.split step on current iteration of rfe.auto-fix batch loop completed." then run:
-
-```bash
-python3 scripts/state.py read tmp/autofix-config.yaml
-```
-
-A "State file not found" error just means the config was not persisted — the fallback below covers it.
-
-Returning to **Step 3d: Between-Batch Summary** of `/rfe.auto-fix`. Re-read the batch IDs from `tmp/autofix-batch-N-ids.txt` (where N = `current_batch` from the config above). If the autofix config is not visible, re-read `/rfe.auto-fix` SKILL.md for the full batch loop. Do not summarize or stop.
+**If `headless: true`**: Output the text "rfe.split step completed." and stop.
 
 **If interactive (no `--headless`)**: Present the final state for each parent ID:
 

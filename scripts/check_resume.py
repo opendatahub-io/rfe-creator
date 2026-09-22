@@ -14,9 +14,9 @@ Supports two modes:
 
 Usage:
     # File-based (used by auto-fix skill)
-    python3 scripts/check_resume.py --ids-file tmp/autofix-all-ids.txt \\
-        --changed-file tmp/autofix-changed-ids.txt \\
-        --output-file tmp/autofix-process-ids.txt
+    python3 scripts/check_resume.py --ids-file tmp/pipeline-all-ids.txt \\
+        --changed-file tmp/pipeline-changed-ids.txt \\
+        --output-file tmp/pipeline-process-ids.txt
 
     # Legacy positional args
     python3 scripts/check_resume.py RHAIRFE-1234 RHAIRFE-5678

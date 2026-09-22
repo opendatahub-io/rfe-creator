@@ -93,7 +93,8 @@ CONTEXT_DIR = ".context/assess-rfe"  # bootstrap-assess-rfe.sh:44
 ASSESS_STAGING = "tmp/rfe-assess/single"  # byte-stable staging dir (design §10 tail)
 PASS_THRESHOLD = 7  # Q15: scoring machinery, a constant — not per type
 POLL_PHASE_BASES = ("fetch", "assess", "review", "revise", "split")
-STATE_STAGES = ("review", "split", "autofix", "speedrun")
+# The auto-fix skills keep no *-config.yaml: the dispatcher owns tmp/pipeline-state.yaml.
+STATE_STAGES = ("review", "split", "speedrun")
 # The reserved label keys whose value is "<label_prefix>-<suffix>" today (design §3.2 labels map).
 LABEL_SUFFIX = {
     "rubric_pass": "autofix-rubric-pass",
@@ -1797,8 +1798,9 @@ class TestPhaseChecks:
         assert len(check_review_progress.PHASE_CHECKS) == 14
 
     def test_detect_fast_config_allowlist(self):
-        # rows: 141 — check_review_progress.py:134-141; each ==
-        # f"tmp/{state_prefix}{stage}-config.yaml";
+        # rows: 141 — check_review_progress.py _detect_fast; each ==
+        # f"tmp/{state_prefix}{stage}-config.yaml" over the interactive stages (PR-5a dropped
+        # the never-written *-autofix-config.yaml entries);
         # tmp/initiative-speedrun-config.yaml is MISSING today (live drift; pin the current tuple)
         fn = next(
             n

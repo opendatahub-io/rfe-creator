@@ -17,7 +17,7 @@ Parse `$ARGUMENTS` for flags and IDs:
 Persist parsed flags (survives context compression):
 
 ```bash
-python3 scripts/state.py init tmp/review-config.yaml headless=<true/false> caller=<autofix|split|none>
+python3 scripts/state.py init tmp/review-config.yaml headless=<true/false> caller=<split|none>
 ```
 
 Persist all IDs to disk (survives context compression):
@@ -318,17 +318,12 @@ python3 scripts/state.py read tmp/review-config.yaml
 ```
 
 ```bash
-python3 scripts/state.py read tmp/autofix-config.yaml
-```
-
-```bash
 python3 scripts/state.py read tmp/split-config.yaml
 ```
 
 A "State file not found" error just means that caller's config does not exist — continue with what was found.
 
 Check the `caller` field above:
-- **`autofix`**: Returning to **Step 3b: Collect Results** of `/rfe.auto-fix`. Re-read batch IDs from `tmp/autofix-batch-N-ids.txt` (where N = `current_batch` from `tmp/autofix-config.yaml`). If the autofix config is not visible, re-read `/rfe.auto-fix` SKILL.md for the full batch loop.
 - **`split`**: Returning to **Split Step 3: Right-sizing Self-Correction** of `/rfe.split`. Re-read parent IDs from `tmp/split-all-ids.txt`. If the split config is not visible, re-read `/rfe.split` SKILL.md for the full flow.
 
 Do not summarize or stop.

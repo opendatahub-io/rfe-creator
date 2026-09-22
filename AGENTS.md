@@ -80,7 +80,7 @@ python3 scripts/state.py timestamp                    # Print current UTC time (
 python3 scripts/state.py clean                        # Reset tmp/ directory
 ```
 
-Each skill uses distinct file prefixes to avoid collisions during nested calls: `autofix-`, `review-`, `split-`, `speedrun-`, `initiative-review-`.
+Each skill uses distinct file prefixes to avoid collisions during nested calls: `pipeline-` (the dispatcher, driven by the auto-fix skills), `review-`, `split-`, `speedrun-`, `initiative-review-`.
 
 ### File Naming
 
