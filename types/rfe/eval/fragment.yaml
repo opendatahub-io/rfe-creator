@@ -5,8 +5,6 @@
 schema_version: 1
 entity_long: RFE (Request for Enhancement)
 execution:
-  skill: rfe.speedrun
-  create_skill: rfe.create
   timeout_note: 2 hours — opus with 20 cases + splits needs ~60 min
 dataset:
   prompt: Concise problem statement (1-2 sentences)

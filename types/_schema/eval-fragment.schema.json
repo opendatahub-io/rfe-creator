@@ -24,17 +24,9 @@
     },
     "execution": {
       "type": "object",
-      "required": ["skill", "create_skill", "timeout_note"],
+      "required": ["timeout_note"],
       "additionalProperties": false,
       "properties": {
-        "skill": {
-          "$ref": "#/$defs/line",
-          "description": "The speedrun skill the harness invokes (execution.skill)."
-        },
-        "create_skill": {
-          "$ref": "#/$defs/line",
-          "description": "The create skill's name; the pipeline_flow judge accepts it in stdout as the Phase 1 marker."
-        },
         "timeout_note": {
           "$ref": "#/$defs/line",
           "description": "Trailing comment on execution.timeout explaining the calibration (the value itself is eval.timeout in type.yaml)."
