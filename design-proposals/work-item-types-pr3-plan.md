@@ -109,6 +109,8 @@ PR-4b opened as #191 (2026-09-17): skeleton-only; proof by offline replay of the
 
 **2026-09-22 stage dry run of main 28ad626** (job 16650820395, RHAIRFE-3444 + 3416, 7.5 min, green): the AISDLC-50 reproduction now ends correctly — both no-change revisions finish with `auto_revised: false`, task == original, no auto-revised label (last time 3444 got it), no late agent write after REPORT; the bootstrap logged `assess-rfe from https://github.com/opendatahub-io/assess-rfe (types/rfe/type.yaml pipeline.rubric.repo) at d8391ae379fb (… already checked out)`. ci-stage = 28ad626; ci-prod fast-forwarded 10f9a64 → 28ad626 the same day (#197 + #198 live; first production run 15:00 UTC 2026-09-22). Next: the PR-5 split plan.
 
+**PR-5 planning started 2026-09-22:** see [work-item-types-pr5-plan.md](work-item-types-pr5-plan.md) (split 5-pre / 5a / 5b / 5c, decisions D1–D14, from five inventories of main 28ad626).
+
 ## Risks
 
 The barrier escalation fix (D14) is a prerequisite that is not yet scheduled. Log shape changes in CI traces (D3 keeps it to one line per entry script, and none for the legacy default). Artifact bytes in the results repo change permanently from PR-3c on (expected and named). PR-3c edits the twin prompts ahead of PR-5's collapse; PR-5 lifts the edited text verbatim. Two evals per PR-3c iteration cost about $125 and three hours; PR-3a and PR-3b need one or none.
