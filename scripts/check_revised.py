@@ -7,12 +7,17 @@ Modes:
   Batch:  check_revised.py --batch [ID ...]
     Scans originals vs tasks for every ID (or all if none given),
     sets auto_revised in review frontmatter directly.  No LLM loop needed.
+    --lower-only: the last-reader guard (REPORT transition, submit.py
+    start-up) — a set flag on a task whose body still equals its original
+    is lowered; nothing is ever raised. Prints LOWERED=<ids>.
+    --artifacts-dir DIR: resolve the bare type dirs under DIR, not ./artifacts.
 
 Usage:
     python3 scripts/check_revised.py artifacts/rfe-originals/ID.md artifacts/rfe-tasks/ID.md
     python3 scripts/check_revised.py --batch
     python3 scripts/check_revised.py --batch RHAIRFE-1504 RHAIRFE-1510
     python3 scripts/check_revised.py --type initiative --batch --ids-file tmp/ids.txt
+    python3 scripts/check_revised.py --batch --lower-only --artifacts-dir /path/artifacts
 
 An unregistered --type exits 2 with the registered type list.
 """
@@ -63,8 +68,28 @@ _TYPE_CONFIG = {
 }
 
 
-def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe"):
-    """Compare originals to tasks and set auto_revised in review frontmatter."""
+def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=False):
+    """Compare originals to tasks and set auto_revised in review frontmatter.
+
+    ``lower_only`` is the last-reader guard (the REPORT transition and submit.py start-up):
+    a set flag on a task whose body still equals its original is lowered, and nothing is
+    ever raised — a removed-context companion can make task != original without a
+    revision, so raising stays FIXUP's job over the revise ids. A revise agent's write can
+    land after FIXUP (2026-09-21 stage dry run: the wave released at 09:36:43, FIXUP
+    lowered the flag at 09:36:46, the agent's last write restored it at 09:37:06), and
+    the last reader must not trust a flag the content contradicts.
+
+    The equality test is ``strip_frontmatter`` + whitespace strip — narrower than submit's
+    ``jira_utils.strip_metadata`` (HTML comments, "### Revision Notes" blocks, the
+    "# KEY: Title" heading), so a task that differs from its original only by those keeps
+    its flag: conservative, the guard never lowers when unsure.
+
+    Per-id isolation (both modes): one review that cannot be read or updated is skipped —
+    ``check_revised: skipped <id> (<ExceptionClass>)`` on stderr, class name only, since the
+    message can quote frontmatter — and reported on the ``SKIPPED=<ids>`` line; the rest of
+    the batch proceeds and the exit status stays 0. One bad item must not abort the batch:
+    every id sorted after it would otherwise keep a stale flag.
+    """
     # --type is validated against the registry in main() (type_registry.parse_type_arg), so
     # the lookup cannot miss for a CLI caller; the dict's keys ARE the registry names.
     tc = _TYPE_CONFIG[pipeline_type]
@@ -73,29 +98,48 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe"):
 
     # If no IDs given, discover from originals dir
     if not ids:
-        ids = [os.path.splitext(f)[0] for f in os.listdir(originals_dir) if f.endswith(".md")]
+        if os.path.isdir(originals_dir):
+            ids = [os.path.splitext(f)[0] for f in os.listdir(originals_dir) if f.endswith(".md")]
+        else:
+            ids = []
 
     changed = 0
+    lowered = []
+    skipped = []
     for rfe_id in sorted(ids):
-        original = os.path.join(originals_dir, f"{rfe_id}.md")
-        task = os.path.join(tasks_dir, f"{rfe_id}.md")
-        review = find_review_file(artifacts_dir, rfe_id)
-        if not review:
-            continue
+        try:
+            original = os.path.join(originals_dir, f"{rfe_id}.md")
+            task = os.path.join(tasks_dir, f"{rfe_id}.md")
+            review = find_review_file(artifacts_dir, rfe_id)
+            if not review:
+                continue
 
-        revised = check_pair(original, task)
-        if revised is None:
-            continue
+            revised = check_pair(original, task)
+            if revised is None:
+                continue
 
-        data, _ = read_frontmatter(review)
-        current = data.get("auto_revised", False)
-        if revised != current:
-            update_frontmatter(review, {"auto_revised": revised}, tc["review_schema"])
-            changed += 1
-            print(f"{rfe_id}: auto_revised {current} -> {revised}")
-        else:
-            print(f"{rfe_id}: auto_revised={current} (correct)")
+            data, _ = read_frontmatter(review)
+            current = data.get("auto_revised", False)
+            if lower_only:
+                if current and not revised:
+                    update_frontmatter(review, {"auto_revised": False}, tc["review_schema"])
+                    changed += 1
+                    lowered.append(rfe_id)
+                    print(f"{rfe_id}: auto_revised True -> False (task body equals the original)")
+                continue
+            if revised != current:
+                update_frontmatter(review, {"auto_revised": revised}, tc["review_schema"])
+                changed += 1
+                print(f"{rfe_id}: auto_revised {current} -> {revised}")
+            else:
+                print(f"{rfe_id}: auto_revised={current} (correct)")
+        except Exception as exc:  # one bad item must not abort the batch
+            skipped.append(rfe_id)
+            print(f"check_revised: skipped {rfe_id} ({type(exc).__name__})", file=sys.stderr)
 
+    if lower_only:
+        print(f"LOWERED={','.join(lowered)}")
+    print(f"SKIPPED={','.join(skipped)}")
     print(f"UPDATED={changed}")
 
 
@@ -126,6 +170,32 @@ def _extract_ids_file(argv):
     return remaining, ids
 
 
+def _extract_option(argv, name):
+    """Pull a ``--name <value>`` pair (or ``--name=<value>``) out of argv.
+
+    Returns (remaining_argv, value or None). A flag without a value exits 2.
+    """
+    remaining = []
+    value = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == name:
+            if i + 1 >= len(argv):
+                print(f"Error: {name} requires a value", file=sys.stderr)
+                sys.exit(2)
+            value = argv[i + 1]
+            i += 2
+            continue
+        if arg.startswith(f"{name}="):
+            value = arg.split("=", 1)[1]
+            i += 1
+            continue
+        remaining.append(arg)
+        i += 1
+    return remaining, value
+
+
 def main():
     # --type is hand-parsed by the registry's shared helper (design §5 rung 1): an unregistered
     # name, or a trailing flag, exits 2 with the registered list; rfe when the flag is absent.
@@ -137,8 +207,15 @@ def main():
 
     if "--batch" in argv:
         rest, file_ids = _extract_ids_file(argv)
-        args = [a for a in rest if a != "--batch"]
-        batch_mode(args + file_ids, pipeline_type=pipeline_type)
+        rest, artifacts_dir = _extract_option(rest, "--artifacts-dir")
+        lower_only = "--lower-only" in rest
+        args = [a for a in rest if a not in ("--batch", "--lower-only")]
+        batch_mode(
+            args + file_ids,
+            artifacts_dir=artifacts_dir or "artifacts",
+            pipeline_type=pipeline_type,
+            lower_only=lower_only,
+        )
         return
 
     if len(argv) != 2:

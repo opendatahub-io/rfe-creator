@@ -24,27 +24,17 @@ Comments file: artifacts/rfe-tasks/{ID}-comments.md (read if it exists)
 
 **Right-sizing is a recommendation, never auto-applied.** If right_sized scored 0 or 1, do NOT remove acceptance criteria or capabilities to force a different shape.
 
-**Do not invent missing evidence.** If WHY is flagged for missing named customers, do not fabricate evidence — set `needs_attention=true` in Step 3 so the author is notified.
+**Do not invent missing evidence.** If WHY is flagged for missing named customers, do not fabricate evidence — set `needs_attention=true` in Step 5 so the author is notified.
 
-**Never use HTML comments (`<!-- -->`) in the task file.** HTML comments are invisible when rendered in Jira — authors will never see them. If you need to flag something for the author, set `needs_attention=true` and `needs_attention_reason` in frontmatter (Step 3), which gets posted as a visible Jira comment during submission.
+**Never use HTML comments (`<!-- -->`) in the task file.** HTML comments are invisible when rendered in Jira — authors will never see them. If you need to flag something for the author, set `needs_attention=true` and `needs_attention_reason` in frontmatter (Step 5), which gets posted as a visible Jira comment during submission.
 
 For each criterion the assessor flagged:
 - **Open to HOW**: Reframe flagged sections to remove prescriptive framing while preserving useful context
-- **WHY**: Strengthen with available evidence; if gaps remain, set `needs_attention=true` in Step 3 so the author is notified
+- **WHY**: Strengthen with available evidence; if gaps remain, set `needs_attention=true` in Step 5 so the author is notified
 - **Right-sized**: Report only — do not split or remove scope
 - **WHAT / Not a task**: Follow assessor guidance if provided
 
-## Step 3: Update Frontmatter
-
-**Immediately after editing the task file**, run:
-
-```bash
-python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md auto_revised=true needs_attention=<true/false> needs_attention_reason="<reason or null>"
-```
-
-Set `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide). When true, set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`. This is the most important step — do not skip it.
-
-## Step 4: Content Preservation
+## Step 3: Content Preservation
 
 ```bash
 python3 scripts/check_content_preservation.py artifacts/rfe-originals/{ID}.md artifacts/rfe-tasks/{ID}.md --write-yaml
@@ -57,8 +47,21 @@ Then read `artifacts/rfe-tasks/{ID}-removed-context.yaml` and classify each bloc
 
 Verify no `type: unclassified` entries remain.
 
-## Step 5: Update Revision History
+## Step 4: Update Revision History
 
-Add what changed and why to the review file's `## Revision History` section. Do NOT add revision notes to the RFE artifact itself.
+Add what changed and why to the review file's `## Revision History` section. If you changed nothing (for example, the only failing criterion needs evidence you must not invent), say so there in one line. Do NOT add revision notes to the RFE artifact itself.
 
-Do not return a summary. Your work is complete when the task file is revised and `auto_revised=true` is set in frontmatter.
+## Step 5: Update Frontmatter — your last action
+
+Run this **after** every other edit, as the final command of your work:
+
+```bash
+python3 scripts/frontmatter.py set artifacts/rfe-reviews/{ID}-review.md auto_revised=true needs_attention=<true/false> needs_attention_reason="<reason or null>"
+```
+
+- `auto_revised=true` is the pipeline's completion marker for this revision — set it even if you changed nothing. The pipeline re-derives the real value from the content right after (`scripts/check_revised.py` compares the task file with the original), so an unchanged task ends up `auto_revised=false` without your help.
+- `needs_attention=true` if human review is still needed (e.g., missing evidence the author must provide); then set `needs_attention_reason` to a concise explanation (1-2 sentences) of what the human needs to address. When false, set `needs_attention_reason=null`.
+
+On a first revision this write releases the pipeline's wave barrier, and the content check runs right after it. On a re-revision (a reassess cycle) the flag is already set from the previous cycle, so the barrier may release as soon as you write the Revision History in Step 4 — run this command immediately after Step 4, with nothing in between. Either way, anything you write after this command can undo that check and ship a wrong Jira label — so nothing may follow it: no Revision History edit, no re-run of Step 3, no summary.
+
+Do not return a summary. Your work is complete when the frontmatter set above has run and it was your last write.

@@ -138,6 +138,31 @@ def _default_review(initiative_id, auto_revised="false", alignment="strong"):
     )
 
 
+class TestUnrevisedFlagGuard:
+    def test_set_flag_on_unchanged_text_is_lowered_before_labels(self, art_dir):
+        """The submit-time content guard runs for every type: a set auto_revised on an
+        initiative whose body equals its original is lowered before the label is derived."""
+        body = "## Objective\n\nSame content.\n"
+        _write(f"{art_dir}/initiative-originals/RHOAIENG-1234.md", body)
+        _write(
+            f"{art_dir}/initiatives/RHOAIENG-1234.md",
+            f"---\ninitiative_id: RHOAIENG-1234\ntitle: Test Initiative\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(
+            f"{art_dir}/initiative-reviews/RHOAIENG-1234-review.md",
+            _default_review("RHOAIENG-1234", auto_revised="true"),
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert (
+            "Lowered auto_revised on 1 item(s) whose text equals the original: RHOAIENG-1234"
+            in stdout
+        )
+        assert "auto-revised" not in stdout
+
+
 class TestNewInitiative:
     def test_new_initiative_would_create(self, art_dir):
         """INIT-NNN → Would create RHOAIENG Initiative."""

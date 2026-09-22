@@ -707,7 +707,13 @@ def _final_reconcile(state, type_flag):
     reader, reconciles again at start-up (after the agent process is torn down) and removes
     them. An id the reconcile could not repair gets the registry error stub, not a merged
     error field: the run report treats a review with a generic ``error`` as readable and
-    would copy its stale scores."""
+    would copy its stale scores. After the reconcile, the content guard
+    (``check_revised.py --batch --lower-only``) lowers a set ``auto_revised`` on every task
+    whose body still equals its original: a revise agent's last write can land after FIXUP
+    (2026-09-21 stage dry run), and the run report must agree with what submit will
+    label. Lower-only — raising stays FIXUP's job over the revise ids. The guard is
+    best-effort: if it cannot run, REPORT goes ahead with the flags as written and the
+    failure is logged with its exit status only."""
     all_ids = _read_ids("tmp/pipeline-all-ids.txt")
     if not all_ids:
         return ""
@@ -724,12 +730,31 @@ def _final_reconcile(state, type_flag):
         verify_phase.write_error_stubs(
             "review", errored, state.get("type", "rfe"), error="reconcile_failed"
         )
+    rc, guard_out = _run_script_soft(
+        f"python3 scripts/check_revised.py {type_flag} --batch --lower-only {' '.join(all_ids)}"
+    )
+    if rc != 0:
+        print(
+            f"REPORT flag guard: skipped (check_revised.py exit {rc}); flags left as written",
+            file=sys.stderr,
+        )
+        lowered, skipped = [], []
+    else:
+        lowered = _parse_line_ids(guard_out, "LOWERED")
+        # Ids the guard could not read or update (per-id isolation; the rest were checked).
+        skipped = _parse_line_ids(guard_out, "SKIPPED")
+    lines = ""
     if restored or flagged or errored:
-        return (
+        lines += (
             f"REPORT reconcile: restored={len(restored)} flagged={len(flagged)}"
             f" errors={len(errored)}\n"
         )
-    return ""
+    if lowered or skipped:
+        lines += f"REPORT flag guard: lowered={len(lowered)}"
+        if skipped:
+            lines += f" skipped={len(skipped)}"
+        lines += "\n"
+    return lines
 
 
 def _sweep_review_state(ids):
@@ -791,6 +816,16 @@ def _run_script(cmd):
             print(result.stderr, file=sys.stderr)
         sys.exit(1)
     return result.stdout.strip()
+
+
+def _run_script_soft(cmd):
+    """Run a best-effort script and return ``(returncode, stdout)``.
+
+    Unlike ``_run_script`` it neither exits on failure nor echoes the child's stderr: a
+    frontmatter parse error quotes the offending source line, which can carry issue
+    content, and a guard that cannot run must not abort the transition it guards."""
+    result = subprocess.run(_argv(cmd), capture_output=True, text=True)
+    return result.returncode, result.stdout.strip()
 
 
 def _ids_from_output(output, source):
