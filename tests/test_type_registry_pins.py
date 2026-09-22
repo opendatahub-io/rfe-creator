@@ -2083,20 +2083,37 @@ class TestSkillLayer:
         # The collapse's invariant: no generic body or skeleton names a dir, a scorer, a poll
         # file prefix, a state prefix or a Jira key prefix of ANY type outside the auto-fix
         # example block and the frontmatter description — those come from the launch block.
-        literals = set()
+        literals, prefixes = set(), set()
         for t in TYPES:
             c = _ctx(t)
             literals |= set(c.dirs.values()) | {c.pipe["scorer_agent"], f"tmp/{t}-poll-"}
             literals |= {f"tmp/{c.sp}{st}-config.yaml" for st in STATE_STAGES if c.sp}
+            # the Jira key prefixes, the local id prefix, the label prefix and the parent-key
+            # prefixes of every registered type, matched at a word boundary (`--initiative-id`,
+            # the D15 alias, is not the `initiative-` label prefix)
+            prefixes |= set(c.jira["key_prefixes"]) | {c.lp, f"{c.conv['label_prefix']}-"}
+            prefixes |= {
+                m.group(0)
+                for m in (re.match(r"[A-Z]+-", p) for p in c.conv.get("parent_key_patterns", []))
+                if m
+            }
+        assert {"RHAIRFE-", "RHOAIENG-", "RFE-", "INIT-", "RHAISTRAT-"} <= prefixes
+        boundary = re.compile(r"(?<![\w-])(?:" + "|".join(map(re.escape, sorted(prefixes))) + ")")
+        surfaces = {}
         for stage in ctx.pipe["stages"]:
             raw = read(GENERIC_SKILL.format(stage=stage)).split("---", 2)[2]
-            raw = raw.split("### Example `launch_wave` output", 1)[0]
-            for literal in literals:
-                assert literal not in raw, (stage, literal)
+            surfaces[stage] = raw.split("### Example `launch_wave` output", 1)[0]
         for name in ("fetch", "assess", "review", "revise"):
-            raw = read(f"{SKELETON_DIR}/{name}-agent.md")
+            surfaces[name] = read(f"{SKELETON_DIR}/{name}-agent.md")
+        for where, raw in surfaces.items():
             for literal in literals:
-                assert literal not in raw, (name, literal)
+                assert literal not in raw, (where, literal)
+            hit = boundary.search(raw)
+            assert hit is None, (
+                where,
+                hit.group(0),
+                raw[max(0, hit.start() - 40) : hit.end() + 40],
+            )
 
     def test_review_surface_renders_without_a_dimension_literal(self):
         # The review body and skeleton iterate the launch block's dimension entries: rendered
@@ -2319,15 +2336,31 @@ class TestSkillLayer:
 
     def test_type_flag_pass_through(self, ctx):
         # rows: 222 — every script invocation that carries --type names this type (TYPE_FLAG,
-        # rendered); no python3 line in the rendered bodies names another type
-        texts = "\n".join(skill(ctx.t, st) for st in ctx.pipe["stages"]) + render(
-            typed(ctx.t, "split_rules"), ctx.t, "split"
-        )
+        # rendered); every nested Skill(...) handoff and every /rfe-* invocation with arguments
+        # in the rendered bodies carries it too (a handoff that drops {TYPE_FLAG} fails here);
+        # no python3 line in the rendered bodies names another type
+        texts = "\n".join(
+            skill(ctx.t, st).split("---", 2)[2] for st in ctx.pipe["stages"]
+        ) + render(typed(ctx.t, "split_rules"), ctx.t, "split")
         commands = [
             ln for ln in texts.splitlines() if ln.lstrip().startswith(("python3 ", "bash "))
         ]
         flags = [f for ln in commands for f in re.findall(r"--type ([a-z]+)", ln)]
         assert flags and set(flags) == {ctx.d["type"]}
+        handoffs = re.findall(r'Skill\(skill: "(rfe-[a-z-]+)", args: "([^"]*)"\)', texts)
+        assert {name for name, _ in handoffs} == {"rfe-auto-fix", "rfe-submit"}
+        for name, args in handoffs:
+            assert f"--type {ctx.t}" in args, (name, args)
+        # `/rfe-<stage> <args>` in prose, code blocks and Agent(prompt: "...") lines — a
+        # mention with no arguments (`/rfe-review`'s ...) is not an invocation; the usage
+        # string shows the flag as `--type <t>`
+        invocations = re.findall(
+            r"/rfe-(?:create|review|split|submit|auto-fix|speedrun)(?=[\s`\"])([^`\"\n]*)", texts
+        )
+        with_args = [a.strip() for a in invocations if a.strip()]
+        assert len(with_args) >= 10, with_args
+        for args in with_args:
+            assert f"--type {ctx.t}" in args or "--type <t>" in args, args
         for stage in ctx.pipe["stages"]:
             raw = read(GENERIC_SKILL.format(stage=stage))
             assert "--type rfe" not in raw.split("---", 2)[2].replace("--type rfe-", ""), stage
@@ -2404,9 +2437,22 @@ class TestSkillLayer:
             f"(python3 scripts/type_registry.py binding {ctx.t} shows it), report the mismatch "
             "and stop — write no files."
         ) in text
-        flag = "true" if comments else "false"
-        assert f"COMMENTS_COMPANION={flag}" in text
-        assert f"{ctx.dirs['tasks']}/{{KEY}}-comments.md" in text  # gated by the flag above
+        # The comments lines render behind this type's gate and nowhere else: the write step
+        # opens with the gate carrying the descriptor's flag, the verify entry repeats it, and
+        # the other flag value appears nowhere (a type without the companion is told to skip).
+        flag, other = ("true", "false") if comments else ("false", "true")
+        gate = f"COMMENTS_COMPANION={flag}"
+        assert gate in text and f"COMMENTS_COMPANION={other}" not in text
+        comments_file = f"{ctx.dirs['tasks']}/{{KEY}}-comments.md"
+        comment_lines = [ln for ln in lines if comments_file in ln]
+        assert len(comment_lines) == 2, comment_lines
+        assert comment_lines[0].strip() == (
+            f"e. Only when this type keeps a comments companion ({gate}): write comments to "
+            f"{comments_file} formatted as:"
+        )
+        assert comment_lines[1].strip() == (
+            f"- {comments_file} (only for a type with a comments companion — this type: {gate})"
+        )
         assert f"frontmatter.py schema {ctx.task_schema}" in text
         assert f"{ctx.id_field}={{KEY}}" in text
         verify = text.split("3. Verify all output files exist:")[1].split("\n\n")[0]
@@ -2414,7 +2460,7 @@ class TestSkillLayer:
         assert listed == [
             f"{ctx.dirs['tasks']}/{{KEY}}.md",
             f"{ctx.dirs['originals']}/{{KEY}}.md",
-            f"{ctx.dirs['tasks']}/{{KEY}}-comments.md",
+            comments_file,
         ], listed
 
     def test_resplit_rules_in_split_skills(self, ctx):

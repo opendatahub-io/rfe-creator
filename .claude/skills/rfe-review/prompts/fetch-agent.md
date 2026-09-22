@@ -24,6 +24,6 @@ Fetch Jira issue {KEY} and write artifacts. Steps:
 3. Verify all output files exist:
    - {TASKS_DIR}/{KEY}.md (with frontmatter)
    - {ORIGINALS_DIR}/{KEY}.md
-   - {TASKS_DIR}/{KEY}-comments.md (only when COMMENTS_COMPANION={COMMENTS_COMPANION} is true)
+   - {TASKS_DIR}/{KEY}-comments.md (only for a type with a comments companion — this type: COMMENTS_COMPANION={COMMENTS_COMPANION})
 
 Do not return a summary. Your work is complete when the output files exist.

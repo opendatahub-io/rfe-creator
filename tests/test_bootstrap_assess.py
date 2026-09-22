@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import type_registry  # noqa: E402
 from pipeline_state import PIPELINE_TYPES  # noqa: E402
 
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -264,7 +265,53 @@ class TestPathsMatchPipelineRegistry:
 
 
 class TestCallersDeclareType:
-    """An initiative skill that forgets the flag silently loses the gate."""
+    """A skill that forgets the flag silently loses the gate. Since PR-5b the callers are the
+    generic bodies and the typed split prompt, rendered per type with the launch block: every
+    bootstrap call they render must carry --type <t>. The legacy initiative bodies are checked
+    too until PR-5c deletes them."""
+
+    GENERIC_CALLERS = ("rfe-create", "rfe-review", "rfe-auto-fix", "rfe-speedrun")
+
+    def _desc(self, t):
+        return type_registry.load(extra_roots=[], env={}).get(t)
+
+    def _surfaces(self, t):
+        """(repo-relative file, stage) of every generic surface that bootstraps for type t."""
+        for name in self.GENERIC_CALLERS:
+            yield f".claude/skills/{name}/SKILL.md", name.split("-", 1)[1]
+        yield self._desc(t).get("pipeline.prompts.split_rules"), "split"
+
+    def _rendered(self, t, rel, stage):
+        with open(os.path.join(REPO_ROOT, rel)) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(self._desc(t), stage):
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    @staticmethod
+    def _bootstrap_lines_in(text):
+        return [ln for ln in text.splitlines() if re.search(r"bootstrap-assess-rfe\.sh", ln)]
+
+    @pytest.mark.parametrize("t", sorted(PIPELINE_TYPES))
+    def test_every_generic_caller_passes_the_resolved_type(self, t):
+        seen = []
+        for rel, stage in self._surfaces(t):
+            for line in self._bootstrap_lines_in(self._rendered(t, rel, stage)):
+                seen.append((rel, line.strip()))
+                assert f"--type {t}" in line, f"{rel} rendered for {t}: {line.strip()}"
+        assert len(seen) >= len(self.GENERIC_CALLERS) + 1, seen
+
+    @pytest.mark.parametrize("t", sorted(PIPELINE_TYPES))
+    def test_the_launch_block_is_the_only_bootstrap_site(self, t):
+        """No generic body or typed prompt hand-writes the command: every bootstrap call is
+        the BOOTSTRAP launch var, which carries the type — a body cannot drop the flag."""
+        block = dict(type_registry.launch_vars(self._desc(t), "review"))
+        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap-assess-rfe.sh --type {t}"
+        for rel, _ in self._surfaces(t):
+            with open(os.path.join(REPO_ROOT, rel)) as f:
+                raw = f.read()
+            assert "bootstrap-assess-rfe.sh" not in raw, rel
+            assert "{BOOTSTRAP}" in raw, rel
 
     def _bootstrap_lines(self, path):
         with open(path) as f:

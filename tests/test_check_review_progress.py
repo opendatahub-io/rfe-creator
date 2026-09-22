@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import type_registry  # noqa: E402
 from check_review_progress import (  # noqa: E402
     PHASE_CHECKS,
     _check_phase,
@@ -18,6 +19,8 @@ from check_review_progress import (  # noqa: E402
     _format_status,
     check_id,
 )
+
+REG = type_registry.load(extra_roots=[], env={})
 
 # ── check_id ──
 
@@ -934,6 +937,12 @@ def _phases_used(text):
     return re.findall(r"--phase\s+([a-z-]+)", text)
 
 
+def _phases_used_rendered(text):
+    """Literal phase names in a rendered generic body: a templated `--phase <prefix><name>`
+    (the dimension loop) is not one."""
+    return re.findall(r"--phase ([a-z][a-z-]*[a-z])(?![\w<-])", text)
+
+
 class TestSkillBarrierUsage:
     """The barrier is prose, so nothing else in the suite exercises it.
 
@@ -969,6 +978,52 @@ class TestSkillBarrierUsage:
         init = _skill_text("initiative-split")
         assert len(_phases_used(init)) >= len(_phases_used(rfe))
         assert init.count("NEXT_POLL") >= rfe.count("NEXT_POLL")
+
+    # PR-5b: the generic bodies poll through `--phase {POLL_PREFIX}<phase>`. Rendered per type
+    # with the launch block (`type_registry.py launch-vars`) they must name PHASE_CHECKS keys
+    # only — the guard above, restated on the surface a type actually runs through — and poll
+    # at least as much as the legacy bodies they replace (kept until PR-5c).
+
+    @staticmethod
+    def _rendered(t, stage):
+        with open(os.path.join(SKILLS_DIR, f"rfe-{stage}", "SKILL.md")) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(REG.get(t), stage):
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    @staticmethod
+    def _dimension_polls(text):
+        """The per-dimension loop polls `--phase <prefix><name>` — one line for every blocking
+        dimension, templated on <name>."""
+        return re.findall(r"--phase [a-z-]*<name>", text)
+
+    @pytest.mark.parametrize("t", REG.names())
+    def test_generic_bodies_poll_known_phases_only(self, t):
+        desc = REG.get(t)
+        pp = desc.get("pipeline.poll_prefix")
+        for stage in ("review", "split", "speedrun"):
+            text = self._rendered(t, stage)
+            used = _phases_used_rendered(text)
+            assert used, (t, stage)
+            unknown = [p for p in used if p not in PHASE_CHECKS]
+            assert not unknown, f"rfe-{stage} rendered for {t}: unknown poll phases {unknown}"
+        for dim in desc.get("pipeline.dimensions"):
+            assert f"{pp}{dim['name']}" in PHASE_CHECKS, dim["name"]
+        assert self._dimension_polls(self._rendered(t, "review"))
+        assert f"{pp}create" in _phases_used_rendered(self._rendered(t, "speedrun"))
+
+    @pytest.mark.parametrize("t", REG.names())
+    def test_generic_bodies_poll_as_much_as_the_legacy_bodies(self, t):
+        legacy = {"rfe": "rfe.", "initiative": "initiative-"}[t]
+        blocking = [d for d in REG.get(t).get("pipeline.dimensions") if d.get("blocking", True)]
+        for stage in ("review", "split"):
+            new, old = self._rendered(t, stage), _skill_text(f"{legacy}{stage}")
+            barriers = len(_phases_used_rendered(new)) + len(blocking) * len(
+                self._dimension_polls(new)
+            )
+            assert barriers >= len(_phases_used(old)), (t, stage)
+            assert new.count("NEXT_POLL") >= old.count("NEXT_POLL"), (t, stage)
 
 
 # ── Registry derivation ──

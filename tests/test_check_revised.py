@@ -9,8 +9,48 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import check_revised  # noqa: E402
+import type_registry  # noqa: E402
 
+REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_revised.py")
+GENERIC_REVIEW_SKELETON = ".claude/skills/rfe-review/prompts/review-agent.md"
+REVIEW_PROMPT_SURFACES = [
+    ".claude/skills/rfe.review/prompts/review-agent.md",  # legacy, until PR-5c
+    ".claude/skills/initiative-review/prompts/review-agent.md",  # legacy, until PR-5c
+    "rfe:generic",
+    "initiative:generic",
+]
+
+
+def _set_commands(text):
+    """Every `python3 scripts/frontmatter.py set` command, backslash continuations joined."""
+    lines, out, i = text.splitlines(), [], 0
+    while i < len(lines):
+        if "frontmatter.py set" in lines[i]:
+            command = lines[i]
+            while command.rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                command = command.rstrip()[:-1] + " " + lines[i].strip()
+            out.append(command)
+        i += 1
+    return out
+
+
+def _review_prompt(surface):
+    """(text, id_field) of a review-agent prompt surface: a legacy file, or the generic
+    skeleton rendered for a type with its launch block (`type_registry.py launch-vars`)."""
+    if surface.endswith(":generic"):
+        t = surface.split(":")[0]
+        desc = type_registry.load(extra_roots=[], env={}).get(t)
+        with open(os.path.join(REPO_ROOT, GENERIC_REVIEW_SKELETON)) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(desc, "review"):
+            text = text.replace("{" + key + "}", value)
+        return text, desc.id_field
+    with open(os.path.join(REPO_ROOT, surface)) as f:
+        return f.read(), ("rfe_id" if "/rfe." in surface else "initiative_id")
+
+
 FM_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "frontmatter.py")
 
 
@@ -320,28 +360,17 @@ class TestReassessCyclePreservation:
         fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md")
         assert fm["auto_revised"] is True
 
-    def test_review_agent_prompt_excludes_auto_revised(self):
-        """The review agent prompt must NOT include auto_revised in its
-        frontmatter.py set call — only the revise agent and FIXUP set it."""
-        prompt_path = os.path.join(
-            os.path.dirname(__file__), "..", ".claude/skills/rfe.review/prompts/review-agent.md"
-        )
-        with open(prompt_path) as f:
-            content = f.read()
-        lines = content.split("\n")
-        in_set_block = False
-        set_block = []
-        for line in lines:
-            if "frontmatter.py set" in line and "rfe_id=" in line:
-                in_set_block = True
-            if in_set_block:
-                set_block.append(line)
-                if not line.rstrip().endswith("\\"):
-                    break
-        set_cmd = " ".join(set_block)
-        assert "auto_revised" not in set_cmd, (
-            "review-agent.md frontmatter.py set must not include auto_revised"
-        )
+    @pytest.mark.parametrize("surface", REVIEW_PROMPT_SURFACES)
+    def test_review_agent_prompt_excludes_auto_revised(self, surface):
+        """The review agent prompt must NOT include auto_revised in its frontmatter.py set
+        call — only the revise agent and FIXUP set it. Held on the legacy prompts (until PR-5c)
+        and on the generic review skeleton rendered per type (`{ID_FIELD}={ID}` renders to the
+        type's id field)."""
+        text, id_field = _review_prompt(surface)
+        review_sets = [c for c in _set_commands(text) if f"{id_field}={{ID}}" in c]
+        assert review_sets, f"{surface}: no frontmatter.py set command carries {id_field}={{ID}}"
+        for command in review_sets:
+            assert "auto_revised" not in command, f"{surface}: {command}"
 
 
 class TestTypeArg:

@@ -28,7 +28,7 @@ LEGACY_DIM = {
     ("initiative", "feasibility"): ".claude/skills/initiative-feasibility-review/SKILL.md",
     ("initiative", "alignment"): ".claude/skills/strategic-alignment-review/SKILL.md",
 }
-MIN_SENTENCE = 30
+MIN_SENTENCE = 12
 
 
 def read(rel):
@@ -71,6 +71,37 @@ def sentences(text):
             sentence = sentence.strip(" .;:—-")
             if len(sentence) >= MIN_SENTENCE:
                 out.append(sentence)
+    return out
+
+
+def commands(text, dims=()):
+    """Every ``python3 scripts/…`` / ``bash scripts/…`` invocation — a code-block line
+    (backslash continuations joined) or an inline backtick span — normalised: trailing comments
+    dropped; ``--type <t>`` and ``type=<t>`` folded (the generic surface adds the type
+    everywhere); ``{PLACEHOLDERS}`` and ``<slots>`` folded; the declared dimension names folded
+    (the generic body templates them as ``<name>``)."""
+    found, lines, i = [], text.splitlines(), 0
+    while i < len(lines):
+        ln = lines[i].strip()
+        if re.match(r"(python3|bash) scripts/", ln):
+            parts = [ln]
+            while parts[-1].endswith("\\") and i + 1 < len(lines):
+                parts[-1] = parts[-1][:-1].strip()
+                i += 1
+                parts.append(lines[i].strip())
+            found.append(" ".join(parts))
+        i += 1
+    found.extend(re.findall(r"`((?:python3|bash) scripts/[^`]*)`", text))
+    out = []
+    for cmd in found:
+        cmd = re.sub(r"\s+#.*$", "", cmd)
+        cmd = re.sub(r"\s--type\s+\S+", "", cmd)
+        cmd = re.sub(r"\stype=\S+", "", cmd)
+        cmd = re.sub(r"\{[A-Za-z_<>]+\}", "{}", cmd)
+        cmd = re.sub(r"<[^>]*>", "<>", cmd)
+        for name in dims:
+            cmd = re.sub(rf"\b{re.escape(name)}\b", "<>", cmd)
+        out.append(re.sub(r"\s+", " ", cmd).strip())
     return out
 
 
@@ -130,6 +161,35 @@ for _t, _prefix in (("rfe", "rfe."), ("initiative", "initiative-")):
     _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_DIMENSION_GENERIC_BODY)
 _allow("initiative", ".claude/skills/initiative-review/SKILL.md", *_DIMENSION_GENERIC_BODY_INIT)
 _allow("rfe", ".claude/skills/rfe.review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW_RFE)
+# The revise skeleton's step list keeps the rfe wording ("Read the task file to see what needs
+# changing"); the initiative's "Read the initiative: <path>" is the same read, the path now the
+# skeleton's `Task file:` header line.
+_allow(
+    "initiative", ".claude/skills/initiative-review/prompts/revise-agent.md", "read the initiative"
+)
+
+# (type, legacy file) -> substrings of normalised script invocations the collapse rewrote, why.
+ALLOWED_COMMANDS = {}
+
+
+def _allow_command(t, rel, *entries):
+    ALLOWED_COMMANDS.setdefault((t, rel), []).extend(entries)
+
+
+# NEXT_ID_FLAGS renders `--prefix <local prefix> --dir <tasks dir>` for every type; the rfe
+# bodies relied on next_rfe_id.py's defaults, which are those same values.
+for _rel in (
+    ".claude/skills/rfe.split/prompts/split-agent.md",
+    ".claude/skills/rfe.create/SKILL.md",
+    ".claude/skills/rfe.speedrun/SKILL.md",
+):
+    _allow_command("rfe", _rel, "python3 scripts/next_rfe_id.py")
+# PROMPT_PATH is a launch-block line: the PR-5a lookup of pipeline.rubric.path is subsumed.
+_allow_command(
+    "rfe",
+    ".claude/skills/rfe.review/SKILL.md",
+    "python3 scripts/type_registry.py get rfe pipeline.rubric.path",
+)
 _allow("initiative", ".claude/skills/initiative-split/SKILL.md", *_RESPLIT_INIT)
 
 
@@ -214,15 +274,53 @@ def test_every_legacy_sentence_survives(t, rel, legacy_text, corpus, mode):
     )
 
 
+@pytest.mark.parametrize("t,rel,legacy_text,corpus,mode", list(_cases()))
+def test_every_legacy_script_invocation_survives(t, rel, legacy_text, corpus, mode):
+    """The mechanical lines too: every script invocation of a legacy file is one of the
+    generic surface's, after placeholder normalisation."""
+    dims = [d["name"] for d in REG.get(t).get("pipeline.dimensions")]
+    have = set(commands(corpus, dims))
+    allowed = ALLOWED_COMMANDS.get((t, rel), [])
+    missing = [
+        c
+        for c in commands(body(legacy_text), dims)
+        if c not in have and not any(a in c for a in allowed)
+    ]
+    assert not missing, f"{t} {rel}: {len(missing)} invocation(s) lost:\n- " + "\n- ".join(missing)
+
+
 def test_allowed_entries_are_still_needed():
-    """An allowlist entry is stale when the sentence it excuses is present again, or when no
-    legacy sentence matches it at all — either way, drop it."""
-    stale = []
+    """An allowlist entry is stale when the sentence (or invocation) it excuses is present
+    again, or when no legacy sentence matches it at all — either way, drop it. A legacy file
+    may back several cases (the create body backs the guidance case too), so the verdict is
+    per (type, file) across its cases."""
+    matched, present = set(), set()
     for t, rel, legacy_text, corpus, mode in (p.values for p in _cases()):
-        have = normalise(corpus)
-        wanted = sentences(body(legacy_text)) if mode == "full" else bold_rules(legacy_text)
-        for a in ALLOWED.get((t, rel), []):
-            matching = [s for s in wanted if a in s]
-            if not matching or any(s in have for s in matching):
-                stale.append((t, rel, a))
+        dims = [d["name"] for d in REG.get(t).get("pipeline.dimensions")]
+        surfaces = [
+            (
+                ALLOWED,
+                sentences(body(legacy_text)) if mode == "full" else bold_rules(legacy_text),
+                lambda s, have=normalise(corpus): s in have,
+            ),
+            (
+                ALLOWED_COMMANDS,
+                commands(body(legacy_text), dims),
+                lambda c, have=set(commands(corpus, dims)): c in have,
+            ),
+        ]
+        for allowed, wanted, survives in surfaces:
+            for a in allowed.get((t, rel), []):
+                for item in wanted:
+                    if a in item:
+                        matched.add((t, rel, a))
+                        if survives(item):
+                            present.add((t, rel, a))
+    entries = {
+        (t, rel, a)
+        for table in (ALLOWED, ALLOWED_COMMANDS)
+        for (t, rel), v in table.items()
+        for a in v
+    }
+    stale = sorted((entries - matched) | present)
     assert not stale, stale
