@@ -3432,7 +3432,8 @@ class TestWaveStall:
         assert "ASSESS → REVIEW" in capsys.readouterr().err
         assert ps._load_state()["phase"] == "REVIEW"
         assert action["action"] == "launch_wave" and action["phase"] == "REVIEW"
-        assert [a["vars"].splitlines()[1] for a in action["agents"]] == ["ID=RHAIRFE-1001"]
+        # the launch block precedes the phase vars (PR-5b); the survivor is the only id
+        assert ["ID=RHAIRFE-1001" in a["vars"].splitlines() for a in action["agents"]] == [True]
         assert read_ids("tmp/pipeline-active-ids.txt") == ["RHAIRFE-1001"]
         assert all(os.path.exists(p) for p in outputs)
         from artifact_utils import read_frontmatter

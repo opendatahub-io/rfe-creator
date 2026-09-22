@@ -974,8 +974,10 @@ class TestSkillBarrierUsage:
 # ── Registry derivation ──
 
 
-# The 14 poll phases in the order the literal table had. argparse renders the --phase /
-# --also-phase choices from this order, so it is CLI surface, not an implementation detail.
+# The 15 poll phases in the order the literal table had (PR-5b added initiative-create after
+# initiative-fetch: every type polls the Phase-1 create barrier). argparse renders the
+# --phase / --also-phase choices from this order, so it is CLI surface, not an implementation
+# detail.
 _TODAYS_PHASES = [
     "fetch",
     "create",
@@ -986,6 +988,7 @@ _TODAYS_PHASES = [
     "split",
     "initiative-split",
     "initiative-fetch",
+    "initiative-create",
     "initiative-assess",
     "initiative-feasibility",
     "initiative-review",
@@ -1023,12 +1026,14 @@ class TestDerivedFromRegistry:
                 name = dim["name"]
                 assert PHASE_CHECKS[f"{pp}{name}"]("X-1") == f"{dirs['reviews']}/X-1-{name}.md"
 
-    def test_create_row_is_rfe_only(self):
-        """#148's Phase-1 barrier is grandfathered to rfe until PR-5's generic body."""
+    def test_create_row_for_every_type(self):
+        """#148's Phase-1 barrier is polled by every type since PR-5b (the generic speedrun
+        body renders `--phase <poll_prefix>create`); the row watches the fetch path with the
+        stricter frontmatter check."""
         for desc in _hermetic_registry():
             pp = desc.get("pipeline.poll_prefix")
-            assert (f"{pp}create" in PHASE_CHECKS) is (desc.name == "rfe")
-        assert PHASE_CHECKS["create"]("X-1") == PHASE_CHECKS["fetch"]("X-1")
+            assert f"{pp}create" in PHASE_CHECKS, desc.name
+            assert PHASE_CHECKS[f"{pp}create"]("X-1") == PHASE_CHECKS[f"{pp}fetch"]("X-1")
 
     def test_create_mode_uses_the_owning_types_id_field(self, tmp_path, monkeypatch):
         """The create check compares identity.id_field, not a literal — rfe_id for rfe."""
@@ -1189,6 +1194,7 @@ class TestDerivedFromRegistry:
         got = json.loads(result.stdout)
         widget_keys = [
             "widget-fetch",
+            "widget-create",
             "widget-assess",
             "widget-feasibility",
             "widget-security",
@@ -1196,9 +1202,10 @@ class TestDerivedFromRegistry:
             "widget-revise",
             "widget-split",
         ]
-        assert got["keys"] == _TODAYS_PHASES + widget_keys  # shipped rows first, no widget-create
+        assert got["keys"] == _TODAYS_PHASES + widget_keys  # shipped rows first
         assert got["paths"] == {
             "widget-fetch": "artifacts/widgets/W-1.md",
+            "widget-create": "artifacts/widgets/W-1.md",
             "widget-assess": "tmp/rfe-assess/single/W-1.result.md",
             "widget-feasibility": "artifacts/widget-reviews/W-1-feasibility.md",
             "widget-security": "artifacts/widget-reviews/W-1-security.md",

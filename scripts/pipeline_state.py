@@ -170,76 +170,153 @@ PHASES = [
     "DONE",
 ]
 
-# ---------- Pipeline type config ----------
+# ---------- Pipeline type config (projected from the registry, PR-5b) ----------
+
+# The Tier-1/2 prompt skeletons are type-invariant since PR-5b: one review prompt directory
+# for every type (design §4.2; plan D7 — no descriptor field). The typed fragments reach the
+# agents through the launch block (type_registry.launch_vars), the split prompt and the
+# dimension files are the typed files themselves (prompt_file).
+REVIEW_PROMPTS = ".claude/skills/rfe-review/prompts"
+# The post-compaction recovery target names the body DRIVING the run. Until PR-5c turns the
+# legacy bodies into shims, the production job is driven by rfe.auto-fix and an initiative run
+# by initiative-auto-fix, so the target stays per type here; a type without a legacy body is
+# driven by the generic rfe-auto-fix. Collapses to one constant with the shims (D7).
+_LEGACY_DISPATCH_SKILL = {
+    "rfe": ".claude/skills/rfe.auto-fix/SKILL.md",
+    "initiative": ".claude/skills/initiative-auto-fix/SKILL.md",
+}
+GENERIC_DISPATCH_SKILL = ".claude/skills/rfe-auto-fix/SKILL.md"
+# A descriptor must carry these to get a phase table (a drop-in root may register a partial
+# one; it is then refused at `init`, before any state is written — D12).
+_PHASE_TABLE_FACTS = (
+    "dirs.tasks",
+    "dirs.reviews",
+    "dirs.originals",
+    "pipeline.poll_prefix",
+    "pipeline.scorer_agent",
+    "pipeline.rubric.path",
+    "pipeline.prompts.split_rules",
+)
+
+
+def _pipeline_type_row(desc):
+    """One PIPELINE_TYPES row: the eight descriptor projections plus the two constants."""
+    dirs = desc.dirs()
+    dims = [
+        {
+            "name": d["name"],
+            "prompt": d["prompt"],
+            "blocking": bool(d.get("blocking", True)),
+            "condition": d.get("condition"),
+            "skip_stub": d.get("skip_stub"),
+        }
+        for d in desc.get("pipeline.dimensions", None) or []
+    ]
+    by_name = {d["name"]: d for d in dims}
+    return {
+        "review_prompts": REVIEW_PROMPTS,
+        "split_prompt": desc.get("pipeline.prompts.split_rules"),
+        "scorer_type": desc.get("pipeline.scorer_agent"),
+        "rubric_path": f"{type_registry.CONTEXT_DIR}/{desc.get('pipeline.rubric.path')}",
+        "dimensions": dims,
+        "feasibility_skill": by_name.get("feasibility", {}).get("prompt"),
+        "alignment_skill": by_name.get("alignment", {}).get("prompt"),
+        "tasks_dir": dirs["tasks"],
+        "reviews_dir": dirs["reviews"],
+        "originals_dir": dirs["originals"],
+        "dispatch_skill": _LEGACY_DISPATCH_SKILL.get(desc.name, GENERIC_DISPATCH_SKILL),
+        "poll_prefix": desc.get("pipeline.poll_prefix"),
+    }
+
+
+def _has_phase_table_facts(desc):
+    return all(desc.get(dotted, None) is not None for dotted in _PHASE_TABLE_FACTS)
+
 
 PIPELINE_TYPES = {
-    "rfe": {
-        "review_prompts": ".claude/skills/rfe.review/prompts",
-        "split_prompt": ".claude/skills/rfe.split/prompts/split-agent.md",
-        "scorer_type": "rfe-scorer",
-        "rubric_path": ".context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md",
-        "feasibility_skill": ".claude/skills/rfe-feasibility-review/SKILL.md",
-        "alignment_skill": None,
-        "tasks_dir": "artifacts/rfe-tasks",
-        "reviews_dir": "artifacts/rfe-reviews",
-        "dispatch_skill": ".claude/skills/rfe.auto-fix/SKILL.md",
-        "poll_prefix": "",
-    },
-    "initiative": {
-        "review_prompts": ".claude/skills/initiative-review/prompts",
-        "split_prompt": ".claude/skills/initiative-split/prompts/split-agent.md",
-        "scorer_type": "initiative-scorer",
-        "rubric_path": ".context/assess-rfe/skills/assess-initiative/scripts/agent_prompt.md",
-        "feasibility_skill": ".claude/skills/initiative-feasibility-review/SKILL.md",
-        "alignment_skill": ".claude/skills/strategic-alignment-review/SKILL.md",
-        "tasks_dir": "artifacts/initiatives",
-        "reviews_dir": "artifacts/initiative-reviews",
-        "dispatch_skill": ".claude/skills/initiative-auto-fix/SKILL.md",
-        "poll_prefix": "initiative-",
-    },
+    name: _pipeline_type_row(_TYPES.get(name))
+    for name in _TYPES.names()
+    if _has_phase_table_facts(_TYPES.get(name))
 }
+
+
+def _launch_block(state):
+    """The type's launch block for the auto-fix stage (KEY, value) pairs; cached per type."""
+    ptype = state.get("type", "rfe")
+    if ptype not in _LAUNCH_BLOCKS:
+        _LAUNCH_BLOCKS[ptype] = type_registry.launch_vars(_TYPES.get(ptype), "auto-fix")
+    return _LAUNCH_BLOCKS[ptype]
+
+
+_LAUNCH_BLOCKS = {}
+
+
+def _render_vars(launch_block, phase_vars, rfe_id):
+    """``KEY=value`` lines: the launch block, then the phase's values; ``{ID}`` substituted."""
+    lines = [f"{k}={v.replace('{ID}', rfe_id)}" for k, v in launch_block]
+    lines += [f"{k}={v.replace('{ID}', rfe_id)}" for k, v in phase_vars.items()]
+    return "\n".join(lines) + "\n"
 
 
 # ---------- Conditional parallel agent helpers ----------
 
 
-def _has_rhaistrat_parent(rfe_id, state):
-    """Check if an initiative has a RHAISTRAT parent_key in its frontmatter."""
-    if state.get("type") != "initiative":
-        return False
-    path = os.path.join(PIPELINE_TYPES["initiative"]["tasks_dir"], f"{rfe_id}.md")
+def _frontmatter_field(path, field):
+    """One frontmatter field of a task file, or None when the file or block is unreadable."""
     if not os.path.exists(path):
-        return False
+        return None
     with open(path) as f:
         content = f.read()
     parts = content.split("---", 2)
     if len(parts) < 3:
-        return False
+        return None
     try:
         fm = yaml.safe_load(parts[1])
     except yaml.YAMLError:
-        return False
-    pk = (fm or {}).get("parent_key", "")
-    return bool(pk and pk.startswith("RHAISTRAT-"))
+        return None
+    return (fm or {}).get(field)
 
 
 def _check_condition(condition, rfe_id, state):
-    """Evaluate a named condition for a specific ID."""
-    if condition == "has_rhaistrat_parent":
-        return _has_rhaistrat_parent(rfe_id, state)
+    """Evaluate a dimension's descriptor condition (pipeline.dimensions[].condition) for one id:
+    ``{frontmatter_field, prefix}`` — the task file's field starts with the prefix — or
+    ``{context_exists}`` — the path exists. No condition means always."""
+    if not condition:
+        return True
+    if "frontmatter_field" in condition:
+        t = PIPELINE_TYPES[state.get("type", "rfe")]
+        value = _frontmatter_field(
+            os.path.join(t["tasks_dir"], f"{rfe_id}.md"), condition["frontmatter_field"]
+        )
+        return bool(isinstance(value, str) and value.startswith(condition["prefix"]))
+    if "context_exists" in condition:
+        return os.path.exists(condition["context_exists"])
     return True
 
 
-def _write_poll_stub(poll_phase, rfe_id):
-    """Write a stub completion file for a skipped conditional agent."""
+def _has_rhaistrat_parent(rfe_id, state):
+    """The initiative alignment condition, evaluated from the descriptor (kept as a named
+    helper for its callers and tests)."""
+    t = PIPELINE_TYPES.get(state.get("type", "rfe"))
+    if not t:
+        return False
+    dim = next((d for d in t["dimensions"] if d["name"] == "alignment"), None)
+    if not dim or not dim.get("condition"):
+        return False
+    return _check_condition(dim["condition"], rfe_id, state)
+
+
+def _write_poll_stub(poll_phase, rfe_id, skip_stub=None):
+    """Write a stub completion file for a skipped conditional agent: the dimension's
+    descriptor ``skip_stub`` (``result``/``reason``) as the file's frontmatter."""
     from check_review_progress import PHASE_CHECKS
 
     path = PHASE_CHECKS[poll_phase](rfe_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    stub = skip_stub or {"result": "not_assessed", "reason": "skipped by pipeline"}
+    body = "".join(f"{k}: {v}\n" for k, v in stub.items())
     with open(path, "w") as f:
-        f.write(
-            "---\nresult: not_assessed\nreason: skipped by pipeline (no RHAISTRAT parent)\n---\n"
-        )
+        f.write(f"---\n{body}---\n")
 
 
 # ---------- Phase config (built from pipeline type) ----------
@@ -266,27 +343,26 @@ def _build_phase_config(pipeline_type):
             "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
             "FEASIBILITY_PATH": f"{t['reviews_dir']}/{{ID}}-feasibility.md",
         }
-        if t["alignment_skill"]:
-            v["ALIGNMENT_PATH"] = f"{t['reviews_dir']}/{{ID}}-alignment.md"
+        for dim in t["dimensions"]:
+            if dim["name"] != "feasibility":
+                key = dim["name"].upper().replace("-", "_")
+                v[f"{key}_PATH"] = f"{t['reviews_dir']}/{{ID}}-{dim['name']}.md"
         return v
 
     def _assess_parallel():
-        parallel = [
-            {
-                "prompt": t["feasibility_skill"],
-                "poll_phase": f"{pp}feasibility",
+        # One companion per declared dimension (absent dimensions are simply not launched —
+        # a drop-in type without a feasibility dimension gets a scorer-only wave, D12).
+        parallel = []
+        for dim in t["dimensions"]:
+            entry = {
+                "prompt": dim["prompt"],
+                "poll_phase": f"{pp}{dim['name']}",
                 "vars": {"ID": "{ID}"},
-            },
-        ]
-        if t["alignment_skill"]:
-            parallel.append(
-                {
-                    "prompt": t["alignment_skill"],
-                    "poll_phase": f"{pp}alignment",
-                    "vars": {"ID": "{ID}"},
-                    "condition": "has_rhaistrat_parent",
-                }
-            )
+            }
+            if dim.get("condition"):
+                entry["condition"] = dim["condition"]
+                entry["skip_stub"] = dim.get("skip_stub")
+            parallel.append(entry)
         return parallel
 
     fixup_cmd = f"python3 scripts/check_revised.py --batch --type {pipeline_type}"
@@ -791,9 +867,7 @@ def _save_originals(ids, pipeline_type):
     _validate_ids(ids, source="_save_originals")  # ids become path components below
     t = PIPELINE_TYPES[pipeline_type]
     tasks_dir = t["tasks_dir"]
-    originals_dir = tasks_dir.replace("rfe-tasks", "rfe-originals").replace(
-        "initiatives", "initiative-originals"
-    )
+    originals_dir = t["originals_dir"]
     os.makedirs(originals_dir, exist_ok=True)
     for rfe_id in ids:
         orig = os.path.join(originals_dir, f"{rfe_id}.md")
@@ -1145,10 +1219,10 @@ def advance(state, dry_run=False):
 def cmd_init(args):
     parser = argparse.ArgumentParser(prog="pipeline_state.py init")
     # Registered type names (rfe first) that this script has a phase table for: an unknown
-    # --type fails with that list (design §5 rung 1), and a drop-in type without a
-    # PIPELINE_TYPES entry is refused HERE, before any state is written, rather than by
-    # _validate_state_values later. PIPELINE_TYPES keeps its literal table, pinned equal to
-    # the registry names.
+    # --type fails with that list (design §5 rung 1). PIPELINE_TYPES is projected from the
+    # registry (PR-5b), so a registered descriptor that carries the phase-table facts gets a
+    # table automatically (D12); one that lacks them (a partial drop-in) is refused HERE,
+    # before any state is written, rather than by _validate_state_values later.
     parser.add_argument(
         "--type", choices=[n for n in _TYPES.choices() if n in PIPELINE_TYPES], default="rfe"
     )
@@ -1410,7 +1484,10 @@ def cmd_next_action(args):
             _write_wave_launch()
             _clear_wave_progress()
 
-            # Build agent entries
+            # Build agent entries. Every agent's vars are the type's launch block (the typed
+            # literals the skeletons and typed files read — design §8.3, PR-5b) followed by
+            # the phase's own values, with {ID} substituted throughout.
+            launch_block = _launch_block(state)
             agents = []
             for rfe_id in wave_ids:
                 # Main agent
@@ -1418,11 +1495,7 @@ def cmd_next_action(args):
                 if config.get("subagent_type"):
                     entry["subagent_type"] = config["subagent_type"]
                 entry["prompt_file"] = config["prompt"]
-                # Build vars string
-                var_lines = []
-                for k, v in config.get("vars", {}).items():
-                    var_lines.append(f"{k}={v.replace('{ID}', rfe_id)}")
-                entry["vars"] = "\n".join(var_lines) + "\n"
+                entry["vars"] = _render_vars(launch_block, config.get("vars", {}), rfe_id)
                 agents.append(entry)
 
                 # Parallel agents
@@ -1430,16 +1503,13 @@ def cmd_next_action(args):
                     cond = par.get("condition")
                     if cond and not _check_condition(cond, rfe_id, state):
                         if par.get("poll_phase"):
-                            _write_poll_stub(par["poll_phase"], rfe_id)
+                            _write_poll_stub(par["poll_phase"], rfe_id, par.get("skip_stub"))
                         continue
                     pentry = {}
                     if par.get("subagent_type"):
                         pentry["subagent_type"] = par["subagent_type"]
                     pentry["prompt_file"] = par["prompt"]
-                    pvar_lines = []
-                    for k, v in par.get("vars", {}).items():
-                        pvar_lines.append(f"{k}={v.replace('{ID}', rfe_id)}")
-                    pentry["vars"] = "\n".join(pvar_lines) + "\n"
+                    pentry["vars"] = _render_vars(launch_block, par.get("vars", {}), rfe_id)
                     agents.append(pentry)
 
             msg = f"{phase}: wave {wave_num}/{total_waves} ({len(wave_ids)} IDs)"
