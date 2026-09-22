@@ -78,3 +78,5 @@ The shim hop in headless production (5c) — mitigated by the shim wording, the 
 ## Progress
 
 **2026-09-22 — decisions taken (see Rulings); PR-5a started** on branch `fix/pr5a-stale-sites-dead-paths` (worktree `rfe-pr5a`).
+
+**PR-5a opened 2026-09-22 as [#199](https://github.com/opendatahub-io/rfe-creator/pull/199)** (5799de0 stale rubric path → `type_registry.py get rfe pipeline.rubric.path` in review Steps 2/4b, composed literal in split-agent and the auto-fix example, `test_rubric_path_sites` flipped to pin the sites as correct, new `test_auto_fix_example_wave_matches_the_phase_table`; 2393e4f dead paths → announce-and-stop, `caller=<split|none>`, `_detect_fast` allowlist minus the two `*-autofix-config.yaml` entries, `STATE_STAGES` = review/split/speedrun, correctness reference H5/H7 rewritten and H6/H10 marked removed, counters table, AGENTS.md prefix list, snapshot doc examples, two docstrings; 139b2b7 `.ambient/` deleted). 2975 tests; rfe eval dispatched (GitHub run 35742461041). PR-5b started stacked on the 5a branch (`feat/pr5b-generic-skills`, worktree `rfe-pr5`).
