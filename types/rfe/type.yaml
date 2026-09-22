@@ -71,13 +71,13 @@ schema:
     extra_rules: []
 
 pipeline:
-  stages: [create, review, submit, split, auto-fix, speedrun]   # .claude/skills/rfe.{create,review,submit,split,auto-fix,speedrun}/SKILL.md
+  stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); the legacy rfe.* tree stays until PR-5c
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
     - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "rfe"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
   poll_prefix: ""                                       # pipeline_state.py:107; check_review_progress.py:19-27 unprefixed keys — grandfathered empty (rfe only); also REPORT_CONFIG.default_output "review-report.html" (generate_review_pdf.py:28, Q15)
-  state_prefix: ""                                      # check_autofix_complete.py:18 tmp/speedrun-all-ids.txt; check_review_progress.py:135-138 tmp/{review,split,autofix,speedrun}-config.yaml — grandfathered empty (rfe only)
-  scorer_agent: rfe-scorer                              # pipeline_state.py:100 scorer_type (subagent_type :240,:278,:345,:382); rfe.review/prompts/assess-agent.md:12
+  state_prefix: ""                                      # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies — grandfathered empty (rfe only)
+  scorer_agent: rfe-scorer                              # pipeline_state.PIPELINE_TYPES scorer_type (subagent_type of every assess wave) and the SCORER_AGENT launch var read by .claude/skills/rfe-review/prompts/assess-agent.md
   prompts:                                            # PR-5b: the typed judgement files under types/<t>/ (design §4.2 tiers, §8.1 layout); rendered into every launch by `type_registry.py launch-vars` (RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH, TEMPLATE_PATH, CREATE_GUIDANCE_PATH); gate 1 checks each exists
     template: types/rfe/template.md                 # Tier 3 — the create template (from .claude/skills/rfe.create/rfe-template.md); D16
     create_guidance: types/rfe/prompts/create-guidance.md   # Tier 3 — questions, writing rules and don'ts of the generic rfe-create body

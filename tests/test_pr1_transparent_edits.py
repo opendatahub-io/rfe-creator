@@ -283,6 +283,13 @@ SCRIPT_APPEND_STAMPS = {("scripts/verify_phase.py", "type")}
 # .claude/skills/**/*.md: the `frontmatter.py set` commands that stamp, (file, fields).
 # Bodies are Builder-C territory; tests/test_type_registry_pins.py pins the command tails.
 SKILL_STAMPS = {
+    # PR-5b: the generic bodies and skeletons stamp through the launch block (type={TYPE});
+    # the typed split prompt (types/<t>/prompts/split-rules.md) stamps the split children the
+    # same way and is pinned by tests/test_typed_prompts.py, outside this .claude/skills scan.
+    (".claude/skills/rfe-create/SKILL.md", ("type",)),
+    (".claude/skills/rfe-review/prompts/fetch-agent.md", ("type", "tracker_ref")),
+    (".claude/skills/rfe-review/SKILL.md", ("type",)),  # orchestrator error stubs
+    (".claude/skills/rfe-split/SKILL.md", ("type",)),  # orchestrator error stub
     (".claude/skills/rfe.create/SKILL.md", ("type",)),
     (".claude/skills/rfe.split/prompts/split-agent.md", ("type",)),
     (".claude/skills/rfe.review/prompts/fetch-agent.md", ("type", "tracker_ref")),

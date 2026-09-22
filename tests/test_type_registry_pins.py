@@ -81,9 +81,15 @@ REG = type_registry.load(extra_roots=[], env={})
 TYPES = REG.names()
 
 # ── constants the descriptors deliberately do not carry (UNMAPPED in the matrix) ─────────────
-# Skill-directory naming prefix: 'rfe.' vs 'initiative-'. It determines dispatch_skill, the prompt
-# dirs and eval execution.skill; design §4.4 renames everything to rfe-* generics in PR-5.
+# Legacy skill-directory naming prefix: 'rfe.' vs 'initiative-'. PR-5b landed the generic
+# rfe-* bodies beside them (design §4.4); the legacy trees are deleted in PR-5c. Until then the
+# pins below hold on the GENERIC surface rendered per type (skill()/prompt() below), and
+# dispatch_skill still names the legacy driving body (plan D7).
 SKILL_PREFIX = {"rfe": "rfe.", "initiative": "initiative-"}
+GENERIC_SKILL = ".claude/skills/rfe-{stage}/SKILL.md"
+SKELETON_DIR = ".claude/skills/rfe-review/prompts"
+GENERIC_SPEEDRUN = "rfe-speedrun"
+GENERIC_CREATE = "rfe-create"
 # Interactive skills poll through a second, non-empty prefix the descriptor cannot express.
 POLL_FILE_PREFIX = {"rfe": "tmp/rfe-poll-", "initiative": "tmp/initiative-poll-"}
 # PR-5a: the rfe review skill resolves the rubric path from the descriptor at launch time.
@@ -439,8 +445,33 @@ def read(rel):
     return _TEXT[rel]
 
 
+def launch(t, stage="review"):
+    return type_registry.launch_vars(REG.get(t), stage)
+
+
+def render(text, t, stage="review"):
+    """A skeleton or generic body with the type's launch block substituted."""
+    for key, value in launch(t, stage):
+        text = text.replace("{" + key + "}", value)
+    return text
+
+
 def skill(t, stage, sub="SKILL.md"):
+    """The generic skill of ``stage`` (or one of its prompt skeletons) rendered for type ``t``:
+    the surface the type actually runs through since PR-5b."""
+    if sub == "SKILL.md":
+        return render(read(GENERIC_SKILL.format(stage=stage)), t, stage)
+    return render(read(f"{SKELETON_DIR}/{sub.split('/')[-1]}"), t, stage)
+
+
+def legacy_skill(t, stage, sub="SKILL.md"):
+    """The legacy per-type body (deleted in PR-5c)."""
     return read(f".claude/skills/{SKILL_PREFIX[t]}{stage}/{sub}")
+
+
+def typed(t, key):
+    """A typed file named by pipeline.prompts.<key>."""
+    return read(REG.get(t).get(f"pipeline.prompts.{key}"))
 
 
 def set_commands(rel):
@@ -1489,25 +1520,40 @@ class TestPipelineTypes:
     # rows: 108-124
 
     def test_pipeline_types(self, ctx):
+        # PR-5b: the table is a projection of the descriptor (eight keys) plus two constants
+        # (D7): the type-invariant skeleton directory and, until PR-5c's shims, the legacy
+        # driving body as the compaction-recovery target.
         p = pipeline_state.PIPELINE_TYPES[ctx.t]
         prompts = ctx.pipe["prompts"]
-        pin(
-            "dirname(pipeline.prompts.review_rules)",
-            "pipeline_state.py:98,:110",
-            os.path.dirname(prompts["review_rules"]),
-            p["review_prompts"],
-        )
-        pin(
-            "dirname(pipeline.prompts.revise_rules)",
-            "pipeline_state.py:98,:110",
-            os.path.dirname(prompts["revise_rules"]),
-            p["review_prompts"],
-        )
+        assert p["review_prompts"] == pipeline_state.REVIEW_PROMPTS == SKELETON_DIR
+        for name in ("fetch", "assess", "review", "revise"):
+            assert (REPO_ROOT / f"{SKELETON_DIR}/{name}-agent.md").is_file()
         pin(
             "pipeline.prompts.split_rules",
             "pipeline_state.py:99,:111",
             prompts["split_rules"],
             p["split_prompt"],
+        )
+        pin(
+            "dirs.originals",
+            "pipeline_state._save_originals",
+            ctx.dirs["originals"],
+            p["originals_dir"],
+        )
+        pin(
+            "pipeline.dimensions[]",
+            "pipeline_state.PIPELINE_TYPES dimensions",
+            [
+                {
+                    "name": d["name"],
+                    "prompt": d["prompt"],
+                    "blocking": d.get("blocking", True),
+                    "condition": d.get("condition"),
+                    "skip_stub": d.get("skip_stub"),
+                }
+                for d in ctx.pipe["dimensions"]
+            ],
+            p["dimensions"],
         )
         pin(
             "pipeline.scorer_agent",
@@ -1536,11 +1582,13 @@ class TestPipelineTypes:
         pin("dirs.tasks", "pipeline_state.py:104,:116", ctx.dirs["tasks"], p["tasks_dir"])
         pin("dirs.reviews", "pipeline_state.py:105,:117", ctx.dirs["reviews"], p["reviews_dir"])
         pin(
-            "(UNMAPPED) skill dir prefix + 'auto-fix'",
-            "pipeline_state.py:106,:118",
+            "(UNMAPPED, until PR-5c) legacy driving body",
+            "pipeline_state._LEGACY_DISPATCH_SKILL",
             f".claude/skills/{ctx.sk}auto-fix/SKILL.md",
             p["dispatch_skill"],
         )
+        assert (REPO_ROOT / p["dispatch_skill"]).is_file()
+        assert (REPO_ROOT / pipeline_state.GENERIC_DISPATCH_SKILL).is_file()
         pin("pipeline.poll_prefix", "pipeline_state.py:107,:119", ctx.pp, p["poll_prefix"])
 
     def test_setup_commands_from_context_sources(self, ctx):
@@ -1565,13 +1613,17 @@ class TestPipelineTypes:
         # rows: 110, 118 — pipeline_state.py:194-211,:236-245
         # (+REASSESS_ASSESS/SPLIT_ASSESS/SPLIT_REASSESS)
         cfg = pipeline_state._build_phase_config(ctx.t)
-        review_dir = os.path.dirname(ctx.pipe["prompts"]["review_rules"])
+        review_dir = SKELETON_DIR
         parallel = [
             {
                 "prompt": d["prompt"],
                 "poll_phase": f"{ctx.pp}{d['name']}",
                 "vars": {"ID": "{ID}"},
-                **({"condition": "has_rhaistrat_parent"} if "condition" in d else {}),
+                **(
+                    {"condition": d["condition"], "skip_stub": d.get("skip_stub")}
+                    if "condition" in d
+                    else {}
+                ),
             }
             for d in ctx.pipe["dimensions"]
         ]
@@ -1616,12 +1668,9 @@ class TestPipelineTypes:
         cfg = pipeline_state._build_phase_config(ctx.t)
         prompts, rv = ctx.pipe["prompts"], ctx.dirs["reviews"]
         for phase in ("REVIEW", "REASSESS_REVIEW", "SPLIT_REVIEW", "SPLIT_RE_REVIEW"):
-            pin(
-                "pipeline.prompts.review_rules",
-                f"pipeline_state {phase}.prompt",
-                prompts["review_rules"],
-                cfg[phase]["prompt"],
-            )
+            # The Tier-2 skeleton is the prompt; review_rules reaches the agent as RULES_PATH.
+            assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/review-agent.md"
+            assert dict(launch(ctx.t))["RULES_PATH"] == prompts["review_rules"]
             pin(
                 "dirs.reviews",
                 f"pipeline_state {phase}.vars.FEASIBILITY_PATH",
@@ -1638,12 +1687,8 @@ class TestPipelineTypes:
                 )
             assert cfg[phase]["vars"]["ASSESS_PATH"] == f"{ASSESS_STAGING}/{{ID}}.result.md"
         for phase in ("REVISE", "REASSESS_REVISE", "SPLIT_REVISE"):
-            pin(
-                "pipeline.prompts.revise_rules",
-                f"pipeline_state {phase}.prompt",
-                prompts["revise_rules"],
-                cfg[phase]["prompt"],
-            )
+            assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/revise-agent.md"
+            assert dict(launch(ctx.t))["REVISE_RULES_PATH"] == prompts["revise_rules"]
         pin(
             "pipeline.prompts.split_rules",
             "pipeline_state SPLIT.prompt",
@@ -1706,7 +1751,9 @@ class TestPipelineTypes:
             {"frontmatter_field": "parent_key", "prefix": "RHAISTRAT-"},
             cond,
         )
-        assert 'if condition == "has_rhaistrat_parent":' in read("scripts/pipeline_state.py")
+        assert "def _check_condition(condition, rfe_id, state):" in read(
+            "scripts/pipeline_state.py"
+        )
         write(
             Path(ctx.dirs["tasks"]) / "A.md", fm({cond["frontmatter_field"]: f"{cond['prefix']}1"})
         )
@@ -1743,17 +1790,7 @@ class TestPipelineTypes:
             True,
             (Path(ctx.dirs["originals"]) / f"{ident}.md").exists(),
         )
-        derived = (
-            ctx.dirs["tasks"]
-            .replace("rfe-tasks", "rfe-originals")
-            .replace("initiatives", "initiative-originals")
-        )
-        pin(
-            "dirs.originals (str.replace)",
-            "pipeline_state.py:562-563",
-            ctx.dirs["originals"],
-            derived,
-        )
+        assert "rfe-originals" not in read("scripts/pipeline_state.py")  # PR-5b: dirs.originals
 
     def test_valid_id_floor_accepts_both_grammars(self, ctx):
         # rows: 123 — pipeline_state.py:465,:482 type-neutral floor; registry owns grammar in PR-2
@@ -1776,8 +1813,7 @@ def _expected_phase_rows(ctx):
     rows[f"{ctx.pp}split"] = f"{ctx.dirs['reviews']}/X-split-status.yaml"
     for d in ctx.pipe["dimensions"]:
         rows[f"{ctx.pp}{d['name']}"] = f"{ctx.dirs['reviews']}/X-{d['name']}.md"
-    if ctx.t == "rfe":
-        rows["create"] = f"{ctx.dirs['tasks']}/X.md"  # #148: rfe-only create barrier
+    rows[f"{ctx.pp}create"] = f"{ctx.dirs['tasks']}/X.md"  # #148's barrier, every type (PR-5b)
     return rows
 
 
@@ -1787,21 +1823,19 @@ class TestPhaseChecks:
     # tests/test_check_review_progress.py::TestDerivedFromRegistry holds the projection, today's
     # 14-key order and the four modes)
 
-    def test_create_barrier_is_the_rfe_only_grandfather(self):
-        # rows: 125 (residue) — check_review_progress._CREATE_BARRIER_TYPES: the PR #148 create
-        # barrier is still a name-keyed literal (no descriptor fact says which pipeline polls one),
-        # so PR-5's generic speedrun body inheriting it for every type is a visible pin change
-        # here, not a silent descriptor edit
-        assert check_review_progress._CREATE_BARRIER_TYPES == ("rfe",)
-        assert "create" in check_review_progress.PHASE_CHECKS
-        assert "initiative-create" not in check_review_progress.PHASE_CHECKS
-        assert len(check_review_progress.PHASE_CHECKS) == 14
+    def test_create_barrier_for_every_type(self):
+        # rows: 125 (residue, lifted in PR-5b) — the PR #148 create barrier is polled by every
+        # type: the generic speedrun body renders `--phase <poll_prefix>create`
+        assert not hasattr(check_review_progress, "_CREATE_BARRIER_TYPES")
+        for t in TYPES:
+            assert f"{_ctx(t).pp}create" in check_review_progress.PHASE_CHECKS
+        assert len(check_review_progress.PHASE_CHECKS) == 15
 
     def test_detect_fast_config_allowlist(self):
         # rows: 141 — check_review_progress.py _detect_fast; each ==
         # f"tmp/{state_prefix}{stage}-config.yaml" over the interactive stages (PR-5a dropped
-        # the never-written *-autofix-config.yaml entries);
-        # tmp/initiative-speedrun-config.yaml is MISSING today (live drift; pin the current tuple)
+        # the never-written *-autofix-config.yaml entries; PR-5b added the initiative speedrun's,
+        # whose generic body polls the Phase-1 barrier)
         fn = next(
             n
             for n in ast.walk(ast.parse(read("scripts/check_review_progress.py")))
@@ -1812,8 +1846,7 @@ class TestPhaseChecks:
         expected = tuple(
             f"tmp/{_ctx(t).sp}{stage}-config.yaml" for t in TYPES for stage in STATE_STAGES
         )
-        assert live == tuple(x for x in expected if x != "tmp/initiative-speedrun-config.yaml")
-        assert "tmp/initiative-speedrun-config.yaml" not in live
+        assert live == expected
 
     def test_phase_flag_choices_are_the_table_keys(self):
         # rows: 142 — check_review_progress.py:157,:163
@@ -2028,81 +2061,92 @@ class TestArtifactHelpers:
 
 
 class TestSkillLayer:
-    # rows: 189-195, 216-222, 224-232
+    # rows: 189-195, 216-222, 224-232 — since PR-5b one generic body per stage, rendered per type
+    # with the launch block (design §4.1-4.4): the pins assert registry-rendered tokens on that
+    # surface, never twin-divergent text. The legacy trees stay until PR-5c.
 
     def test_stage_skills_and_prompt_files_exist(self, ctx):
-        # rows: 189, 190 — .claude/skills/{rfe.*,initiative-*}; prompts.* point at live files (Q1)
+        # rows: 189, 190 — .claude/skills/rfe-*; prompts.* / dimensions[].prompt / template
         assert ctx.pipe["stages"] == ["create", "review", "submit", "split", "auto-fix", "speedrun"]
         for stage in ctx.pipe["stages"]:
+            assert (REPO_ROOT / GENERIC_SKILL.format(stage=stage)).is_file(), stage
             assert (REPO_ROOT / f".claude/skills/{ctx.sk}{stage}/SKILL.md").is_file(), stage
         for key, path in ctx.pipe["prompts"].items():
+            assert path.startswith(f"types/{ctx.t}/"), key
             assert (REPO_ROOT / path).is_file(), f"pipeline.prompts.{key}"
+        assert ctx.pipe["prompts"]["template"] == f"types/{ctx.t}/template.md"
         for d in ctx.pipe["dimensions"]:
-            assert (REPO_ROOT / d["prompt"]).is_file(), f"dimensions[{d['name']}].prompt"
-        assert (REPO_ROOT / f".claude/skills/{ctx.sk}create/{ctx.t}-template.md").is_file()
+            assert d["prompt"] == f"types/{ctx.t}/dimensions/{d['name']}.md"
+            assert (REPO_ROOT / d["prompt"]).is_file()
+        for name in ("fetch", "assess", "review", "revise"):
+            assert (REPO_ROOT / f"{SKELETON_DIR}/{name}-agent.md").is_file()
+
+    def test_generic_bodies_carry_no_typed_literal(self, ctx):
+        # The collapse's invariant: no generic body or skeleton names a dir, a scorer, a poll
+        # file prefix, a state prefix or a Jira key prefix of ANY type outside the auto-fix
+        # example block and the frontmatter description — those come from the launch block.
+        literals = set()
+        for t in TYPES:
+            c = _ctx(t)
+            literals |= set(c.dirs.values()) | {c.pipe["scorer_agent"], f"tmp/{t}-poll-"}
+            literals |= {f"tmp/{c.sp}{st}-config.yaml" for st in STATE_STAGES if c.sp}
+        for stage in ctx.pipe["stages"]:
+            raw = read(GENERIC_SKILL.format(stage=stage)).split("---", 2)[2]
+            raw = raw.split("### Example `launch_wave` output", 1)[0]
+            for literal in literals:
+                assert literal not in raw, (stage, literal)
+        for name in ("fetch", "assess", "review", "revise"):
+            raw = read(f"{SKELETON_DIR}/{name}-agent.md")
+            for literal in literals:
+                assert literal not in raw, (name, literal)
 
     def test_scorer_literal_sites(self, ctx):
-        # rows: 191 — rfe.review/SKILL.md:82,:224; assess-agent.md:12; auto-fix:122; speedrun:37
-        # (+twins)
+        # rows: 191 — rendered review body launches the scorer twice; the assess skeleton
+        # names it through SCORER_AGENT; the speedrun's bootstrap note names it
         scorer = ctx.pipe["scorer_agent"]
-        other = next(_ctx(o).pipe["scorer_agent"] for o in TYPES if o != ctx.t)
         assert skill(ctx.t, "review").count(f"subagent_type: {scorer}") == 2
         assert f"subagent_type: {scorer}" in skill(ctx.t, "review", "prompts/assess-agent.md")
-        assert f"subagent_type: {scorer}" in skill(ctx.t, "auto-fix")
         assert f"`{scorer}`" in skill(ctx.t, "speedrun")
-        for stage in ("review", "auto-fix", "speedrun"):
-            assert other not in skill(ctx.t, stage), (
-                f"{ctx.t} {stage} names the other type's scorer"
-            )
+        assert "subagent_type: {SCORER_AGENT}" in read(f"{SKELETON_DIR}/assess-agent.md")
 
     def test_rubric_path_sites(self, ctx):
-        # rows: 192 — every site composes CONTEXT_DIR + rubric.path (pipeline.rubric.path is
-        # context-relative). PR-5a: the rfe review skill's two launch sites resolve the value
-        # from the descriptor at launch time; the auto-fix example and the split prompt carry
-        # the composed literal, as the initiative twins do. The pre-assess-rfe#5 path is gone.
+        # rows: 192 — the composed CONTEXT_DIR + rubric.path is a launch var (PROMPT_PATH);
+        # the typed split prompt renders it; the stale pre-assess-rfe#5 path is gone everywhere
         live = f"{CONTEXT_DIR}/{ctx.pipe['rubric']['path']}"
         stale = ".context/assess-rfe/scripts/agent_prompt.md"
-        review = skill(ctx.t, "review")
-        auto_fix = skill(ctx.t, "auto-fix")
-        split_prompt = skill(ctx.t, "split", "prompts/split-agent.md")
-        for text in (review, auto_fix, split_prompt):
-            assert stale not in text
-        assert auto_fix.count(live) == 1
-        assert split_prompt.count(live) == 1
-        if ctx.t == "initiative":
-            assert review.count(live) == 2
-        else:
-            assert review.count(RUBRIC_PATH_GET) == 2
-            assert review.count(RUBRIC_PATH_TOKEN) == 2
-            assert live not in review
+        assert dict(launch(ctx.t))["PROMPT_PATH"] == live
+        split_prompt = typed(ctx.t, "split_rules")
+        assert split_prompt.count("{PROMPT_PATH}") == 1 and live not in split_prompt
+        assert render(split_prompt, ctx.t, "split").count(live) == 1
+        for stage in ctx.pipe["stages"]:
+            assert stale not in read(GENERIC_SKILL.format(stage=stage))
+        for rel in ctx.pipe["prompts"].values():
+            assert stale not in read(rel)
 
     def test_auto_fix_example_wave_matches_the_phase_table(self, ctx):
-        # PR-5a: the illustrative launch_wave block in the auto-fix skill is derived from
-        # the ASSESS entry of the dispatcher's phase table, not hand-maintained.
+        # PR-5a/5b: the illustrative launch_wave block in the generic auto-fix skill is derived
+        # from the ASSESS entry of the rfe phase table (the launch block lines are elided).
         if ctx.t != "rfe":
             return
-        import pipeline_state
-
-        text = skill(ctx.t, "auto-fix")
+        text = read(GENERIC_SKILL.format(stage="auto-fix"))
         block = text.split("### Example `launch_wave` output", 1)[1].split("```yaml", 1)[1]
         example = yaml.safe_load(block.split("```", 1)[0])
         cfg = pipeline_state._build_phase_config("rfe")["ASSESS"]
         scorer, companion = example["agents"]
         assert example["phase"] == "ASSESS"
         assert scorer["subagent_type"] == cfg["subagent_type"]
-        assert scorer["prompt_file"] == cfg["prompt"]
+        assert scorer["prompt_file"] == cfg["prompt"] == f"{SKELETON_DIR}/assess-agent.md"
         rendered = {k: v.replace("{ID}", "RHAIRFE-1234") for k, v in cfg["vars"].items()}
-        for line in scorer["vars"].strip().splitlines():
-            key, value = line.split("=", 1)
-            assert rendered[key] == value, f"example {key}={value} != table {rendered[key]}"
+        shown = dict(
+            line.split("=", 1) for line in scorer["vars"].strip().splitlines() if "=" in line
+        )
+        assert shown == rendered, (shown, rendered)
         assert companion["prompt_file"] == cfg["parallel"][0]["prompt"]
-        assert companion["vars"].strip() == "ID=RHAIRFE-1234"
+        assert "ID=RHAIRFE-1234" in companion["vars"].splitlines()
 
     def test_bootstrap_script_text(self, ctx):
-        # rows: 193, 194 — bootstrap-assess-rfe.sh:31-37 case arms (MIGRATED in PR-3a: the script
-        # reads `type_registry.py list` and fails an unknown --type with the registered list, so
-        # no literal type name is left to pin — tests/test_bootstrap_assess.py covers the paths),
-        # :44-52 rubric source, :95-100, :103
+        # rows: 193, 194 — bootstrap-assess-rfe.sh reads the repo, the ref and the type list
+        # from the registry; no literal case arm, no literal SHA
         sh = read("scripts/bootstrap-assess-rfe.sh")
         assert (
             'REGISTERED="$(python3 "$SCRIPT_DIR/type_registry.py" list 2>/dev/null)" || '
@@ -2113,8 +2157,6 @@ class TestSkillLayer:
         assert f"  {' | '.join(TYPES)}) ;;" not in sh, "PR-3a: no literal case arm"
         assert f"(expected {' or '.join(TYPES)})" not in sh
         rubric = ctx.pipe["rubric"]
-        # The clone URL is read from the registry (ASSESS_RFE_REPO overrides); the shipped URL
-        # survives in the script only as the last-resort default when the registry is unreadable.
         assert 'get "$PIPELINE_TYPE" pipeline.rubric.repo' in sh
         assert f'ASSESS_REPO="{rubric["repo"]}"' in sh
         var = "RUBRIC_FILE" if ctx.t == "rfe" else "INITIATIVE_RUBRIC"
@@ -2122,32 +2164,30 @@ class TestSkillLayer:
         assert f'CONTEXT_DIR="{CONTEXT_DIR}"' in sh
         if ctx.t == "initiative":
             assert f'INITIATIVE_AGENT="{ctx.pipe["scorer_agent"]}.md"' in sh
-        # The bootstrap reads the pin through the registry (`type_registry.py get <type>
-        # pipeline.rubric.ref`, the descriptor's `ref:` line as the no-Python fallback) and
-        # checks it out; no literal SHA may live in the script or the pin could not move.
         assert rubric["ref"] not in sh, "the bootstrap must read rubric.ref from the registry"
         assert 'get "$PIPELINE_TYPE" pipeline.rubric.ref' in sh
         assert re.fullmatch(r"[0-9a-f]{7,40}", rubric["ref"])
         assert "skills/export-rubric/scripts/export_rubric.py" in sh
+        block = dict(launch(ctx.t, "create"))
+        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap-assess-rfe.sh --type {ctx.t}"
         if rubric["export"] is None:
             assert "initiative-rubric" not in sh
+            assert block["RUBRIC_EXPORT"] == "none"
         else:
-            assert rubric["export"] == "artifacts/rfe-rubric.md"
+            assert rubric["export"] == "artifacts/rfe-rubric.md" == block["RUBRIC_EXPORT"]
             assert os.path.basename(rubric["export"]) in read("AGENTS.md")
             assert rubric["export"] in skill(ctx.t, "create")
 
     def test_architecture_context_source_is_type_neutral(self, ctx):
-        # rows: 195 — fetch-architecture-context.sh:5-28; SETUP command 2; rfe.review:63 /
-        # initiative-review:63
+        # rows: 195 — fetch-architecture-context.sh takes no type; SETUP command 2; review Step 1.5
         cs = ctx.pipe["context_sources"][1]
         assert cs["bootstrap"] == "scripts/fetch-architecture-context.sh" and "args" not in cs
         assert "--type" not in read(cs["bootstrap"])
         assert f"bash {cs['bootstrap']}" in skill(ctx.t, "review")
 
     def test_tmp_state_and_poll_file_names(self, ctx):
-        # rows: 216 — config/ids files are f"tmp/{state_prefix}{stage}-..."; interactive poll files
-        # use
-        # a second prefix the descriptor cannot express (UNMAPPED, pinned as POLL_FILE_PREFIX)
+        # rows: 216 — config/ids files are f"tmp/{state_prefix}{stage}-..." (STATE_PREFIX) and
+        # the poll files use POLL_FILE_PREFIX = tmp/<type>-poll- — both launch vars now
         texts = "\n".join(skill(ctx.t, st) for st in ("review", "split", "speedrun", "auto-fix"))
         configs = set(re.findall(r"tmp/[a-z-]*-config\.yaml", texts))
         ids = set(re.findall(r"tmp/[a-z-]*-all-ids\.txt", texts))
@@ -2164,20 +2204,20 @@ class TestSkillLayer:
         pin("pipeline.state_prefix + stage", "skills tmp/*-all-ids.txt", set(), ids - allowed_ids)
         polls = set(re.findall(r"tmp/[a-z]+-poll-[a-z-]+", texts))
         assert polls and all(p.startswith(POLL_FILE_PREFIX[ctx.t]) for p in polls), polls
+        assert dict(launch(ctx.t))["POLL_FILE_PREFIX"] == POLL_FILE_PREFIX[ctx.t]
 
     def test_phase_barrier_names(self, ctx):
         # rows: 217 — every --phase literal == f"{poll_prefix}{phase}" and is a PHASE_CHECKS key;
-        # no initiative-create barrier (asymmetry kept visible)
+        # every type polls the create barrier since PR-5b (D8)
         texts = "\n".join(skill(ctx.t, st) for st in ("review", "split", "speedrun"))
-        used = set(re.findall(r"--phase ([a-z-]+)", texts))
+        # a rendered `--phase {POLL_PREFIX}<name>` (the generic dimension loop) is not a literal
+        used = set(re.findall(r"--phase ([a-z][a-z-]*[a-z])(?![\w<-])", texts))
         expected = set(_expected_phase_rows(ctx))
         assert used and used <= expected, used - expected
-        assert ("create" in used) is (ctx.t == "rfe")
-        assert "--phase initiative-create" not in texts
+        assert f"{ctx.pp}create" in used
 
     def test_score_field_lists_in_skill_stubs(self, ctx):
-        # rows: 218 — rfe.review/SKILL.md:53; review-agent.md:52-56,:62-64 (+ initiative twins
-        # :53,:134)
+        # rows: 218 — the stubs render SCORE_ZERO_SET / SCORE_SET / BEFORE_SCORE_SET
         texts = [skill(ctx.t, "review"), skill(ctx.t, "review", "prompts/review-agent.md")]
         lines = [ln for text in texts for ln in text.splitlines() if "scores." in ln]
         assert lines
@@ -2194,111 +2234,102 @@ class TestSkillLayer:
         assert re.search(r"needs_attention=true (scores\.\w+=0 ){5}", texts[0])
 
     def test_schema_literals_and_rebuild_index_calls(self, ctx):
-        # rows: 219 — rfe.create:81; fetch-agent:13; review-agent:17; initiative-create:58;
-        # review-agent:20;
-        # rebuild-index invoked iff index.enabled
+        # rows: 219 — schema names render from TASK_SCHEMA / REVIEW_SCHEMA; the rebuild-index
+        # call is gated on INDEX_ENABLED in every body that carries it
         assert f"frontmatter.py schema {ctx.task_schema}" in skill(ctx.t, "create")
         assert f"frontmatter.py schema {ctx.review_schema}" in skill(
             ctx.t, "review", "prompts/review-agent.md"
         )
-        texts = "\n".join(skill(ctx.t, st) for st in ctx.pipe["stages"])
+        flag = "true" if ctx.d["index"]["enabled"] else "false"
+        for stage in ctx.pipe["stages"]:
+            raw = read(GENERIC_SKILL.format(stage=stage))
+            if "frontmatter.py rebuild-index" in raw:
+                assert "INDEX_ENABLED={INDEX_ENABLED}" in raw, stage
+                assert f"INDEX_ENABLED={flag}" in skill(ctx.t, stage), stage
         pin(
-            "index.enabled",
-            "skills rebuild-index calls",
-            ctx.d["index"]["enabled"],
-            "frontmatter.py rebuild-index" in texts,
+            "index.enabled", "launch-vars INDEX_ENABLED", flag, dict(launch(ctx.t))["INDEX_ENABLED"]
         )
 
     def test_next_rfe_id_invocations(self, ctx):
-        # rows: 220 — rfe.create:73; rfe.speedrun:79; split-agent:105 (rfe defaults); initiative
-        # twins
-        # pass --prefix INIT --dir artifacts/initiatives
+        # rows: 220 — every allocation passes NEXT_ID_FLAGS (explicit --prefix/--dir for
+        # every type since PR-5b; next_rfe_id's defaults are the rfe values)
         texts = [
             skill(ctx.t, "create"),
             skill(ctx.t, "speedrun"),
-            skill(ctx.t, "split", "prompts/split-agent.md"),
+            render(typed(ctx.t, "split_rules"), ctx.t, "split"),
         ]
         calls = [ln for text in texts for ln in text.splitlines() if "scripts/next_rfe_id.py" in ln]
         assert len(calls) == 3, calls
         flags = f"--prefix {ctx.lp.rstrip('-')} --dir {ctx.dirs['tasks']}"
         for call in calls:
-            if ctx.t == "rfe":
-                assert "--prefix" not in call and "--dir" not in call, call
-            else:
-                assert flags in call, call
+            assert flags in call, call
 
     def test_submit_skill_label_table(self, ctx):
-        # rows: 221 — rfe.submit/SKILL.md:46-56; initiative-submit:45-58 (tables omit ignore,
-        # split_quarantine and the split_child_marker template — documentation gap, pinned as is)
-        documented = set(re.findall(r"^\| `([a-z-]+)` \|", skill(ctx.t, "submit"), re.M))
-        keys = (
+        # rows: 221 — the generic submit documents the label KEYS (the values are the
+        # descriptor's conventions.labels, printed via type_registry.py get); LABEL_PREFIX renders
+        documented = set(re.findall(r"^\| `([a-z_.]+)` \|", skill(ctx.t, "submit"), re.M))
+        keys = {
             "auto_created",
             "auto_revised",
             "split_original",
             "split_result",
             "needs_attention",
             "rubric_pass",
-        )
-        expected = (
-            {ctx.labels[k] for k in keys}
-            | set(ctx.labels["feasibility"].values())
-            | set(ctx.labels.get("alignment", {}).values())
-        )
+        } | {f"feasibility.{k}" for k in ctx.labels["feasibility"]}
         pin(
-            "conventions.labels (documented subset)",
-            f"{ctx.sk}submit/SKILL.md label table",
-            expected,
+            "conventions.labels keys (documented subset)",
+            "rfe-submit label table",
+            keys,
             documented,
         )
-        assert (
-            ctx.labels["ignore"] not in documented
-            and ctx.labels["split_quarantine"] not in documented
-        )
+        assert f"every label starts with `{ctx.conv['label_prefix']}-`" in skill(ctx.t, "submit")
+        assert "ignore" not in documented and "split_quarantine" not in documented
+        if "alignment" in ctx.labels:
+            for k in ctx.labels["alignment"]:
+                assert f"`alignment.{k}`" in skill(ctx.t, "submit")
 
     def test_type_flag_pass_through(self, ctx):
-        # rows: 222 — every '--type X' literal in the type's skills names this type; rfe twins omit
-        # the flag (the grandfathered "no --type for rfe" convention) with ONE residue lifted in
-        # PR-3b: the speedrun's batch validator passes --type rfe so a mapping type: of another
-        # type is D1-rejected before any id is allocated (the initiative body always passed its
-        # type there); every other rfe call keeps the default
-        texts = "\n".join(skill(ctx.t, st) for st in ctx.pipe["stages"]) + skill(
-            ctx.t, "split", "prompts/split-agent.md"
+        # rows: 222 — every script invocation that carries --type names this type (TYPE_FLAG,
+        # rendered); no python3 line in the rendered bodies names another type
+        texts = "\n".join(skill(ctx.t, st) for st in ctx.pipe["stages"]) + render(
+            typed(ctx.t, "split_rules"), ctx.t, "split"
         )
-        flags = re.findall(r"--type ([a-z]+)", texts)
+        commands = [
+            ln for ln in texts.splitlines() if ln.lstrip().startswith(("python3 ", "bash "))
+        ]
+        flags = [f for ln in commands for f in re.findall(r"--type ([a-z]+)", ln)]
         assert flags and set(flags) == {ctx.d["type"]}
-        if ctx.t == "rfe":
-            commands = [
-                ln for ln in texts.splitlines() if ln.startswith("python3 ") and "--type rfe" in ln
-            ]
-            assert commands == [
-                "python3 scripts/validate_batch_input.py <input_file> --type rfe --strict"
-            ]
+        for stage in ctx.pipe["stages"]:
+            raw = read(GENERIC_SKILL.format(stage=stage))
+            assert "--type rfe" not in raw.split("---", 2)[2].replace("--type rfe-", ""), stage
 
     def test_run_report_filename_literals(self, ctx):
-        # rows: 224 — rfe.speedrun:215-217; initiative-speedrun:213; eval.yaml:130,:135;
-        # eval-initiative.yaml:130
+        # rows: 224 — RUN_REPORT / HTML_REPORT render from snapshot.report_prefix for every type
         rp = ctx.snap["report_prefix"]
-        assert f"artifacts/auto-fix-runs/{rp}<timestamp>.yaml" in skill(ctx.t, "speedrun")
+        text = skill(ctx.t, "speedrun")
+        assert f"artifacts/auto-fix-runs/{rp}<timestamp>.yaml" in text
+        assert f"artifacts/auto-fix-runs/{rp}<timestamp>-report.html" in text
         outputs = {o["path"]: o for o in eval_config(ctx)["outputs"]}
         assert f"{rp}YYYYMMDD-HHMMSS.yaml" in outputs["artifacts/auto-fix-runs"]["schema"]
-        # submit.py writes the HTML companion beside the YAML (report_companion_path); the
-        # generated configs document it there, and the never-produced
-        # artifacts/<poll_prefix>review-report.html output is gone (PR-4).
         assert f"{rp}YYYYMMDD-HHMMSS-report.html" in outputs["artifacts/auto-fix-runs"]["schema"]
         html = f"artifacts/{generate_review_pdf.REPORT_CONFIG[ctx.t]['default_output']}"
         assert html not in outputs
-        assert ("<timestamp>-report.html" in skill(ctx.t, "speedrun")) is (ctx.t == "rfe")
 
     def test_alignment_dimension_skill_text(self, ctx):
-        # rows: 225 — initiative-review/SKILL.md:94-102,:117-129;
-        # strategic-alignment-review/SKILL.md:25-73
+        # rows: 225 — the alignment dimension is descriptor data: its condition, blocking flag
+        # and skip stub render into the launch block; the typed file carries the verdicts
+        block = dict(launch(ctx.t))
         if "alignment" not in ctx.dims:
-            assert "alignment" not in skill(ctx.t, "review").lower()
+            assert not any(k.startswith("DIMENSION_ALIGNMENT") for k in block)
+            assert block["DIMENSIONS"] == "feasibility"
             return
         dim = ctx.dims["alignment"]
-        review, prompt = skill(ctx.t, "review"), read(dim["prompt"])
-        assert f"matches `{dim['condition']['prefix']}*`" in review
-        assert "informational, not blocking" in review and dim["blocking"] is False
+        prompt = read(dim["prompt"])
+        assert block["DIMENSION_ALIGNMENT_CONDITION"] == (
+            f"{dim['condition']['frontmatter_field']} startswith {dim['condition']['prefix']}"
+        )
+        assert block["DIMENSION_ALIGNMENT_BLOCKING"] == "false" and dim["blocking"] is False
+        assert "informational, not blocking" in skill(ctx.t, "review")
         assert f"**Alignment**: {dim['skip_stub']['result']}" in prompt
         pin(
             "conventions.labels.alignment keys",
@@ -2308,22 +2339,16 @@ class TestSkillLayer:
         )
 
     def test_fetch_agent_companions(self, ctx):
-        # rows: 226 — rfe.review/prompts/fetch-agent.md:5-8,:11,:13-14,:16,:26;
-        # initiative-review/prompts/fetch-agent.md:5-8,:11,:13-14,:19 (D10: both twins are the
-        # same body — step 1 is `fetch_issue.py {KEY} --fetch-all artifacts` (the initiative one
-        # adds `--type initiative`, the rfe one keeps the grandfathered flag-less form), the MCP
-        # fallback runs only on exit 2 (missing creds) and any other non-zero exit — a fetch
-        # error or a post-fetch (project, issue_type) mismatch — stops the agent; the comments
-        # companion (its MCP request field, the file and its verify line) exists iff
-        # companions.comments). The three step-1 verdict lines are pinned as WHOLE lines: the
-        # twins may differ only by the --type flag and the comments companion, so neither may
-        # grow a sentence of its own (the rfe twin is production and byte-frozen).
+        # rows: 226 — one Tier-1 fetch skeleton: step 1 is `fetch_issue.py {KEY} --fetch-all
+        # artifacts --type <t>` (TYPE_FLAG), the MCP fallback runs only on exit 2, the comments
+        # companion (its MCP field and file) is gated on COMMENTS_COMPANION
         text = skill(ctx.t, "review", "prompts/fetch-agent.md")
         comments = ctx.d["companions"]["comments"]
-        type_flag = "" if ctx.t == "rfe" else f" --type {ctx.t}"
         lines = text.splitlines()
         calls = [ln for ln in lines if "scripts/fetch_issue.py" in ln]
-        step1 = f"1. Run: python3 scripts/fetch_issue.py {{KEY}} --fetch-all artifacts{type_flag}"
+        step1 = (
+            f"1. Run: python3 scripts/fetch_issue.py {{KEY}} --fetch-all artifacts --type {ctx.t}"
+        )
         assert calls == [step1], calls
         verdicts = lines[lines.index(step1) + 1 : lines.index(step1) + 4]
         assert verdicts == [
@@ -2335,67 +2360,69 @@ class TestSkillLayer:
         assert text.count("--fields") == 0 and text.count("--markdown") == 0
         mcp = re.search(r"mcp__atlassian__getJiraIssue .*?fields=\[([^\]]*)\]", text).group(1)
         fields = [f.strip('"') for f in mcp.split(",")]
-        assert fields[:5] == ["summary", "description", "priority", "labels", "status"]
-        # PR-3c-ii: the MCP fallback requests the same two witnesses fetch_issue verifies and
-        # stops before any write on a mismatch (the fallback cannot call verify_binding).
-        assert fields[5:7] == ["issuetype", "project"]
+        assert fields[:7] == [
+            "summary",
+            "description",
+            "priority",
+            "labels",
+            "status",
+            "issuetype",
+            "project",
+        ]
         pin("companions.comments", "fetch-agent.md MCP fields", comments, fields[7:] == ["comment"])
         assert (
             f"If the response's project.key or issuetype.name differs from the {ctx.t} binding "
             f"(python3 scripts/type_registry.py binding {ctx.t} shows it), report the mismatch "
             "and stop — write no files."
         ) in text
-        pin(
-            "companions.comments",
-            "fetch-agent.md",
-            comments,
-            f"{ctx.dirs['tasks']}/{{KEY}}-comments.md" in text,
-        )
-        assert ("-comments.md" in text) is comments
+        flag = "true" if comments else "false"
+        assert f"COMMENTS_COMPANION={flag}" in text
+        assert f"{ctx.dirs['tasks']}/{{KEY}}-comments.md" in text  # gated by the flag above
         assert f"frontmatter.py schema {ctx.task_schema}" in text
         assert f"{ctx.id_field}={{KEY}}" in text
         verify = text.split("3. Verify all output files exist:")[1].split("\n\n")[0]
         listed = re.findall(r"^   - (\S+)", verify, re.M)
-        expected = [f"{ctx.dirs['tasks']}/{{KEY}}.md", f"{ctx.dirs['originals']}/{{KEY}}.md"]
-        if comments:
-            expected.append(f"{ctx.dirs['tasks']}/{{KEY}}-comments.md")
-        assert listed == expected, listed
+        assert listed == [
+            f"{ctx.dirs['tasks']}/{{KEY}}.md",
+            f"{ctx.dirs['originals']}/{{KEY}}.md",
+            f"{ctx.dirs['tasks']}/{{KEY}}-comments.md",
+        ], listed
 
     def test_resplit_rules_in_split_skills(self, ctx):
-        # rows: 227 — rfe.split/SKILL.md:115 uses resplit {right_sized, 2}; initiative-split:115
-        # re-splits
-        # on recommendation=split (skill layer diverges — pinned as is, design §1)
+        # rows: 227 — D6: one re-split trigger, the descriptor's pipeline.resplit threshold,
+        # rendered for every type (the initiative body's recommendation=split trigger is gone)
         text = skill(ctx.t, "split")
         resplit = ctx.pipe["resplit"]
-        if ctx.t == "rfe":
-            assert f"below {resplit['below']}/2 on `scores.{resplit['score_field']}`" in text
-        else:
-            assert "recommendation=split" in text and f"scores.{resplit['score_field']}" not in text
+        assert f"below {resplit['below']}/2 on `scores.{resplit['score_field']}`" in text
+        assert "recommendation=split" not in text
+        block = dict(launch(ctx.t, "split"))
+        assert block["RESPLIT_FIELD"] == resplit["score_field"]
+        assert block["RESPLIT_BELOW"] == str(resplit["below"])
 
     def test_id_grammar_prose(self, ctx):
-        # rows: 228 — review:15, split:14, speedrun:18,:30
-        grammar = f"({ctx.wp}NNNN or {ctx.lp}NNN)"
+        # rows: 228 — ID_GRAMMAR / KEY_PREFIX render into the argument prose
+        grammar = f"{ctx.wp}NNNN or {ctx.lp}NNN"
         assert grammar in skill(ctx.t, "review") and grammar in skill(ctx.t, "split")
-        assert skill(ctx.t, "speedrun").count(f"({ctx.wp}NNNN)") == 2
+        assert f"({ctx.wp}NNNN)" in skill(ctx.t, "speedrun")
 
     def test_create_skill_rubric_and_size_guide(self, ctx):
-        # rows: 229 — rfe.create/SKILL.md:21-34,:61; initiative-create has no rubric step
+        # rows: 229 — the rubric step is gated on RUBRIC_EXPORT; the size guide lives in the
+        # typed guidance of a type whose task schema has a size field (SIZE_FIELD / SIZE_ENUM)
         text = skill(ctx.t, "create")
         export = ctx.pipe["rubric"]["export"]
-        if export is None:
-            assert "rubric" not in text.lower()
+        assert f"RUBRIC_EXPORT={export or 'none'}" in text
+        size = ctx.schema["task"]["extra_fields"].get("size")
+        assert f"SIZE_FIELD={'true' if size else 'false'}" in text
+        guidance = typed(ctx.t, "create_guidance")
+        sizes = re.findall(r"\b([A-Z]{1,2}) \(\d+-?\d*\+?\)", guidance)
+        if size:
+            pin("schema.task.extra_fields.size.enum", "create-guidance.md", size["enum"], sizes)
+            assert f"`{','.join(size['enum'])}`" in text
         else:
-            assert export in text
-            sizes = re.findall(r"\b([A-Z]{1,2}) \(\d+-?\d*\+?\)", text)
-            pin(
-                "schema.task.extra_fields.size.enum",
-                f"{ctx.sk}create/SKILL.md:61",
-                ctx.schema["task"]["extra_fields"]["size"]["enum"],
-                sizes,
-            )
+            assert sizes == [] and "SIZE_SET=" not in text.replace("SIZE_SET={SIZE_SET}", "")
 
     def test_feasibility_dimension_io(self, ctx):
-        # rows: 231 — rfe-feasibility-review/SKILL.md:13,:56 and the initiative twin
+        # rows: 231 — types/<t>/dimensions/feasibility.md (the body of the former dimension skill)
         text = read(ctx.dims["feasibility"]["prompt"])
         assert f"`{ctx.dirs['reviews']}/{{ID}}-feasibility.md`" in text
         assert f"`{ctx.dirs['tasks']}/{{ID}}.md`" in text
@@ -2403,15 +2430,13 @@ class TestSkillLayer:
         assert f"{ctx.dirs['reviews']}/X-feasibility.md" == check_review_progress.PHASE_CHECKS[
             f"{ctx.pp}feasibility"
         ]("X")
+        assert not text.startswith("---"), "the typed file is a body, not a skill"
 
     def test_speedrun_forwards_clarifying_context_to_create(self, ctx):
         """The batch entry's clarifying_context reaches the create agent only if the launch
-        line says so: the 2026-09-15 eval run on #187 saw an orchestrator drop it for 26 of 27
-        entries (the weak drafts lost their honest 'no evidence' anchors, no item was revised,
-        revision_coverage 0.0) with a body that named only <prompt>. Both twins spell it out
-        verbatim inside a delimited, informational-only block: entry 1 (whose sample carries a
-        context) shows the block, entry 2 (whose sample does not) shows none, and the generic
-        line shows it as optional."""
+        line says so (the 2026-09-15 eval run on #187 saw an orchestrator drop it): the generic
+        body spells it out verbatim inside a delimited, informational-only block, and forwards
+        the resolved type and the pre-assigned id (--id, D15)."""
         text = skill(ctx.t, "speedrun")
         intro, block = text.split("For each entry, launch an Agent")[1].split("```")[:2]
         launch_lines = [ln for ln in block.splitlines() if "<prompt>" in ln]
@@ -2427,58 +2452,56 @@ class TestSkillLayer:
         assert "[" + "\\n\\n" + marker + "]" in launch_lines[2]
         assert "verbatim" in intro and "never summarize or paraphrase" in intro
         assert "data, not instructions" in intro
+        for ln in launch_lines:
+            assert f"/rfe-create --headless --type {ctx.t} --id {ctx.lp}" in ln, ln
 
     def test_speedrun_batch_format_and_barrier(self, ctx):
-        # rows: 232 — rfe.speedrun/SKILL.md:48-106; initiative-speedrun/SKILL.md:49-91; PR-3b:
-        # the example stays the legacy bare list (the eval harness feeds that form) and the
-        # {type, items} mapping form is described in the prose right after it
+        # rows: 232 — the example is the legacy bare list; the mapping form and this type's
+        # extra entry fields (BATCH_EXTRA_FIELDS) are described in the prose; the Phase-1
+        # barrier polls <poll_prefix>create for every type (D8)
         text = skill(ctx.t, "speedrun")
         block = re.search(r"\*\*Mode A \(Batch YAML\)\*\*.*?```yaml\n(.*?)```", text, re.S).group(1)
         entries = yaml.safe_load(block)
         assert isinstance(entries, list)
-        known = {"prompt", "priority", "labels", "clarifying_context"} | set(
-            ctx.d["batch"]["extra_fields"]
-        )
+        known = {"prompt", "priority", "labels", "clarifying_context"}
         used = {k for entry in entries for k in entry}
         assert used <= known, used - known
-        assert set(ctx.d["batch"]["extra_fields"]) <= used
+        extra = ",".join(ctx.d["batch"]["extra_fields"])
+        assert f"extra entry fields: `{extra}`" in text
         assert "mapping with the keys `type` and `items`" in text
         assert f"`type: {ctx.t}`" in text
         assert "single-typed" in text and "TYPE RESOLVED" in text
-        # both bodies declare their type to the validator, so a mapping whose type: is the
-        # other type is D1-rejected before any id is allocated (the allocator's rfe call keeps
-        # the flag-less form: the validator runs first and the body stops on its nonzero exit)
         assert f"validate_batch_input.py <input_file> --type {ctx.t} --strict" in text
-        assert ("--phase create" in text) is (
-            "create" in check_review_progress.PHASE_CHECKS and ctx.t == "rfe"
-        )
+        assert f"--phase {ctx.pp}create" in text
+        assert f"{ctx.pp}create" in check_review_progress.PHASE_CHECKS
 
     def test_self_describing_stamps_in_skill_bodies(self, ctx):
-        # rows: none (PR-3c, design §5 "Self-describing artifacts"; plan D7/D8) — the prompt
-        # writers that mint NEW task artifacts append `type=<t>` as the LAST field of their
-        # frontmatter.py set command: create (SKILL.md), split children (split-agent.md), the MCP
-        # fetch fallback (fetch-agent.md, which also appends `tracker_ref={KEY}`) and the
-        # orchestrator error stubs in the review / split bodies (the same field verify_phase's
-        # stub carries). No other skill command sets either field: the split parent archive
-        # ({TASK_FILE}), initiative-create's parent_key follow-up and every review-agent /
-        # revise-agent command are untouched (D8: reviews are stamped by verify_phase after the
-        # barrier, not by prompt edits).
+        # rows: none (PR-3c, design §5 "Self-describing artifacts"; plan D7/D8) — the writers
+        # that mint NEW task artifacts append `type={TYPE}` as the LAST field of their
+        # frontmatter.py set command: the generic create body, the typed split prompt (split
+        # children), the fetch skeleton's MCP fallback (which also appends `tracker_ref={KEY}`)
+        # and the orchestrator error stubs in the generic review / split bodies. No other
+        # command sets either field.
         t, tasks, reviews = ctx.t, ctx.dirs["tasks"], ctx.dirs["reviews"]
-        root = f".claude/skills/{ctx.sk}"
-        cmds = [
-            (str(path.relative_to(REPO_ROOT)), target, fields)
-            for path in sorted((REPO_ROOT / ".claude" / "skills").glob(f"{ctx.sk}*/**/*.md"))
-            for target, fields in set_commands(str(path.relative_to(REPO_ROOT)))
-        ]
+        files = [
+            str(p.relative_to(REPO_ROOT))
+            for p in sorted((REPO_ROOT / ".claude" / "skills").glob("rfe-*/**/*.md"))
+        ] + [ctx.pipe["prompts"]["split_rules"]]
+        cmds = [(rel, target, fields) for rel in files for target, fields in set_commands(rel)]
         stamped = {c for c in cmds if re.search(r"(?<![\w-])(type|tracker_ref)=", c[2])}
         tails = {
-            (f"{root}create/SKILL.md", f"{tasks}/<filename>.md"): f"status=Draft type={t}",
-            (f"{root}split/prompts/split-agent.md", f"{tasks}/<child_filename>.md"): (
-                f"parent_key={{ID}} type={t}"
-            ),
-            (f"{root}review/prompts/fetch-agent.md", f"{tasks}/{{KEY}}.md"): (
-                f"type={t} tracker_ref={{KEY}}"
-            ),
+            (
+                ".claude/skills/rfe-create/SKILL.md",
+                "{TASKS_DIR}/<filename>.md",
+            ): "status=Draft type={TYPE}",
+            (
+                ctx.pipe["prompts"]["split_rules"],
+                "{TASKS_DIR}/<child_filename>.md",
+            ): "parent_key={ID} type={TYPE}",
+            (
+                f"{SKELETON_DIR}/fetch-agent.md",
+                "{TASKS_DIR}/{KEY}.md",
+            ): "type={TYPE} tracker_ref={KEY}",
         }
         expected = set()
         for (rel, target), tail in tails.items():
@@ -2488,16 +2511,21 @@ class TestSkillLayer:
         stubs = {
             c
             for c in cmds
-            if c[0] in (f"{root}review/SKILL.md", f"{root}split/SKILL.md") and "error=" in c[2]
+            if c[0] in (".claude/skills/rfe-review/SKILL.md", ".claude/skills/rfe-split/SKILL.md")
+            and "error=" in c[2]
         }
-        assert stubs and all(c[1] == f"{reviews}/<ID>-review.md" for c in stubs)
-        assert all(c[2].endswith(f" type={t}") for c in stubs), stubs
+        assert stubs and all(c[1] == "{REVIEWS_DIR}/<ID>-review.md" for c in stubs)
+        assert all(c[2].endswith(" type={TYPE}") for c in stubs), stubs
         pin("type (skill stamps)", "frontmatter.py set commands", expected | stubs, stamped)
         assert [c for c in stamped if "tracker_ref=" in c[2]] == [
             c for c in expected if c[0].endswith("fetch-agent.md")
         ]
         untouched = [c for c in cmds if c[1] == "{TASK_FILE}" or c[2].startswith("parent_key=")]
         assert untouched and not any(c in stamped for c in untouched)
+        # rendered per type, the stamps carry this type's dirs and name
+        rendered = render(read(".claude/skills/rfe-create/SKILL.md"), t, "create")
+        assert f"{tasks}/<filename>.md" in rendered and f"type={t}" in rendered
+        assert f"{reviews}/<ID>-review.md" in skill(t, "review")
 
 
 # ── eval configs ──────────────────────────────────────────────────────────────────────────────
@@ -2525,11 +2553,11 @@ class TestEvalConfigs:
             ev["mlflow"]["experiment"],
         )
         pin("eval.timeout", f"{ctx.ev['config']}:9", ctx.ev["timeout"], ev["execution"]["timeout"])
-        pin(
-            "(UNMAPPED) skill dir prefix + speedrun",
-            f"{ctx.ev['config']}:7",
-            f"{ctx.sk}speedrun",
-            ev["execution"]["skill"],
+        # PR-5b: every type runs through the generic speedrun with its type passed explicitly
+        assert ev["execution"]["skill"] == GENERIC_SPEEDRUN
+        assert (
+            ev["execution"]["arguments"]
+            == f"--headless --dry-run --input batch.yaml --type {ctx.t}"
         )
         assert (REPO_ROOT / ctx.ev["dataset"]).is_dir()
 
@@ -2626,7 +2654,7 @@ class TestEvalConfigs:
         # is the fragment's execution.create_skill
         check = judges(ctx)["pipeline_flow"]["check"]
         assert f'"rm {ctx.dirs["tasks"]}/" in stdout' in check
-        assert f'"{ctx.sk}create"' in check
+        assert f'"{GENERIC_CREATE}"' in check  # PR-5b: the generic create skill is the marker
         assert '"AUTOFIX" in stdout or "Batch " in stdout' in check
         assert "if len(phases_found) < 3:" in check  # PR-4b: all three phases
 

@@ -313,6 +313,16 @@ def _write_poll_stub(poll_phase, rfe_id, skip_stub=None):
 
     path = PHASE_CHECKS[poll_phase](rfe_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if skip_stub is None:
+        skip_stub = next(
+            (
+                dim.get("skip_stub")
+                for row in PIPELINE_TYPES.values()
+                for dim in row["dimensions"]
+                if f"{row['poll_prefix']}{dim['name']}" == poll_phase
+            ),
+            None,
+        )
     stub = skip_stub or {"result": "not_assessed", "reason": "skipped by pipeline"}
     body = "".join(f"{k}: {v}\n" for k, v in stub.items())
     with open(path, "w") as f:

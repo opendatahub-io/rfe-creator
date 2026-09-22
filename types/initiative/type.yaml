@@ -75,13 +75,13 @@ schema:
       - { when: { field: alignment, equals: weak }, then: needs_attention }   # Q22: prompt rule only — initiative-review/prompts/review-agent.md:60; eval-initiative.yaml:277-278 judge; no script consumer, unpinned
 
 pipeline:
-  stages: [create, review, submit, split, auto-fix, speedrun]   # .claude/skills/initiative-{create,review,submit,split,auto-fix,speedrun}/SKILL.md
+  stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); the legacy initiative-* tree stays until PR-5c
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
     - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "initiative"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
   poll_prefix: "initiative-"                            # pipeline_state.py:119; check_review_progress.py:28-34 keys initiative-{split,fetch,assess,feasibility,review,revise,alignment}; REPORT_CONFIG.default_output "initiative-review-report.html" (generate_review_pdf.py:69, Q15)
-  state_prefix: "initiative-"                           # check_autofix_complete.py:22 tmp/initiative-speedrun-all-ids.txt; check_review_progress.py:139-141 tmp/initiative-{review,split,autofix}-config.yaml
-  scorer_agent: initiative-scorer                       # pipeline_state.py:112 scorer_type; bootstrap-assess-rfe.sh:52 INITIATIVE_AGENT="initiative-scorer.md"; initiative-review/prompts/assess-agent.md:12
+  state_prefix: "initiative-"                           # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies
+  scorer_agent: initiative-scorer                       # pipeline_state.PIPELINE_TYPES scorer_type (subagent_type of every assess wave) and the SCORER_AGENT launch var read by .claude/skills/rfe-review/prompts/assess-agent.md
   prompts:                                            # PR-5b: the typed judgement files under types/<t>/ (design §4.2 tiers, §8.1 layout); rendered into every launch by `type_registry.py launch-vars` (RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH, TEMPLATE_PATH, CREATE_GUIDANCE_PATH); gate 1 checks each exists
     template: types/initiative/template.md                 # Tier 3 — the create template (from .claude/skills/initiative-create/initiative-template.md); D16
     create_guidance: types/initiative/prompts/create-guidance.md   # Tier 3 — questions, writing rules and don'ts of the generic rfe-create body

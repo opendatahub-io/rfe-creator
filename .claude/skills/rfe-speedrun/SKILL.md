@@ -68,7 +68,7 @@ When the user doesn't specify, use these defaults:
 
 ## Phase 1: Create
 
-**Mode A (Batch YAML)**: Read the YAML input file. Format (the `parent_key` field is accepted only for a type whose `BATCH_EXTRA_FIELDS` lists it):
+**Mode A (Batch YAML)**: Read the YAML input file. Format — the entry keys are `prompt`, `priority`, `labels`, `clarifying_context` and this type's extra entry fields: `{BATCH_EXTRA_FIELDS}` (a `parent_key` field is accepted only when listed there):
 
 ```yaml
 - prompt: "Users need to verify model signatures at serving time"
