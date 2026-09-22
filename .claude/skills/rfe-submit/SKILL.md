@@ -61,12 +61,10 @@ The scripts automatically apply the type's labels (`conventions.labels` in `type
 | `split_result` | Child ticket produced by splitting another item |
 | `needs_attention` | Automation couldn't fully resolve all issues — human review needed (review frontmatter `needs_attention: true`) |
 | `rubric_pass` | Item passed review (recommendation = "submit") — excluded from future auto-fix JQL queries |
-| `feasibility.feasible` | Technical feasibility check returned `feasible` |
-| `feasibility.infeasible` | Technical feasibility check returned `infeasible` |
-| `feasibility.indeterminate` | Technical feasibility check returned `indeterminate` |
+| `<dimension>.<verdict>` | A review dimension's verdict — one label family per declared dimension; this type's: `{VERDICT_LABELS}` |
 
-A type with further review dimensions carries their verdict labels too (for Initiatives: `alignment.strong` / `alignment.partial` / `alignment.weak`). Print the concrete values with `python3 scripts/type_registry.py get {TYPE} conventions.labels`.
+Print the concrete label values with `python3 scripts/type_registry.py get {TYPE} conventions.labels`.
 
-The three feasibility labels are mutually exclusive: on each submit, the matching label is added and any others present in the ticket's `original_labels` are removed; every other verdict-label family follows the same mutual-exclusion rule. Rejected items have any verdict labels stripped (no add).
+The verdict labels of one dimension are mutually exclusive: on each submit, the matching label is added and any others of that family present in the ticket's `original_labels` are removed. Rejected items have any verdict labels stripped (no add).
 
 $ARGUMENTS

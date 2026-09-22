@@ -1,6 +1,6 @@
 # Initiative review rules
 
-Inputs: read the alignment file at `{ALIGNMENT_PATH}` if it exists. If missing, alignment was not assessed (no RHAISTRAT parent or agent did not complete).
+Inputs: read the feasibility file at `{FEASIBILITY_PATH}` — the technical feasibility analysis; the review's Feasibility section and its `feasibility` frontmatter field come from it. Read the alignment file at `{ALIGNMENT_PATH}` if it exists. If missing, alignment was not assessed (no RHAISTRAT parent or agent did not complete).
 
 Determine recommendation:
 - submit: Initiative passes (7+ with no zeros)

@@ -15,7 +15,7 @@ Parse `$ARGUMENTS` for:
 - `--priority <value>`: Override default priority (Blocker, Critical, Major, Normal, Minor)
 - `--labels <comma-separated>`: Labels to apply to created items
 - `--id <ID>`: Pre-assigned ID. When provided, use this ID instead of calling `next_rfe_id.py` in Step 4. The placeholder file already exists. (`--rfe-id <ID>` and `--initiative-id <ID>` are accepted as aliases.)
-- `--parent <KEY>`: parent key to set on the created item (only for a type whose batch entries carry `parent_key` — `PARENT_FLAG={PARENT_FLAG}` in the launch block; e.g. a RHAISTRAT Outcome for an Initiative)
+- `--parent <KEY>`: parent key to set on the created item — only for a type whose batch entries carry `parent_key` (`PARENT_FLAG={PARENT_FLAG}` in the launch block; the type's `batch.extra_fields` and `conventions.parent_key_patterns` say what an item of this type links to)
 - Remaining arguments: the problem statement / idea / objective text
 
 Resolve the work-item type — forward only `--type <t>` (when given) and `--headless` (when given); never the text, the priority, the labels, the id or the parent:

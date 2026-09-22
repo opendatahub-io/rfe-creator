@@ -110,23 +110,23 @@ Read .claude/skills/rfe-review/prompts/assess-agent.md and follow all instructio
 
 (`{PROMPT_PATH}`, the rubric, comes from the launch block — the descriptor's context-relative `pipeline.rubric.path` under `{CONTEXT_DIR}`.)
 
-**Launch feasibility agent** (model: opus, run_in_background: true) — one per ID:
+**Launch one agent per declared dimension** (model: opus, run_in_background: true) — one per ID and dimension. The launch block lists the dimensions: `DIMENSIONS={DIMENSIONS}`, and for each `<NAME>` a `DIMENSION_<NAME>_PROMPT`, `_FILE`, `_BLOCKING` and `_CONDITION` line. Every dimension agent gets the same prompt, with that dimension's prompt file:
 
 ```
-Read the file at {DIMENSION_FEASIBILITY_PROMPT} and follow all instructions in it. The {ENTITY} ID to review is: <ID>
+Read the file at <DIMENSION_<NAME>_PROMPT> and follow all instructions in it. The {ENTITY} ID to review is: <ID>
 ```
 
-**Launch every other dimension agent** the type declares (model: opus, run_in_background: true) — the launch block lists them: `DIMENSIONS={DIMENSIONS}`, and for each `<NAME>` a `DIMENSION_<NAME>_PROMPT`, `_FILE`, `_BLOCKING` and `_CONDITION` line; the launch line is the same with that dimension's prompt file. A dimension whose `DIMENSION_<NAME>_CONDITION` is not `always` is conditional: for `parent_key startswith RHAISTRAT-` read the task frontmatter (`python3 scripts/frontmatter.py read {TASKS_DIR}/<ID>.md`) and launch the agent only when its `parent_key` matches `RHAISTRAT-*`; otherwise skip that dimension for this ID. For the initiative type this reads: **Launch alignment agent** (model: opus, run_in_background: true) — one per ID that has a RHAISTRAT parent.
+`DIMENSION_<NAME>_CONDITION` says when to launch it: `always` — for every ID; `<field> startswith <prefix>` — read the task frontmatter (`python3 scripts/frontmatter.py read {TASKS_DIR}/<ID>.md`) and launch only when that field's value starts with the prefix; `context_exists <path>` — launch only when that path exists in the working directory. When the condition does not hold, skip that dimension for this ID — the review rules say what to record for a dimension that was not assessed.
 
 Launch all agents for all IDs in parallel (up to (1 + number of dimensions) × N agents for N IDs).
 
-Write IDs to poll files once, then poll using `NEXT_POLL` interval — one poll file and one `--phase {POLL_PREFIX}<name>` per blocking dimension (`DIMENSION_<NAME>_BLOCKING=true`), exactly as for assess:
+Write IDs to poll files once, then poll using `NEXT_POLL` interval — the assess poll, plus one poll file and one `--phase {POLL_PREFIX}<name>` per blocking dimension (`DIMENSION_<NAME>_BLOCKING=true`), exactly as for assess:
 
 ```bash
 python3 scripts/state.py write-ids {POLL_FILE_PREFIX}assess.txt <all_IDs>
-python3 scripts/state.py write-ids {POLL_FILE_PREFIX}feasibility.txt <all_IDs>
+python3 scripts/state.py write-ids {POLL_FILE_PREFIX}<name>.txt <all_IDs>
 python3 scripts/check_review_progress.py --phase {POLL_PREFIX}assess --id-file {POLL_FILE_PREFIX}assess.txt
-python3 scripts/check_review_progress.py --phase {POLL_PREFIX}feasibility --id-file {POLL_FILE_PREFIX}feasibility.txt
+python3 scripts/check_review_progress.py --phase {POLL_PREFIX}<name> --id-file {POLL_FILE_PREFIX}<name>.txt
 ```
 
 Sleep for the `NEXT_POLL` seconds reported by the script before polling again. Only output status when COMPLETED count changes. Wait for all to complete.
@@ -135,7 +135,7 @@ A non-blocking dimension (`DIMENSION_<NAME>_BLOCKING=false`) is polled the same 
 
 After completion, check prerequisites for each ID via Glob:
 - If assess result (`{ASSESS_STAGING}/<ID>.result.md`) is missing → write error: `assess_failed`
-- If a blocking dimension's file (its `DIMENSION_<NAME>_FILE`, e.g. `{DIMENSION_FEASIBILITY_FILE}`) is missing → write error: `<name>_failed`
+- If a blocking dimension's file (its `DIMENSION_<NAME>_FILE` line in the launch block) is missing → write error: `<name>_failed`
 - If a non-blocking dimension's file is missing AND its agent was launched → note but do not treat as a blocking error
 
 For any missing prerequisite:
@@ -153,7 +153,7 @@ For each remaining ID, launch a **review agent** (model: opus, run_in_background
 ```
 <launch block>
 
-Substitute: {ID}=<ID>, {ASSESS_PATH}={ASSESS_STAGING}/<ID>.result.md, {FEASIBILITY_PATH}={DIMENSION_FEASIBILITY_FILE}, {FIRST_PASS}=true, plus one {<NAME>_PATH}=<DIMENSION_<NAME>_FILE> for every other dimension (e.g. {ALIGNMENT_PATH})
+Substitute: {ID}=<ID>, {ASSESS_PATH}={ASSESS_STAGING}/<ID>.result.md, {FIRST_PASS}=true, plus one {<NAME>_PATH}=<DIMENSION_<NAME>_FILE> line for every dimension in `DIMENSIONS={DIMENSIONS}`
 
 Read .claude/skills/rfe-review/prompts/review-agent.md and follow all instructions exactly.
 ```
@@ -298,7 +298,7 @@ For each reassess ID, launch a **review agent** (model: opus, run_in_background:
 ```
 <launch block>
 
-Substitute: {ID}=<ID>, {ASSESS_PATH}={ASSESS_STAGING}/<ID>.result.md, {FEASIBILITY_PATH}={DIMENSION_FEASIBILITY_FILE}, {FIRST_PASS}=false, plus one {<NAME>_PATH}=<DIMENSION_<NAME>_FILE> for every other dimension
+Substitute: {ID}=<ID>, {ASSESS_PATH}={ASSESS_STAGING}/<ID>.result.md, {FIRST_PASS}=false, plus one {<NAME>_PATH}=<DIMENSION_<NAME>_FILE> line for every dimension in `DIMENSIONS={DIMENSIONS}`
 
 Read .claude/skills/rfe-review/prompts/review-agent.md and follow all instructions exactly.
 ```

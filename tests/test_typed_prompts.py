@@ -92,6 +92,16 @@ _REWRITTEN_REVISE_RFE = ("then read and classify each block's",)
 _REWRITTEN_REVISE_INIT = ("auto-revise initiative to address review findings",)
 # Generic names: the headless completion marker names the generic skill (design §4.4).
 _STEP_COMPLETED = ("step completed.",)
+# The review skeleton reads "every dimension file listed above" (DIMENSION_FILES, one <NAME>_PATH
+# each) instead of naming the feasibility file; the typed review rules name the type's inputs.
+_DIMENSION_GENERIC_REVIEW = (
+    "write a review file with assessor feedback, feasibility analysis, and frontmatter scores",
+)
+_DIMENSION_GENERIC_REVIEW_RFE = ("read the assessment result file and the feasibility file",)
+# The review body launches every declared dimension by one rule (DIMENSIONS, DIMENSION_<NAME>_*
+# and the condition grammar) — the per-dimension launch headings are that rule's renderings.
+_DIMENSION_GENERIC_BODY = ("launch feasibility agent",)
+_DIMENSION_GENERIC_BODY_INIT = ("launch alignment agent",)
 # D6: one re-split trigger (the descriptor's resplit threshold) — the initiative body's
 # recommendation-based wording is replaced, not carried.
 _RESPLIT_INIT = (
@@ -114,6 +124,12 @@ _allow(
 for _t, _prefix in (("rfe", "rfe."), ("initiative", "initiative-")):
     _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_STEP_COMPLETED)
     _allow(_t, f".claude/skills/{_prefix}split/SKILL.md", *_STEP_COMPLETED)
+    _allow(
+        _t, f".claude/skills/{_prefix}review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW
+    )
+    _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_DIMENSION_GENERIC_BODY)
+_allow("initiative", ".claude/skills/initiative-review/SKILL.md", *_DIMENSION_GENERIC_BODY_INIT)
+_allow("rfe", ".claude/skills/rfe.review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW_RFE)
 _allow("initiative", ".claude/skills/initiative-split/SKILL.md", *_RESPLIT_INIT)
 
 
@@ -199,12 +215,14 @@ def test_every_legacy_sentence_survives(t, rel, legacy_text, corpus, mode):
 
 
 def test_allowed_entries_are_still_needed():
-    """An allowlist entry whose sentence is present again is stale — drop it."""
+    """An allowlist entry is stale when the sentence it excuses is present again, or when no
+    legacy sentence matches it at all — either way, drop it."""
     stale = []
     for t, rel, legacy_text, corpus, mode in (p.values for p in _cases()):
         have = normalise(corpus)
         wanted = sentences(body(legacy_text)) if mode == "full" else bold_rules(legacy_text)
         for a in ALLOWED.get((t, rel), []):
-            if any(a in s and s in have for s in wanted):
+            matching = [s for s in wanted if a in s]
+            if not matching or any(s in have for s in matching):
                 stale.append((t, rel, a))
     assert not stale, stale

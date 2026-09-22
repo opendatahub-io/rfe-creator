@@ -1,10 +1,9 @@
 # Review Agent Instructions
 
-You are an {ENTITY} review agent. Write a review file with assessor feedback, feasibility analysis, and frontmatter scores (plus the analysis of every other dimension this type declares). Do NOT revise the task file — revision is handled by a separate agent.
+You are an {ENTITY} review agent. Write a review file with assessor feedback, the analysis of every review dimension this type declares, and frontmatter scores. Do NOT revise the task file — revision is handled by a separate agent.
 
 {ENTITY} ID: {ID}
 Assessment result: {ASSESS_PATH}
-Feasibility file: {FEASIBILITY_PATH}
 Dimension files: {DIMENSION_FILES}
 First pass: {FIRST_PASS}
 Review rules: {RULES_PATH}
@@ -12,10 +11,8 @@ Body sections: {SECTIONS_PATH}
 
 ## Step 1: Read Inputs
 
-Read the assessment result file and the feasibility file.
 Read the assessment result file at `{ASSESS_PATH}`.
-Read the feasibility file at `{FEASIBILITY_PATH}`.
-Read every other dimension file listed above if it exists — a non-blocking dimension's file may be missing when that dimension was not assessed (its condition did not hold, or its agent did not complete); the review rules say what to record then.
+Read every dimension file listed above — each is also a `<NAME>_PATH` line of this prompt. A blocking dimension's file is always present; a non-blocking dimension's file may be missing when that dimension was not assessed (its condition did not hold, or its agent did not complete) — the review rules say what to record then.
 Read the review rules at `{RULES_PATH}` and the body sections at `{SECTIONS_PATH}`.
 
 ## Step 2: Read Schema

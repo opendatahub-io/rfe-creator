@@ -2098,6 +2098,33 @@ class TestSkillLayer:
             for literal in literals:
                 assert literal not in raw, (name, literal)
 
+    def test_review_surface_renders_without_a_dimension_literal(self):
+        # The review body and skeleton iterate the launch block's dimension entries: rendered
+        # for a registered type that declares no dimension (the epic paper descriptor, whose
+        # stages include review), nothing names a feasibility read or leaves a dimension token.
+        reg = type_registry.load(extra_roots=[str(REPO_ROOT / "tests/fixtures/types")], env={})
+        epic = reg.get("epic")
+        assert epic.get("pipeline.dimensions") == []
+        pairs = type_registry.launch_vars(epic, "review")
+        assert dict(pairs)["DIMENSIONS"] == "" and dict(pairs)["DIMENSION_FILES"] == ""
+        body = read(GENERIC_SKILL.format(stage="review")).split("---", 2)[2]
+        for text in (body, read(f"{SKELETON_DIR}/review-agent.md")):
+            for key, value in pairs:
+                text = text.replace("{" + key + "}", value)
+            assert "{DIMENSION_" not in text and "FEASIBILITY_PATH" not in text
+            assert "feasibility agent" not in text.lower()
+            assert "feasibility file" not in text.lower()
+        # and for the shipped types the same body launches every declared dimension by rule
+        for t in TYPES:
+            rendered = skill(t, "review")
+            assert "**Launch one agent per declared dimension**" in rendered
+            assert f"DIMENSIONS={dict(launch(t))['DIMENSIONS']}" in rendered
+            assert (
+                "`<field> startswith <prefix>`" in rendered
+                and "`context_exists <path>`" in rendered
+            )
+            assert "RHAISTRAT" not in rendered
+
     def test_scorer_literal_sites(self, ctx):
         # rows: 191 — rendered review body launches the scorer twice; the assess skeleton
         # names it through SCORER_AGENT; the speedrun's bootstrap note names it
@@ -2273,7 +2300,7 @@ class TestSkillLayer:
             "split_result",
             "needs_attention",
             "rubric_pass",
-        } | {f"feasibility.{k}" for k in ctx.labels["feasibility"]}
+        }
         pin(
             "conventions.labels keys (documented subset)",
             "rfe-submit label table",
@@ -2282,9 +2309,13 @@ class TestSkillLayer:
         )
         assert f"every label starts with `{ctx.conv['label_prefix']}-`" in skill(ctx.t, "submit")
         assert "ignore" not in documented and "split_quarantine" not in documented
-        if "alignment" in ctx.labels:
-            for k in ctx.labels["alignment"]:
-                assert f"`alignment.{k}`" in skill(ctx.t, "submit")
+        # The verdict-label families are rendered from the launch block (VERDICT_LABELS: one
+        # family per declared dimension, in descriptor order) — the body names none of them.
+        families = ", ".join(f"{d}.{k}" for d in ctx.dims for k in ctx.labels[d])
+        assert f"this type's: `{families}`" in skill(ctx.t, "submit")
+        assert dict(launch(ctx.t, "submit"))["VERDICT_LABELS"] == families
+        raw = read(GENERIC_SKILL.format(stage="submit")).split("---", 2)[2]
+        assert "feasibility." not in raw and "alignment." not in raw
 
     def test_type_flag_pass_through(self, ctx):
         # rows: 222 — every script invocation that carries --type names this type (TYPE_FLAG,

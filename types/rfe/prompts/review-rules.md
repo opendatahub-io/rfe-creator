@@ -1,5 +1,7 @@
 # RFE review rules
 
+Inputs: read the feasibility file at `{FEASIBILITY_PATH}` — the technical feasibility analysis; the review's Feasibility section and its `feasibility` frontmatter field come from it.
+
 Determine recommendation:
 - submit: RFE passes (7+ with no zeros)
 - revise: RFE fails but can be improved
