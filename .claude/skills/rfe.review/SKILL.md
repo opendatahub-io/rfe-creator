@@ -161,7 +161,7 @@ python3 scripts/check_review_progress.py --phase revise --id-file tmp/rfe-poll-r
 
 Sleep for the `NEXT_POLL` seconds reported by the script before polling again. Wait for all to complete.
 
-**Post-processing: fix auto_revised flag.** The revise agent may run out of budget before setting `auto_revised=true`. After all agents complete, run the batch check which compares originals to task files and sets the flag directly in review frontmatter:
+**Post-processing: fix auto_revised flag.** The revise agent may run out of budget before setting `auto_revised=true`, or set it after changing nothing (the flag is its completion marker). After all agents complete, run the batch check which compares originals to task files and sets the flag directly in review frontmatter:
 
 ```bash
 python3 scripts/check_revised.py --batch --ids-file tmp/rfe-poll-revise.txt

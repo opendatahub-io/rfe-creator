@@ -380,7 +380,12 @@ def _reconcile_saved_review_state(artifacts_dir, type_name):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Warning: review state reconcile failed: {result.stderr.strip()}", file=sys.stderr)
+        # Exit status only: the child's stderr can quote a frontmatter source line.
+        print(
+            "Warning: review state reconcile failed"
+            f" (reconcile_reviews.py exit {result.returncode}); saved state not re-applied",
+            file=sys.stderr,
+        )
         return
     for line in result.stdout.splitlines():
         if line.startswith("RESTORED=") and line[len("RESTORED=") :]:
@@ -388,6 +393,50 @@ def _reconcile_saved_review_state(artifacts_dir, type_name):
             print(f"Re-applied saved review state for {len(ids)} item(s): {', '.join(ids)}")
         elif line.startswith("RECONCILE_ERROR "):
             print(f"Warning: {line}", file=sys.stderr)
+
+
+def _lower_unrevised_flags(artifacts_dir, type_name):
+    """Run ``check_revised.py --batch --lower-only`` over the artifacts (see main): a set
+    ``auto_revised`` on a task whose body still equals its original is lowered before the
+    first review is read. Lower-only — raising stays FIXUP's job over the revise ids. Runs
+    after the state reconcile (a restore may re-raise a flag from state first) and is
+    best-effort like it: a failure is reported, never fatal."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cmd = [
+        sys.executable,
+        os.path.join(script_dir, "check_revised.py"),
+        "--type",
+        type_name,
+        "--batch",
+        "--lower-only",
+        "--artifacts-dir",
+        artifacts_dir,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        # Exit status only: the child's stderr can quote a frontmatter source line.
+        print(
+            "Warning: auto_revised content guard failed"
+            f" (check_revised.py exit {result.returncode}); flags left as written",
+            file=sys.stderr,
+        )
+        return
+    for line in result.stdout.splitlines():
+        if line.startswith("LOWERED=") and line[len("LOWERED=") :]:
+            ids = line[len("LOWERED=") :].split(",")
+            print(
+                f"Lowered auto_revised on {len(ids)} item(s) whose text equals the original:"
+                f" {', '.join(ids)}"
+            )
+        elif line.startswith("SKIPPED=") and line[len("SKIPPED=") :]:
+            # Ids only: the child's per-id stderr line carries the exception class, and its
+            # message could have quoted frontmatter.
+            ids = line[len("SKIPPED=") :].split(",")
+            print(
+                f"Warning: auto_revised content guard skipped {len(ids)} item(s) it could not"
+                f" read or update: {', '.join(ids)}",
+                file=sys.stderr,
+            )
 
 
 def _record_not_attempted(args, cfg, parent_keys, error):
@@ -624,6 +673,10 @@ def main():
     # review agent can rewrite its review minutes after its wave, past COLLECT and REPORT;
     # this is the last reader, and in CI it runs after the agent process is torn down.
     _reconcile_saved_review_state(args.artifacts_dir, type_name)
+    # Then the content guard: a revise agent's last write can land after FIXUP lowered a
+    # flag it had set on an unchanged task (2026-09-21 stage dry run), and this flag is
+    # what the auto-revised label is derived from. Lower-only; never raises.
+    _lower_unrevised_flags(args.artifacts_dir, type_name)
 
     # Scan task files
     tasks = scan_tasks(args.artifacts_dir, desc)
