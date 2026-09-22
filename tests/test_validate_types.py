@@ -593,10 +593,67 @@ class TestPerTypeGate:
         hits = _assert_finding(report, "sharing rubric repo 'opendatahub-io/assess-rfe'", "*")
         assert len(hits) == 1 and len(report.findings) == 1, report.lines()
 
+    def test_two_external_rubric_repos_are_a_cross_finding(self, types_copy):
+        """Rule 6a (CodeRabbit on #198, CWE-345): the bootstrap clones the descriptor's repo
+        into the one checkout, so a second external repository would load the wrong rubric
+        at the shared path; the lint refuses it until the bootstrap keeps one per repo."""
+        _mutate(
+            types_copy,
+            "rfe",
+            lambda d: d["pipeline"]["rubric"].__setitem__(
+                "repo", "https://github.com/other-org/other-rubrics"
+            ),
+        )
+        report = _validate(types_copy)
+        hits = _assert_finding(report, "external rubric repositories differ across types", "*")
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+        assert hits[0].types == frozenset({"rfe", "initiative"})
+        assert "opendatahub-io/assess-rfe (initiative)" in hits[0].message
+        assert "other-org/other-rubrics (rfe)" in hits[0].message
+        assert "needs bootstrap support" in hits[0].message
+
+    def test_userinfo_in_a_repo_url_reaches_no_finding(self, types_copy):
+        """No Sensitive Data In Logs: a credential in the URL is neither part of the rule-6 key
+        nor echoed by any finding — including the schema's, which quotes the instance (the
+        schema rejects such a URL; the canonicalizer and the redaction hold regardless)."""
+        token = "s3cr3t-t0ken"
+        _mutate(
+            types_copy,
+            "rfe",
+            lambda d: d["pipeline"]["rubric"].__setitem__(
+                "repo", f"https://alice:{token}@github.com/opendatahub-io/assess-rfe.git"
+            ),
+        )
+        report = _validate(types_copy)
+        assert not report.ok
+        for finding in report.findings:
+            assert token not in finding.message, finding.message
+            assert "alice" not in finding.message, finding.message
+        # Same repository as the initiative descriptor once canonicalized: no rule-6 finding.
+        assert not _find(report, "rubric repositories differ")
+        assert not _find(report, "differs across the types sharing")
+
+    def test_redact_userinfo(self):
+        """The schema's oneOf message does not quote the instance today; a message that did
+        (a plain pattern error) is redacted before it becomes a finding."""
+        redact = validate_types._redact_userinfo
+        assert redact("'https://alice:tok@host/x.git' does not match") == (
+            "'https://***@host/x.git' does not match"
+        )
+        assert redact("plain text, no url") == "plain text, no url"
+
     @pytest.mark.parametrize(
         "repo, key",
         [
             ("opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),
+            (
+                "https://alice:token@github.com/opendatahub-io/assess-rfe.git",
+                "opendatahub-io/assess-rfe",
+            ),
+            (
+                "https://alice:token@gitlab.example.com/Group/Rubrics.git",
+                "https://gitlab.example.com/group/rubrics",
+            ),
             ("https://github.com/OpenDataHub-IO/Assess-RFE.git/", "opendatahub-io/assess-rfe"),
             ("git@github.com:opendatahub-io/assess-rfe.git", "opendatahub-io/assess-rfe"),
             ("ssh://git@github.com/opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),

@@ -41,6 +41,10 @@ descriptor value ("Deployment binding override" below).
 Follow "Adding a type" in [`types/README.md`](../types/README.md): copy `types/rfe/`, edit only the
 extension points, run `python3 scripts/validate_types.py` (gate 1) and, after
 `bash scripts/bootstrap-assess-rfe.sh`, `python3 scripts/validate_types.py --with-deps` (gate 2).
+Keep `pipeline.rubric.repo` and `pipeline.rubric.ref` identical to the shipped descriptors: the
+bootstrap clones that repository once, at that commit, into `.context/assess-rfe`, and gate 1 refuses
+a second external rubric repository or a second pin (rule 6) until the bootstrap can keep a checkout
+per repository.
 Author the eval prose in `types/<name>/eval/fragment.yaml` (schema
 `types/_schema/eval-fragment.schema.json`) and `types/<name>/eval/pairwise-judge.md`, name the
 quality threshold `<name>_quality`, and let `python3 scripts/generate_eval_config.py --type <name>`

@@ -46,10 +46,11 @@ design-proposals/work-item-types-unified.md §3.3:
       no type's effective local_prefix mints an id (f"{prefix}1") that another
       type's effective local_id_pattern full-matches (PR-3 D13 — detect() tries
       every type's pattern first, so such an id would be routed to the other type);
-      descriptors sharing one external pipeline.rubric.repo (compared as the
-      canonical owner/repo, whatever the spelling) pin the same
-      pipeline.rubric.ref (the bootstrap keeps ONE checkout per repo, so two
-      pins cannot both be honoured)
+      every descriptor with an external pipeline.rubric.repo names ONE repository
+      (compared as the canonical owner/repo, whatever the spelling) and pins the
+      same pipeline.rubric.ref — the bootstrap keeps ONE checkout, cloned from the
+      descriptor's repo at that ref, so a second repository or a second pin
+      cannot be honoured
     * a binding the registry refuses to compute (a malformed identity block, an
       invalid or D13-inconsistent RFE_CREATOR_BINDING_* override) is a finding
       for that type, never a traceback
@@ -110,23 +111,37 @@ RUBRIC_REF_RE = re.compile(r"^[0-9a-f]{7,40}$")
 # Cross rule 6 keys descriptors by repository identity, not by the spelling the schema
 # accepts: `owner/repo`, `https://github.com/owner/repo[.git][/]`, and for robustness the
 # `git@github.com:owner/repo.git` / `ssh://git@github.com/...` forms.
-_GITHUB_PREFIX_RE = re.compile(r"^(?:https?://|ssh://git@|git@)?(?:www\.)?github\.com[:/]+", re.I)
+# URL userinfo (`user:token@`) after an optional scheme, or the `git@` of an scp-style
+# address: never part of the identity, and never to be echoed (a token in a finding
+# would land in CI logs).
+_URL_USERINFO_RE = re.compile(r"^([a-z][a-z0-9+.-]*://)?[^/@]*@", re.I)
+_GITHUB_PREFIX_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*://)?(?:www\.)?github\.com[:/]+", re.I)
+# For redacting an instance value a schema message quotes.
+_EMBEDDED_USERINFO_RE = re.compile(r"(://)[^/@\s'\"]*@")
 
 
 def canonical_rubric_repo(repo):
     """The identity key of pipeline.rubric.repo for cross rule 6: the lowercased
     ``owner/repo`` for any GitHub spelling (slug, https URL, git@ / ssh URL, with or
     without ``.git`` or a trailing slash); any other URL lowercased with the same
-    suffixes stripped. None for a non-string or ``self`` (the D3 embedded rubric)."""
+    suffixes stripped. URL userinfo is dropped for every form, so a credential never
+    becomes part of a key or a finding. None for a non-string or ``self`` (the D3
+    embedded rubric)."""
     if not isinstance(repo, str) or repo == "self":
         return None
     value = repo.strip().rstrip("/")
     if value.lower().endswith(".git"):
         value = value[:-4].rstrip("/")
+    value = _URL_USERINFO_RE.sub(lambda m: m.group(1) or "", value)
     m = _GITHUB_PREFIX_RE.match(value)
     if m:
         value = value[m.end() :]
     return value.strip("/").lower() or None
+
+
+def _redact_userinfo(text):
+    """``https://alice:token@host/x`` → ``https://***@host/x`` inside a message."""
+    return _EMBEDDED_USERINFO_RE.sub(r"\1***@", text)
 
 
 # D3 (design §11): an embedded rubric (`repo: self`) is pinned by a content hash
@@ -284,7 +299,8 @@ def schema_messages(desc, schema):
             text = f"violates {err.validator} (closest sub-error: {cause})"
         if len(text) > 300:
             text = text[:297] + "..."
-        messages.append(f"schema: {location}: {text}")
+        # A schema message quotes the instance; a URL with userinfo must not echo it.
+        messages.append(f"schema: {location}: {_redact_userinfo(text)}")
     return messages
 
 
@@ -366,7 +382,9 @@ def eval_fragment_messages(desc, fragment_schema, skeleton_text, repo_root, eval
                     str(p) for p in err.absolute_path
                 )
                 text = err.message if len(err.message) <= 300 else err.message[:297] + "..."
-                messages.append(f"eval fragment {rel}: schema: {location}: {text}")
+                messages.append(
+                    f"eval fragment {rel}: schema: {location}: {_redact_userinfo(text)}"
+                )
             return messages
     if skeleton_text is None:
         return [f"eval config skeleton missing: {generate_eval_config.SKELETON_RELPATH}"]
@@ -710,27 +728,42 @@ def cross_type_findings(registry, env):
                     [name_a, name_b],
                 )
 
-    # (6) one checkout per external rubric repo: bootstrap-assess-rfe.sh clones
-    #     ONE fixed repo (its ASSESS_RFE_REPO default) into ONE fixed dir,
-    #     .context/assess-rfe, and checks out ONE pipeline.rubric.ref, so
-    #     descriptors sharing the repo must pin the same commit. The grouping is
-    #     by the literal pipeline.rubric.repo string: today every external rubric
-    #     is that one repo, and a descriptor naming a second external repo needs
-    #     bootstrap work (a checkout per repo) before the rule could mean anything
-    #     for it. Only well-formed refs take part (a malformed one is already a
-    #     per-type finding); the D3 embedded rubric (repo: self) has no checkout.
-    #     The key is the canonical repository identity (canonical_rubric_repo), so
+    # (6) ONE external rubric checkout: bootstrap-assess-rfe.sh clones the
+    #     descriptor's pipeline.rubric.repo into ONE fixed dir, .context/assess-rfe,
+    #     and checks out ONE pipeline.rubric.ref. So (6a) every descriptor with an
+    #     external rubric must name the same repository — a second external repo
+    #     would validate and then load the other repo's rubric at the shared path
+    #     (CWE-345); it needs bootstrap support (a checkout per repo) first — and
+    #     (6b) descriptors sharing that repo must pin the same commit. Repositories
+    #     are compared by canonical identity (canonical_rubric_repo), so
     #     `opendatahub-io/assess-rfe`, `https://github.com/opendatahub-io/assess-rfe`
-    #     and `...assess-rfe.git` group together.
+    #     and `...assess-rfe.git` are one repo, and only the canonical key is ever
+    #     printed (a URL's userinfo is dropped from it). Only well-formed refs take
+    #     part in 6b (a malformed one is already a per-type finding); the D3
+    #     embedded rubric (repo: self) has no checkout and is outside both.
+    repos_by_key = {}
     refs_by_repo = {}
     for name, desc in descs.items():
         repo = canonical_rubric_repo(_opt(desc, "pipeline.rubric.repo"))
         ref = _opt(desc, "pipeline.rubric.ref")
-        if repo is None or not isinstance(ref, str):
+        if repo is None:
             continue
-        if not RUBRIC_REF_RE.fullmatch(ref):
+        repos_by_key.setdefault(repo, []).append(name)
+        if not isinstance(ref, str) or not RUBRIC_REF_RE.fullmatch(ref):
             continue
         refs_by_repo.setdefault(repo, {}).setdefault(ref, []).append(name)
+    if len(repos_by_key) > 1:
+        detail = "; ".join(
+            f"{repo} ({_fmt_types(names)})" for repo, names in sorted(repos_by_key.items())
+        )
+        cross(
+            f"external rubric repositories differ across types: {detail} — "
+            "bootstrap-assess-rfe.sh keeps one checkout (.context/assess-rfe), cloned from "
+            "the descriptor's pipeline.rubric.repo, so a second external rubric repository "
+            "needs bootstrap support (a checkout per repository) before a descriptor may "
+            "name it",
+            [n for names in repos_by_key.values() for n in names],
+        )
     for repo, by_ref in sorted(refs_by_repo.items()):
         if len(by_ref) < 2:
             continue

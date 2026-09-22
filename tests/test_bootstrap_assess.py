@@ -346,22 +346,59 @@ class TestRubricPin:
         yield wd
         os.chdir(orig)
 
-    def _env(self, drop_in_root, repo_url, pin, **extra):
+    def _env(self, drop_in_root, repo_url, pin, descriptor_repo=None, **extra):
+        """The bootstrap's environment for a drop-in `memo` type pinned at ``pin``. By default
+        the clone URL comes from ASSESS_RFE_REPO=``repo_url``; with ``descriptor_repo`` the
+        descriptor names the repository instead and the env override is left unset."""
         from conftest import MEMO_OVERRIDES
 
-        root = drop_in_root.add("memo", overrides={**MEMO_OVERRIDES, "pipeline.rubric.ref": pin})
+        overrides = {**MEMO_OVERRIDES, "pipeline.rubric.ref": pin}
+        if descriptor_repo is not None:
+            overrides["pipeline.rubric.repo"] = descriptor_repo
+        root = drop_in_root.add("memo", overrides=overrides)
         env = {
-            k: v for k, v in os.environ.items() if k not in ("ASSESS_RFE_REF", "RFE_SKIP_BOOTSTRAP")
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ASSESS_RFE_REF", "ASSESS_RFE_REPO", "RFE_SKIP_BOOTSTRAP")
         }
-        env.update(
-            {
-                "RFE_CREATOR_EXTRA_TYPES": root,
-                "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": root,
-                "ASSESS_RFE_REPO": repo_url,
-                **extra,
-            }
-        )
+        env.update({"RFE_CREATOR_EXTRA_TYPES": root, "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": root})
+        if descriptor_repo is None:
+            env["ASSESS_RFE_REPO"] = repo_url
+        env.update(extra)
         return env
+
+    def test_descriptor_repo_is_cloned_without_an_env_override(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """Rule 6 / CWE-345 (CodeRabbit on #198): with ASSESS_RFE_REPO unset the clone URL is
+        the descriptor's pipeline.rubric.repo, not a built-in default."""
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, descriptor_repo=url))
+        assert result.returncode == 0, result.stderr
+        assert (
+            f"cloning assess-rfe from {url} (types/memo/type.yaml pipeline.rubric.repo)"
+            in result.stdout
+        )
+        assert self._git(workdir / ".context" / "assess-rfe", "remote", "get-url", "origin") == url
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_env_repo_override_wins_over_the_descriptor(
+        self, workdir, tmp_path, drop_in_root, assess_repo
+    ):
+        url, first, second = assess_repo
+        mirror = tmp_path / "assess-rfe-mirror"
+        subprocess.run(["git", "clone", "-q", "--bare", url, str(mirror)], check=True)
+        mirror_url = f"file://{mirror}"
+        result = self._run(
+            self._env(drop_in_root, url, first, descriptor_repo=url, ASSESS_RFE_REPO=mirror_url)
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"cloning assess-rfe from {mirror_url} (ASSESS_RFE_REPO)" in result.stdout
+        assert (
+            self._git(workdir / ".context" / "assess-rfe", "remote", "get-url", "origin")
+            == mirror_url
+        )
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
 
     def _run(self, env):
         return subprocess.run(
@@ -660,26 +697,31 @@ class TestRubricPin:
         assert "types/rfe/type.yaml pipeline.rubric.ref" in stderr
 
     def test_shipped_pins_match_the_fallback_parser(self):
-        """The no-Python fallback (the awk programme in the script) must read the same value
-        the registry serves; both shipped descriptors pin one full SHA."""
+        """The no-Python fallback (the awk programme in the script) must read the same repo and
+        ref the registry serves; both shipped descriptors pin one full SHA."""
         with open(SCRIPT) as f:
             script = f.read()
-        m = re.search(r"awk '((?:[^']|\n)*?)' \"\$TYPES_ROOT", script)
-        assert m, "the rubric_ref_from_root awk programme moved"
+        m = re.search(r"awk -v key=\"\$1\" '((?:[^']|\n)*?)' \"\$TYPES_ROOT", script)
+        assert m, "the rubric_field_from_root awk programme moved"
         programme = m.group(1)
         registry_py = os.path.join(REPO_ROOT, "scripts", "type_registry.py")
         for name in ("rfe", "initiative"):
-            registry = subprocess.run(
-                [sys.executable, registry_py, "get", name, "pipeline.rubric.ref"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            awk = subprocess.run(
-                ["awk", programme, os.path.join(REPO_ROOT, "types", name, "type.yaml")],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
-            assert registry == awk, (name, registry, awk)
-            assert re.fullmatch(r"[0-9a-f]{40}", registry), (name, registry)
+            values = {}
+            for field in ("ref", "repo"):
+                registry = subprocess.run(
+                    [sys.executable, registry_py, "get", name, f"pipeline.rubric.{field}"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                descriptor = os.path.join(REPO_ROOT, "types", name, "type.yaml")
+                awk = subprocess.run(
+                    ["awk", "-v", f"key={field}", programme, descriptor],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                assert registry == awk, (name, field, registry, awk)
+                values[field] = registry
+            assert re.fullmatch(r"[0-9a-f]{40}", values["ref"]), (name, values)
+            assert values["repo"] == "https://github.com/opendatahub-io/assess-rfe", (name, values)
