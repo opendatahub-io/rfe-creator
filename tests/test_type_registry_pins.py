@@ -2700,25 +2700,7 @@ class TestEvalConfigs:
 
 
 class TestManifestsAndDocs:
-    # rows: 197, 214, 230
-
-    def test_ambient_results_map(self):
-        # rows: 197 — .ambient/ambient.json:4-13
-        rfe, init = _ctx("rfe"), _ctx("initiative")
-        expected = {
-            "RFE Index": "artifacts/rfes.md",
-            "RFE Tasks": f"{rfe.dirs['tasks']}/*.md",
-            "RFE Reviews": f"{rfe.dirs['reviews']}/*.md",
-            "Initiative Tasks": f"{init.dirs['tasks']}/*.md",
-            "Initiative Reviews": f"{init.dirs['reviews']}/*.md",
-        }
-        pin(
-            "dirs + index.enabled",
-            ".ambient/ambient.json:4-13",
-            expected,
-            yaml.safe_load(read(".ambient/ambient.json"))["results"],
-        )
-        assert rfe.d["index"]["enabled"]
+    # rows: 214, 230 (row 197, .ambient/ambient.json, retired with the manifest in PR-5a)
 
     def test_agents_md_jira_field_mappings(self, ctx):
         # rows: 214 — AGENTS.md:119-133 (prose; 'Initiative (id: 10103)' is unused by code)
