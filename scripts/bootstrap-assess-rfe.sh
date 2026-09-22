@@ -1,6 +1,8 @@
 #!/bin/bash
-# Ensures the assess-rfe plugin is available locally.
-# Safe to run multiple times — clones on first run, pulls updates after.
+# Ensures the assess-rfe plugin is available locally, checked out at the commit
+# the type descriptor pins (pipeline.rubric.ref, design §7.3 / Q9) — or at
+# ASSESS_RFE_REF when that is set (a branch, tag or commit for an ad-hoc run).
+# Safe to run multiple times — clones on first run, fetches and re-pins after.
 #
 # Usage: bootstrap-assess-rfe.sh [--type rfe|initiative]
 #
@@ -93,7 +95,40 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
 fi
 
 CONTEXT_DIR=".context/assess-rfe"
-ASSESS_REPO="${ASSESS_RFE_REPO:-https://github.com/opendatahub-io/assess-rfe}"
+
+# One field of the descriptor's `rubric:` block, without the registry (no PyYAML
+# yet, no python3): the `<key>:` line under `  rubric:`, quotes stripped.
+rubric_field_from_root() {
+  awk -v key="$1" '/^  rubric:/ { f = 1; next }
+       f && $1 == key ":" { gsub(/"/, "", $2); print $2; exit }
+       f && /^  [a-z]/ { exit }' "$TYPES_ROOT/$PIPELINE_TYPE/type.yaml" 2>/dev/null
+}
+
+# The repository this checkout is cloned from. The descriptor owns it
+# (pipeline.rubric.repo; validate_types rule 6 keeps every external rubric on
+# ONE repo, since there is one checkout); ASSESS_RFE_REPO overrides it for an
+# ad-hoc run. Read through the registry, then the descriptor line, and only
+# when neither can be read the historical default. A bare `owner/repo` slug
+# (the schema's other spelling) is a GitHub repository.
+if [ -n "${ASSESS_RFE_REPO:-}" ]; then
+  ASSESS_REPO="$ASSESS_RFE_REPO"
+  REPO_SOURCE="ASSESS_RFE_REPO"
+else
+  ASSESS_REPO="$(python3 "$SCRIPT_DIR/type_registry.py" get "$PIPELINE_TYPE" pipeline.rubric.repo 2>/dev/null)" || ASSESS_REPO=""
+  if [ -z "$ASSESS_REPO" ]; then
+    ASSESS_REPO="$(rubric_field_from_root repo)"
+  fi
+  if [ -n "$ASSESS_REPO" ]; then
+    REPO_SOURCE="types/$PIPELINE_TYPE/type.yaml pipeline.rubric.repo"
+  else
+    ASSESS_REPO="https://github.com/opendatahub-io/assess-rfe"
+    REPO_SOURCE="built-in default"
+  fi
+fi
+case "$ASSESS_REPO" in
+  *://*|*@*:*) ;;
+  *) ASSESS_REPO="https://github.com/$ASSESS_REPO" ;;
+esac
 # Scripts now live under each skill dir (assess-rfe moved them out of the repo
 # root in opendatahub-io/assess-rfe#5 "move-scripts-to-skill-dirs").
 RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
@@ -102,16 +137,102 @@ RUBRIC_FILE="$CONTEXT_DIR/skills/assess-rfe/scripts/agent_prompt.md"
 INITIATIVE_RUBRIC="$CONTEXT_DIR/skills/assess-initiative/scripts/agent_prompt.md"
 INITIATIVE_AGENT="initiative-scorer.md"
 
-if [ ! -d "$CONTEXT_DIR" ]; then
-  git clone "$ASSESS_REPO" "$CONTEXT_DIR" 2>&1
+# The commit this checkout must sit at. The descriptor owns the pin
+# (pipeline.rubric.ref); ASSESS_RFE_REF overrides it for an ad-hoc run. Read
+# through the registry like the type list above, with the same no-Python
+# fallback. Every descriptor pins the same commit (validate_types rule 6), so
+# the requested type's pin is the checkout's pin.
+if [ -n "${ASSESS_RFE_REF:-}" ]; then
+  ASSESS_REF="$ASSESS_RFE_REF"
+  REF_SOURCE="ASSESS_RFE_REF"
 else
-  git -C "$CONTEXT_DIR" pull --ff-only 2>&1 || echo "WARN: assess-rfe pull failed, using cached version" >&2
+  ASSESS_REF="$(python3 "$SCRIPT_DIR/type_registry.py" get "$PIPELINE_TYPE" pipeline.rubric.ref 2>/dev/null)" || ASSESS_REF=""
+  if [ -z "$ASSESS_REF" ]; then
+    ASSESS_REF="$(rubric_field_from_root ref)"
+  fi
+  if [ -z "$ASSESS_REF" ]; then
+    echo "ERROR: could not read pipeline.rubric.ref for type '$PIPELINE_TYPE' (python3 $SCRIPT_DIR/type_registry.py get failed and $TYPES_ROOT/$PIPELINE_TYPE/type.yaml holds no rubric ref)" >&2
+    exit 2
+  fi
+  REF_SOURCE="types/$PIPELINE_TYPE/type.yaml pipeline.rubric.ref"
 fi
 
-# Checkout a specific branch/tag if requested
-if [ -n "${ASSESS_RFE_REF:-}" ]; then
-  git -C "$CONTEXT_DIR" fetch origin "$ASSESS_RFE_REF" 2>&1
-  git -C "$CONTEXT_DIR" checkout FETCH_HEAD 2>&1
+if [ ! -d "$CONTEXT_DIR" ]; then
+  echo "cloning assess-rfe from $ASSESS_REPO ($REPO_SOURCE)"
+  git clone "$ASSESS_REPO" "$CONTEXT_DIR" 2>&1
+fi
+
+# A git checkout is whatever `rev-parse --git-dir` accepts: a clone (.git is a
+# directory), a worktree or a submodule (.git is a file). A checkout owned by
+# another user is refused by git ("dubious ownership") and that refusal is
+# respected — never overridden with safe.directory: a foreign-owned repository
+# can carry hooks a checkout would run with this account's privileges. Such a
+# checkout is one git cannot operate on, and its vendored files are used as
+# found (the WARN branch below).
+gitc() {
+  git -C "$CONTEXT_DIR" "$@"
+}
+pin_is_commit() {
+  # A commit pin is all-hex, at least 7 characters, and resolves to a commit
+  # whose id starts with it. Anything else — a branch, a tag, even a hex-named
+  # one like `cafe` — is a ref name with nothing to compare HEAD against.
+  case "$1" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#1}" -ge 7 ] || return 1
+  local id
+  id="$(gitc rev-parse --verify -q "$1^{commit}" 2>/dev/null)" || return 1
+  case "$id" in "$1"*) return 0 ;; *) return 1 ;; esac
+}
+
+GIT_ERR="$(gitc rev-parse --git-dir 2>&1 >/dev/null)"
+if [ -e "$CONTEXT_DIR/.git" ] && ! gitc rev-parse --git-dir >/dev/null 2>&1; then
+  # Present but unusable (another UID, an unreadable .git): the vendored files
+  # are still there, so keep the pre-pin behaviour — use them, say why.
+  echo "WARN: git cannot operate on $CONTEXT_DIR (${GIT_ERR:-unknown error}); the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced, using the checkout as is" >&2
+elif ! gitc rev-parse --git-dir >/dev/null 2>&1; then
+  echo "WARN: $CONTEXT_DIR is not a git checkout; the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced" >&2
+else
+  HEAD_SHA="$(gitc rev-parse HEAD 2>/dev/null)" || HEAD_SHA=""
+  AT_PIN=0
+  if [ -n "$HEAD_SHA" ] && pin_is_commit "$ASSESS_REF"; then
+    case "$HEAD_SHA" in "$ASSESS_REF"*) AT_PIN=1 ;; esac
+  fi
+  if [ "$AT_PIN" -eq 1 ]; then
+    # Already where the pin says: no network, nothing to move.
+    echo "assess-rfe at ${HEAD_SHA:0:12} ($REF_SOURCE, already checked out)"
+  else
+    # Refresh the objects (a detached checkout cannot `pull`); offline, the
+    # cached objects may already hold the pin.
+    gitc fetch --quiet origin 2>&1 || echo "WARN: assess-rfe fetch failed, using cached objects" >&2
+    # A full SHA (GitHub serves reachable commits by name) or a branch/tag
+    # override lands in FETCH_HEAD; an abbreviated SHA only resolves locally.
+    if gitc fetch --quiet origin "$ASSESS_REF" 2>/dev/null; then
+      CHECKOUT_TARGET="FETCH_HEAD"
+    else
+      CHECKOUT_TARGET="$ASSESS_REF"
+    fi
+    if CHECKOUT_ERR="$(gitc checkout --quiet --detach "$CHECKOUT_TARGET" 2>&1 >/dev/null)"; then
+      HEAD_SHA="$(gitc rev-parse HEAD 2>/dev/null)"
+      if pin_is_commit "$ASSESS_REF"; then
+        case "$HEAD_SHA" in
+          "$ASSESS_REF"*) ;;
+          *)
+            echo "ERROR: assess-rfe checkout is at $HEAD_SHA, not the pinned $ASSESS_REF ($REF_SOURCE)" >&2
+            exit 1
+            ;;
+        esac
+      fi
+      echo "assess-rfe at ${HEAD_SHA:0:12} ($REF_SOURCE)"
+    elif [ -z "$HEAD_SHA" ]; then
+      # No readable HEAD and no way to move: git cannot operate here either.
+      echo "WARN: git cannot check out $CONTEXT_DIR (${CHECKOUT_ERR:-unknown error}); the rubric pin $ASSESS_REF ($REF_SOURCE) is not enforced, using the checkout as is" >&2
+    else
+      # A positive mismatch: HEAD is readable, is not the pin, and the pin
+      # cannot be reached. git's own message tells a commit the remote lacks
+      # from local modifications or a stale index.lock.
+      echo "ERROR: could not check out assess-rfe at $ASSESS_REF ($REF_SOURCE) in $CONTEXT_DIR (HEAD is ${HEAD_SHA:0:12}): ${CHECKOUT_ERR:-no error text}" >&2
+      exit 1
+    fi
+  fi
 fi
 
 # Validate that the rubric file exists after cloning

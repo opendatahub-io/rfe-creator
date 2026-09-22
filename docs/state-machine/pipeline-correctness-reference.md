@@ -220,7 +220,7 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 |---|---|---|
 | `ASSESS_PARSE_TYPE` | Parse `--type rfe\|initiative` (default `rfe`); reject unknown args/types with exit 2 | `bootstrap-assess-rfe.sh:12-37` |
 | `ASSESS_BOOTSTRAP_CHECK` | Check `RFE_SKIP_BOOTSTRAP` env var | `bootstrap-assess-rfe.sh:39` |
-| `ASSESS_CLONE_OR_PULL` | Clone or pull assess-rfe repo (graceful fallback to cached on pull failure) | `bootstrap-assess-rfe.sh:54-58` |
+| `ASSESS_CLONE_OR_PULL` | Resolve the pin (`ASSESS_RFE_REF`, else the type's `pipeline.rubric.ref` via the registry, else the descriptor's `ref:` line; none → exit 2); clone if absent; then, in a git checkout (`rev-parse --git-dir`; git's ownership check is respected, so another UID's clone is a checkout git cannot operate on): HEAD already at a commit pin → continue without the network; otherwise fetch (failure → WARN, cached objects), fetch the ref, detached checkout, and verify HEAD starts with a commit pin (all-hex, ≥7, resolves to itself — a hex-named tag is a ref). A checkout git cannot open, or a non-git vendored copy, WARNs and continues unpinned | `bootstrap-assess-rfe.sh:95-213` |
 | `ASSESS_VALIDATE_RUBRIC` | Validate RFE rubric file exists | `bootstrap-assess-rfe.sh:66-70` |
 | `ASSESS_VALIDATE_INITIATIVE_RUBRIC` | When `--type initiative`: validate `assess-initiative` rubric exists | `bootstrap-assess-rfe.sh:72-77` |
 | `ASSESS_COPY_SKILLS` | Copy skills + patch PLUGIN_ROOT | `bootstrap-assess-rfe.sh:79-87` |
@@ -228,7 +228,7 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 | `ASSESS_VALIDATE_SCORER_AGENT` | When `--type initiative`: validate `.claude/agents/initiative-scorer.md` was installed | `bootstrap-assess-rfe.sh:95-100` |
 | `ASSESS_EXPORT_RUBRIC` | Export rubric to `artifacts/rfe-rubric.md`. Failure silently swallowed (`2>/dev/null \|\| true`); pipeline proceeds without rubric export. | `bootstrap-assess-rfe.sh:103` |
 | `ASSESS_BOOTSTRAP_DONE` | Bootstrap complete | `bootstrap-assess-rfe.sh:103` |
-| `ASSESS_BOOTSTRAP_FAILED` | Required rubric or scorer agent missing after clone | `bootstrap-assess-rfe.sh:67,72,95` |
+| `ASSESS_BOOTSTRAP_FAILED` | Exit 2: no pin readable. Exit 1: a positive pin mismatch — HEAD readable, not the pin, and the fetch/checkout to it failed (git's stderr is printed) — or a checkout that landed elsewhere; or the required rubric / scorer agent missing after the checkout | `bootstrap-assess-rfe.sh:128,189-212,216-229,247-252` |
 | `ASSESS_PREP` | Clean stale files + copy task file to `/tmp/rfe-assess/single/` | `prep_assess.py` |
 | `ASSESS_AGENT_EXEC` | Agent reads rubric + data, writes result | `rfe.review/SKILL.md` Step 2 |
 | `ASSESS_POLL` | Adaptive polling (60/30/15s intervals) | `check_review_progress.py` |

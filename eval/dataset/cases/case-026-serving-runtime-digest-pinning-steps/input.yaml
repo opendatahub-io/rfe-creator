@@ -1,0 +1,18 @@
+priority: Minor
+prompt: 'Three engineering steps for the shipped serving runtime templates: (1) replace every image tag in the
+  ServingRuntime templates with the image digest, (2) add a CI check that fails a template change carrying a tag instead
+  of a digest, (3) run a one-off job that rewrites the templates already copied into existing namespaces. Please file the
+  three steps as they are; there is no feature behind them.'
+clarifying_context: 'Some honesty about where this comes from so the RFE does not overstate it. It is a tidiness item one
+  of us noticed while diffing two clusters: the runtime templates reference images by tag, so the same template can
+  resolve to different images on different days. No customer has reported a problem from that, there is no support case,
+  no incident, no failed audit, no deal or renewal tied to it, and no partner asked. We have not measured how often the
+  tags actually move. Please do not list an internal team as the customer and do not pad the customer or business
+  sections with generic "enterprises need reproducibility" language — if those sections have to stay empty, leave them
+  empty; the gap should be visible rather than papered over.
+
+
+  The work itself is the three steps in the summary and nothing else: swap tags for digests in the templates, add the CI
+  check, run the rewrite job once. Please keep it written as that checklist rather than turning it into a goal, a user
+  story or acceptance criteria — it is a maintenance chore we want tracked, not an outcome. Out of scope: user-supplied
+  custom runtimes, image mirroring, and anything in the dashboard.'

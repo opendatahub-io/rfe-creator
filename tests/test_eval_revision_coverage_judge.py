@@ -154,17 +154,17 @@ def _dataset(path):
 
 def test_threshold_arithmetic():
     # Same value in both configs, different denominators, derived from the shipped
-    # datasets so the calibration notes cannot drift from the case counts. RFE: 25
-    # cases, 5 tagged revision-expected, 3 of 5 revised must pass and 2 of 5 must
-    # fail. Initiative: 20 cases, 6 tagged (case-007, case-013, case-017..020, since
-    # the gate had passed only on incidental revisions), 5 of 6 must pass and 4 of 6
+    # datasets so the calibration notes cannot drift from the case counts. RFE: 26
+    # cases, 6 tagged revision-expected, 4 of 6 revised must pass and 3 of 6 must
+    # fail. Initiative: 21 cases, 7 tagged (case-007, case-013, case-017..021, since
+    # the gate had passed only on incidental revisions), 6 of 7 must pass and 5 of 7
     # must fail. Guard the float boundary as well as the configured value.
     for path in (EVAL_YAML, EVAL_INITIATIVE_YAML):
         assert _config(path)["thresholds"][JUDGE]["min_pass_rate"] == 0.92
     n_rfe, tagged_rfe, _ = _dataset("eval/dataset/cases")
     n_init, tagged_init, _ = _dataset("eval/initiative-dataset/cases")
-    assert (n_rfe, len(tagged_rfe)) == (25, 5)
-    assert (n_init, len(tagged_init)) == (20, 6)
+    assert (n_rfe, len(tagged_rfe)) == (26, 6)
+    assert (n_init, len(tagged_init)) == (21, 7)
     assert tagged_init == [
         "case-007-gpu-utilization-observability",
         "case-013-scaleup-test-matrix-dynamic",
@@ -172,11 +172,30 @@ def test_threshold_arithmetic():
         "case-018-pipeline-artifact-retention",
         "case-019-serving-cold-start-baseline",
         "case-020-cluster-health-digest",
+        "case-021-model-card-generation-vendor-lock",
     ]
-    assert (n_rfe - 2) / n_rfe >= 0.92  # 3 of 5 revised -> 2 failures -> pass
-    assert (n_rfe - 3) / n_rfe < 0.92  # 2 of 5 revised -> 3 failures -> fail
-    assert (n_init - 1) / n_init >= 0.92  # 5 of 6 revised -> 1 failure -> pass
-    assert (n_init - 2) / n_init < 0.92  # 4 of 6 revised -> 2 failures -> fail
+    assert (n_rfe - 2) / n_rfe >= 0.92  # 4 of 6 revised -> 2 failures -> pass
+    assert (n_rfe - 3) / n_rfe < 0.92  # 3 of 6 revised -> 3 failures -> fail
+    assert (n_init - 1) / n_init >= 0.92  # 6 of 7 revised -> 1 failure -> pass
+    assert (n_init - 2) / n_init < 0.92  # 5 of 7 revised -> 2 failures -> fail
+
+
+def test_2026_09_21_cases_are_why_missing_revision_expected_drafts():
+    """case-026 / initiative case-021 calibrated (2026-09-21) as one-revision passes: they are
+    ordinary revision-expected drafts failing first review on WHY, and no case claims a
+    second revision (the reviser pads WHY to 1, so an unfixable WHY cannot be engineered)."""
+    expected = {
+        "eval/dataset/cases": "case-026-serving-runtime-digest-pinning-steps",
+        "eval/initiative-dataset/cases": "case-021-model-card-generation-vendor-lock",
+    }
+    for path, case in expected.items():
+        _, tagged, rows = _dataset(path)
+        ann = dict(rows)[case]
+        assert case in tagged
+        assert "why-missing" in ann["tags"]
+        assert ann["expected_scores"]["why"] == 0
+        assert ann["known_issues"], case
+        assert not [c for c, a in rows if "second-revision-expected" in (a.get("tags") or [])]
 
 
 def test_tagged_cases_are_annotated_as_weak_drafts():

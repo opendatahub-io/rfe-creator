@@ -305,3 +305,423 @@ class TestCallersDeclareType:
             # SETUP runs its bootstrap steps as a concurrent "commands" list.
             commands = setup.get("commands") or [setup["command"]]
             assert any(f"bootstrap-assess-rfe.sh --type {ptype}" in c for c in commands)
+
+
+class TestRubricPin:
+    """The checkout sits at the descriptor's pipeline.rubric.ref (design §7.3 / Q9) unless
+    ASSESS_RFE_REF overrides it, and the script verifies where it landed."""
+
+    @staticmethod
+    def _git(repo, *args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    @pytest.fixture
+    def assess_repo(self, tmp_path):
+        """A local assess-rfe stand-in with two commits; returns (url, first_sha, second_sha)."""
+        repo = tmp_path / "assess-rfe-origin"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        env_args = ["-c", "user.name=t", "-c", "user.email=t@example.com"]
+        _touch(str(repo / RFE_RUBRIC))
+        _touch(str(repo / "skills" / "export-rubric" / "scripts" / "export_rubric.py"))
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), *env_args, "commit", "-q", "-m", "one"], check=True)
+        first = self._git(repo, "rev-parse", "HEAD")
+        with open(repo / RFE_RUBRIC, "a") as f:
+            f.write("second\n")
+        subprocess.run(
+            ["git", "-C", str(repo), *env_args, "commit", "-q", "-am", "two"], check=True
+        )
+        second = self._git(repo, "rev-parse", "HEAD")
+        return f"file://{repo}", first, second
+
+    @pytest.fixture
+    def workdir(self, tmp_path):
+        wd = tmp_path / "wd"
+        wd.mkdir()
+        orig = os.getcwd()
+        os.chdir(wd)
+        yield wd
+        os.chdir(orig)
+
+    def _env(self, drop_in_root, repo_url, pin, descriptor_repo=None, **extra):
+        """The bootstrap's environment for a drop-in `memo` type pinned at ``pin``. By default
+        the clone URL comes from ASSESS_RFE_REPO=``repo_url``; with ``descriptor_repo`` the
+        descriptor names the repository instead and the env override is left unset."""
+        from conftest import MEMO_OVERRIDES
+
+        overrides = {**MEMO_OVERRIDES, "pipeline.rubric.ref": pin}
+        if descriptor_repo is not None:
+            overrides["pipeline.rubric.repo"] = descriptor_repo
+        root = drop_in_root.add("memo", overrides=overrides)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ASSESS_RFE_REF", "ASSESS_RFE_REPO", "RFE_SKIP_BOOTSTRAP")
+        }
+        env.update({"RFE_CREATOR_EXTRA_TYPES": root, "RFE_CREATOR_EXTRA_TYPES_ALLOWLIST": root})
+        if descriptor_repo is None:
+            env["ASSESS_RFE_REPO"] = repo_url
+        env.update(extra)
+        return env
+
+    def test_descriptor_repo_is_cloned_without_an_env_override(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """Rule 6 / CWE-345 (CodeRabbit on #198): with ASSESS_RFE_REPO unset the clone URL is
+        the descriptor's pipeline.rubric.repo, not a built-in default."""
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, descriptor_repo=url))
+        assert result.returncode == 0, result.stderr
+        assert (
+            f"cloning assess-rfe from {url} (types/memo/type.yaml pipeline.rubric.repo)"
+            in result.stdout
+        )
+        assert self._git(workdir / ".context" / "assess-rfe", "remote", "get-url", "origin") == url
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_env_repo_override_wins_over_the_descriptor(
+        self, workdir, tmp_path, drop_in_root, assess_repo
+    ):
+        url, first, second = assess_repo
+        mirror = tmp_path / "assess-rfe-mirror"
+        subprocess.run(["git", "clone", "-q", "--bare", url, str(mirror)], check=True)
+        mirror_url = f"file://{mirror}"
+        result = self._run(
+            self._env(drop_in_root, url, first, descriptor_repo=url, ASSESS_RFE_REPO=mirror_url)
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"cloning assess-rfe from {mirror_url} (ASSESS_RFE_REPO)" in result.stdout
+        assert (
+            self._git(workdir / ".context" / "assess-rfe", "remote", "get-url", "origin")
+            == mirror_url
+        )
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def _run(self, env):
+        return subprocess.run(
+            ["bash", SCRIPT, "--type", "memo"], capture_output=True, text=True, env=env
+        )
+
+    def test_fresh_clone_lands_on_the_descriptor_pin(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        assert (
+            f"assess-rfe at {first[:12]} (types/memo/type.yaml pipeline.rubric.ref)"
+            in result.stdout
+        )
+
+    def test_cached_checkout_is_moved_to_the_pin(self, workdir, drop_in_root, assess_repo):
+        """The second run of the day: the clone exists at the other commit."""
+        url, first, second = assess_repo
+        subprocess.run(["git", "clone", "-q", url, ".context/assess-rfe"], check=True)
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_env_override_wins_over_the_pin(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, ASSESS_RFE_REF=second))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+        # The fresh clone already sits on the default branch head, which is the override.
+        assert f"assess-rfe at {second[:12]} (ASSESS_RFE_REF, already checked out)" in result.stdout
+
+    def test_branch_override_is_accepted_without_a_sha_check(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, first, ASSESS_RFE_REF="main"))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+
+    def test_unresolvable_pin_fails_loudly(self, workdir, drop_in_root, assess_repo):
+        url, first, second = assess_repo
+        result = self._run(self._env(drop_in_root, url, "0" * 40))
+        assert result.returncode == 1
+        assert f"could not check out assess-rfe at {'0' * 40}" in result.stderr
+        assert "types/memo/type.yaml pipeline.rubric.ref" in result.stderr
+
+    def _clone_at(self, url, sha):
+        subprocess.run(["git", "clone", "-q", url, ".context/assess-rfe"], check=True)
+        subprocess.run(
+            ["git", "-C", ".context/assess-rfe", "checkout", "-q", "--detach", sha], check=True
+        )
+        # Offline from here on: every fetch fails.
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                ".context/assess-rfe",
+                "remote",
+                "set-url",
+                "origin",
+                "file:///nonexistent",
+            ],
+            check=True,
+        )
+
+    def test_checkout_already_at_the_pin_needs_no_network(self, workdir, drop_in_root, assess_repo):
+        """Review finding 1(a): HEAD already equals the pin — fine, continue, no fetch."""
+        url, first, second = assess_repo
+        self._clone_at(url, first)
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert "already checked out" in result.stdout
+        assert "fetch failed" not in result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_offline_cached_objects_reach_the_pin(self, workdir, drop_in_root, assess_repo):
+        """The fetch fails but the cached objects hold the pin: a warning, then the move."""
+        url, first, second = assess_repo
+        self._clone_at(url, second)
+        result = self._run(self._env(drop_in_root, url, first))
+        assert result.returncode == 0, result.stderr
+        assert "WARN: assess-rfe fetch failed, using cached objects" in result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_positive_mismatch_fails_with_git_error_text(self, workdir, drop_in_root, assess_repo):
+        """Review finding 1(c): HEAD readable, not the pin, pin unreachable — exit 1, and git's
+        own message is printed so the operator can tell a missing commit from a stale lock."""
+        url, first, second = assess_repo
+        self._clone_at(url, second)
+        result = self._run(self._env(drop_in_root, url, "0" * 40))
+        assert result.returncode == 1
+        assert f"could not check out assess-rfe at {'0' * 40}" in result.stderr
+        assert f"HEAD is {second[:12]}" in result.stderr
+        assert re.search(r"fatal|error", result.stderr), result.stderr
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 directory")
+    def test_unoperable_checkout_warns_and_continues(self, workdir, drop_in_root, assess_repo):
+        """Review finding 1(b): git cannot open the checkout (here an unreadable .git; in
+        production a checkout owned by another UID, which git refuses as "dubious ownership"
+        and this script never overrides) — warn, keep the vendored files as found, no git
+        write, exit 0."""
+        url, first, second = assess_repo
+        self._clone_at(url, second)
+        git_dir = workdir / ".context" / "assess-rfe" / ".git"
+        os.chmod(git_dir, 0)
+        try:
+            result = self._run(self._env(drop_in_root, url, first))
+        finally:
+            os.chmod(git_dir, 0o755)
+        assert result.returncode == 0, result.stderr
+        assert "WARN: git cannot operate on .context/assess-rfe" in result.stderr
+        assert "is not enforced, using the checkout as is" in result.stderr
+        # Nothing was checked out: HEAD is where the (untrusted) checkout left it.
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+        # The skills were still vendored from the checkout as found.
+        assert (
+            workdir / ".claude" / "skills" / "assess-rfe" / "scripts" / "agent_prompt.md"
+        ).is_file()
+
+    def test_dubious_ownership_is_respected_not_overridden(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """CodeRabbit on #198: git's own ownership refusal, not a filesystem permission. With
+        GIT_TEST_ASSUME_DIFFERENT_OWNER git reports "dubious ownership" for every command on
+        the checkout; the script must take the WARN-and-continue branch — vendored files
+        copied, HEAD untouched, no fetch. A `safe.directory` override in the script would
+        make this test fail: git would then accept the checkout and move HEAD to the pin.
+
+        Not every git build or config honours the hook (the GitHub ubuntu runner does not:
+        lint.yml run 35604448686 saw rev-parse and checkout succeed and only the fetch fail),
+        so the test probes git first and skips itself, with the reason, where the premise
+        does not hold. The mode-000 test above is the unconditional unopenable-checkout guard.
+        """
+        url, first, second = assess_repo
+        self._clone_at(url, second)
+        env = self._env(drop_in_root, url, first, GIT_TEST_ASSUME_DIFFERENT_OWNER="1")
+        probe = subprocess.run(
+            ["git", "-C", ".context/assess-rfe", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if probe.returncode == 0 or "dubious ownership" not in probe.stderr:
+            version = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+            safe_dirs = {
+                scope: subprocess.run(
+                    ["git", "config", scope, "--get-all", "safe.directory"],
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                for scope in ("--system", "--global")
+            }
+            pytest.skip(
+                "this git does not refuse the checkout under GIT_TEST_ASSUME_DIFFERENT_OWNER=1: "
+                f"{version.strip()}; probe rc={probe.returncode} stderr={probe.stderr.strip()!r}; "
+                f"safe.directory system={safe_dirs['--system']!r} global={safe_dirs['--global']!r}"
+            )
+        result = self._run(env)
+        assert result.returncode == 0, result.stderr
+        assert "WARN: git cannot operate on .context/assess-rfe" in result.stderr
+        assert "dubious ownership" in result.stderr
+        assert "fetch failed" not in result.stderr
+        assert (
+            workdir / ".claude" / "skills" / "assess-rfe" / "scripts" / "agent_prompt.md"
+        ).is_file()
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == second
+
+    def test_long_hex_tag_that_is_not_its_targets_prefix_is_a_ref(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """pin_is_commit boundary (CodeRabbit on #198): `deadbeef0` passes the all-hex and
+        length checks, so only the resolves-to-itself check makes it a ref name; drop that
+        check and the HEAD verification fails here."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        assert not first.startswith("deadbeef0")
+        subprocess.run(["git", "-C", repo, "tag", "deadbeef0", first], check=True)
+        result = self._run(self._env(drop_in_root, url, second, ASSESS_RFE_REF="deadbeef0"))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        assert f"assess-rfe at {first[:12]} (ASSESS_RFE_REF)" in result.stdout
+
+    def test_short_hex_tag_that_is_its_targets_prefix_is_still_a_ref(
+        self, workdir, drop_in_root, assess_repo
+    ):
+        """The length check alone: a 4-hex tag named after its target's first four characters
+        resolves to a commit that starts with it, so only `>= 7` keeps it a ref name. With the
+        checkout already at the target, dropping the length check would report the
+        "already checked out" shortcut instead of checking the ref out normally."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        tag = first[:4]
+        subprocess.run(["git", "-C", repo, "tag", tag, first], check=True)
+        subprocess.run(["git", "clone", "-q", url, ".context/assess-rfe"], check=True)
+        subprocess.run(
+            ["git", "-C", ".context/assess-rfe", "checkout", "-q", "--detach", first], check=True
+        )
+        result = self._run(self._env(drop_in_root, url, second, ASSESS_RFE_REF=tag))
+        assert result.returncode == 0, result.stderr
+        assert "already checked out" not in result.stdout
+        assert f"assess-rfe at {first[:12]} (ASSESS_RFE_REF)" in result.stdout
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_hex_named_tag_override_is_a_ref_not_a_sha(self, workdir, drop_in_root, assess_repo):
+        """Review finding 2: `cafe` is all-hex but resolves to a commit that does not start
+        with it, so it is a ref name and HEAD is not checked against it."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        subprocess.run(["git", "-C", repo, "tag", "cafe", first], check=True)
+        result = self._run(self._env(drop_in_root, url, second, ASSESS_RFE_REF="cafe"))
+        assert result.returncode == 0, result.stderr
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        assert f"assess-rfe at {first[:12]} (ASSESS_RFE_REF)" in result.stdout
+
+    def test_worktree_with_a_git_file_is_pinned(self, workdir, drop_in_root, assess_repo):
+        """Review finding 3: a worktree's .git is a file; it is a git checkout all the same."""
+        url, first, second = assess_repo
+        repo = url[len("file://") :]
+        os.makedirs(".context")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                repo,
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                str(workdir / ".context" / "assess-rfe"),
+                second,
+            ],
+            check=True,
+        )
+        assert (workdir / ".context" / "assess-rfe" / ".git").is_file()
+        try:
+            result = self._run(self._env(drop_in_root, url, first))
+            assert result.returncode == 0, result.stderr
+            assert "not a git checkout" not in result.stderr
+            assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+        finally:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    repo,
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(workdir / ".context" / "assess-rfe"),
+                ]
+            )
+
+    def test_awk_fallback_pins_without_a_working_registry(self, workdir, tmp_path, assess_repo):
+        """Review item 6: no working python3 (the first interactive run) — the type list and the
+        pin both come from the descriptor next to the script, and the clone lands on it."""
+        url, first, second = assess_repo
+        stray = tmp_path / "stray"
+        (stray / "scripts").mkdir(parents=True)
+        (stray / "types" / "rfe").mkdir(parents=True)
+        shutil.copy(SCRIPT, stray / "scripts" / "bootstrap-assess-rfe.sh")
+        with open(os.path.join(REPO_ROOT, "types", "rfe", "type.yaml")) as f:
+            descriptor = f.read()
+        shipped_ref = re.search(r'^    ref: "([0-9a-f]{40})"', descriptor, re.M).group(1)
+        (stray / "types" / "rfe" / "type.yaml").write_text(descriptor.replace(shipped_ref, first))
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        fake_python = fakebin / "python3"
+        fake_python.write_text("#!/bin/sh\necho 'ERROR: fake registry failure' >&2\nexit 1\n")
+        fake_python.chmod(0o755)
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("ASSESS_RFE_REF", "RFE_SKIP_BOOTSTRAP")
+        }
+        env["PATH"] = f"{fakebin}{os.pathsep}{env['PATH']}"
+        env["ASSESS_RFE_REPO"] = url
+        result = subprocess.run(
+            ["bash", str(stray / "scripts" / "bootstrap-assess-rfe.sh"), "--type", "rfe"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert (
+            f"assess-rfe at {first[:12]} (types/rfe/type.yaml pipeline.rubric.ref)" in result.stdout
+        )
+        assert self._git(workdir / ".context" / "assess-rfe", "rev-parse", "HEAD") == first
+
+    def test_non_git_checkout_warns_and_continues(self, fake_checkout):
+        """A vendored copy (no .git) cannot be pinned; the script says so and keeps the
+        previous behaviour rather than failing an offline run."""
+        _add_rfe_assets(fake_checkout)
+        _, stderr, rc = _run()
+        assert rc == 0, stderr
+        assert "is not a git checkout; the rubric pin" in stderr
+        assert "types/rfe/type.yaml pipeline.rubric.ref" in stderr
+
+    def test_shipped_pins_match_the_fallback_parser(self):
+        """The no-Python fallback (the awk programme in the script) must read the same repo and
+        ref the registry serves; both shipped descriptors pin one full SHA."""
+        with open(SCRIPT) as f:
+            script = f.read()
+        m = re.search(r"awk -v key=\"\$1\" '((?:[^']|\n)*?)' \"\$TYPES_ROOT", script)
+        assert m, "the rubric_field_from_root awk programme moved"
+        programme = m.group(1)
+        registry_py = os.path.join(REPO_ROOT, "scripts", "type_registry.py")
+        for name in ("rfe", "initiative"):
+            values = {}
+            for field in ("ref", "repo"):
+                registry = subprocess.run(
+                    [sys.executable, registry_py, "get", name, f"pipeline.rubric.{field}"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                descriptor = os.path.join(REPO_ROOT, "types", name, "type.yaml")
+                awk = subprocess.run(
+                    ["awk", "-v", f"key={field}", programme, descriptor],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                assert registry == awk, (name, field, registry, awk)
+                values[field] = registry
+            assert re.fullmatch(r"[0-9a-f]{40}", values["ref"]), (name, values)
+            assert values["repo"] == "https://github.com/opendatahub-io/assess-rfe", (name, values)

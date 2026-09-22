@@ -1,0 +1,20 @@
+prompt: Generate a model card for every model registered in the platform's model registry, produced by the Cardsmith
+  Cloud SaaS (a third-party service) through the connector their solutions team wrote for us, rendered from their
+  template pack, and attached to the registry entry as a PDF. Cardsmith Cloud and its connector are the decision; the
+  reason we want it is that the platform does not generate model cards today.
+clarifying_context: 'Two things to keep exactly as stated. First, the technology: the cards are produced by the Cardsmith
+  Cloud service (hosted by that vendor, outside the cluster) through the connector their solutions team already wrote
+  for us, using their template pack and their PDF renderer. That is settled — it is not a candidate, not an example,
+  and I do not want it softened into "a model-card service such as" or turned into an evaluation of options; the
+  platform''s own registry UI, the open-source card libraries and anything built in-house were not looked at and
+  should not be introduced as alternatives. Second, the justification: the reason for doing this is that the platform
+  does not generate model cards today, and that is the whole reason. No customer has asked for cards, there is no
+  support case, no deal, no audit finding, no regulation anyone has named, no outcome or strategy item this rolls up to,
+  and no internal team is waiting on it. If the write-up needs a "why", it is "we do not have it", and I would rather
+  you left the customer and business parts at that — honestly thin — than padded them with generic segments,
+  compliance talk or teams we have not spoken to.
+
+
+  Scope is every registered model, one PDF card per version, regenerated when a version is updated; nothing about
+  card review workflows, approvals, or publishing cards outside the registry.'
+priority: Normal

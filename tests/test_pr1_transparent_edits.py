@@ -936,7 +936,7 @@ class TestLintHooks:
         i_fmt = runs.index("ruff format --check --diff .")
         i_val = runs.index(LINT_STEPS[0])
         i_pfx = runs.index(LINT_STEPS[1])
-        i_test = runs.index('python3 -m pytest tests/ -v -k "not integration"')
+        i_test = runs.index('python3 -m pytest tests/ -v -rs -k "not integration"')
         assert i_fmt < i_val < i_pfx < i_test
         # jsonschema (validate_types' only non-stdlib dependency) is installed
         # by the requirements-dev step that precedes ruff.

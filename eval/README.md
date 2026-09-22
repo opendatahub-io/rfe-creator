@@ -38,7 +38,7 @@ Each run produces:
 
 ## How it works
 
-The evaluation runs the `rfe.speedrun` skill headlessly against 25 test cases: 20 derived from real RHAIRFE Jira issues plus 5 deliberately weak drafts (see [Weak-draft cases](#weak-draft-cases)). Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
+The evaluation runs the `rfe.speedrun` skill headlessly against 26 test cases: 20 derived from real RHAIRFE Jira issues plus 6 deliberately weak drafts (see [Weak-draft cases](#weak-draft-cases)). Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
 
 ### How it was generated
 
@@ -57,7 +57,7 @@ The evaluation runs the `rfe.speedrun` skill headlessly against 25 test cases: 2
 
 ### Dataset
 
-`eval/dataset/cases/` contains 25 test cases, each with:
+`eval/dataset/cases/` contains 26 test cases, each with:
 
 | File | Purpose |
 |------|---------|
@@ -68,7 +68,7 @@ Input files contain only the fields the skill needs in batch Mode A — no Jira 
 
 #### Weak-draft cases
 
-Cases `case-021` through `case-025` are deliberately weak drafts (`difficulty: hard`) that the pipeline is expected to auto-revise. Their `annotations.yaml` carries `tags: [weak-draft, revision-expected, <mode>]`, where `<mode>` names the flaw the draft carries. Only `revision-expected` has judge semantics: the `revision_coverage` check fails a case tagged with it unless its RFE shows revision evidence. Any one of eight signals counts:
+Cases `case-021` through `case-026` are deliberately weak drafts (`difficulty: hard`) that the pipeline is expected to auto-revise. Their `annotations.yaml` carries `tags: [weak-draft, revision-expected, <mode>]`, where `<mode>` names the flaw the draft carries. Only `revision-expected` has judge semantics: the `revision_coverage` check fails a case tagged with it unless its RFE shows revision evidence. Any one of eight signals counts:
 
 1. `auto_revised: true` in the review frontmatter (or the legacy `revised: true`)
 2. `before_score != score`
@@ -81,7 +81,7 @@ Cases `case-021` through `case-025` are deliberately weak drafts (`difficulty: h
 
 Without these cases every draft passed first review at 8-10, so the revise/reassess path was never exercised: `revision_quality` scored the decision not to revise 4-5 and `revision_flag_consistency` passed vacuously.
 
-The `revision_coverage` threshold (`min_pass_rate: 0.92`) tolerates 2 failing cases out of 25: 3 of 5 weak drafts revised leaves 2 failing cases, 23/25 = 0.92 (pass); 2 of 5 leaves 3, 22/25 = 0.88 (fail). That 2-failure slack is shared by every way a case can fail this check:
+The `revision_coverage` threshold (`min_pass_rate: 0.92`) tolerates 2 failing cases out of 26: 4 of 6 weak drafts revised leaves 2 failing cases, 24/26 = 0.923 (pass); 3 of 6 leaves 3, 23/26 = 0.885 (fail). That 2-failure slack is shared by every way a case can fail this check:
 
 - a weak draft the create step repairs on its own (passes first review, no revision);
 - a weak draft the first review **rejects or splits** instead of revising. `scripts/filter_for_revision.py` never routes `reject`, `autorevise_reject` or `split` recommendations into the revise path, so a correct reject or split leaves no revision evidence; split children are not routed to any case directory in batch mode and count only towards run-level coverage via the report;
@@ -90,6 +90,8 @@ The `revision_coverage` threshold (`min_pass_rate: 0.92`) tolerates 2 failing ca
 The 0.92 value was calibrated on two live 5-case runs on 2026-09-07 (claude-opus-4-6, `--dry-run`). The first authoring of the five drafts, which relied on rewording weaknesses (a mandated design, a chore framing, a vague ask, an internal requester), was repaired by the create step in 4 of 5 cases (first-pass scores 8-9, only the missing-WHY draft was revised). The second authoring added an in-character evidence anchor to each draft and 5 of 5 were revised (first-pass 5-8, every one failing on `why: 0`, three also on `not_a_task`, `what` or `right_sized`), all five passed re-review, and `revision_coverage` scored 1.0. Re-tune only if a future run shows a different distribution.
 
 **Authoring a weak draft that survives the create step.** The creator and the reviser share a model and a rubric, so any weakness that can be fixed by rewording is fixed at create time and the draft passes first review. The only weakness that survives is one that needs information the input does not contain, stated plainly in the requester's voice: no customer has asked, no support case exists, no internal team should be listed as an affected customer, and the customer and business sections should stay honest rather than padded with generic segments. The assessor awards `why: 1` for any generic or internal segment, so the anchor must close every such route; it awards `why: 0` only when the draft names no beneficiaries and no justification at all.
+
+**Cycle-2 coverage.** `case-026` (RFE) and initiative `case-021` were authored to pair an unfixable WHY with one fixable zero so that the re-review would still fail and reassess cycle 2 would launch a second revise agent. The 2026-09-21 calibration runs showed otherwise: `case-026` failed first review at 5/10 (WHY 0, `not_a_task` 0) and one revision took it to 9/10, the reviser padding WHY to 1 with a generic segment despite the draft's do-not-pad anchor; initiative `case-021` had its dictated stack opened by the create step, failed on WHY alone at 8/10 and passed at 9/10 after one revision. Both stay as ordinary `revision-expected` drafts, which is what `revision_coverage` needs; an "unfixable WHY" cannot be engineered reliably. Second-revision coverage comes from drafts whose first revision does not pass, and the same runs supplied it: RFE-024 reached cycle 2 in both rfe runs (Revise, Reassess, Re-review, Revise, Reassess, Re-review) and RFE-021 in one; INIT-012 reached cycle 2, stayed at 5/10 and was flagged at COLLECT (`COLLECT reconcile: restored=1 flagged=1`) — the first live proof of #194's second revision (AISDLC-45) and of the #192 flag path (AISDLC-33). The second launch is read from the run's transcript and the Revision History, not from a judge: `generate_run_report.py` sets `revision_cycles` to 1 only when `auto_revised` is true and the score moved, never higher, and a history entry count is not a stable signal (agents write one bullet per criterion, not per cycle).
 
 ### Judges
 
@@ -131,7 +133,7 @@ Automated evaluation of the `initiative-speedrun` pipeline using the [agent-eval
 
 ## How it works
 
-The evaluation runs the `initiative-speedrun` skill headlessly against 20 test cases: 16 derived from real RHOAIENG Jira initiatives and four deliberately weak drafts. Each test case provides an objective (prompt + clarifying context), and the pipeline creates, reviews (with assessment, feasibility, and strategic alignment), auto-fixes, and (dry-run) submits Initiatives.
+The evaluation runs the `initiative-speedrun` skill headlessly against 21 test cases: 16 derived from real RHOAIENG Jira initiatives (two of them, `case-007` and `case-013`, retargeted into weak drafts) and five deliberately weak drafts. Each test case provides an objective (prompt + clarifying context), and the pipeline creates, reviews (with assessment, feasibility, and strategic alignment), auto-fixes, and (dry-run) submits Initiatives.
 
 ### Configuration
 
@@ -143,7 +145,7 @@ The evaluation runs the `initiative-speedrun` skill headlessly against 20 test c
 
 ### Dataset
 
-`eval/initiative-dataset/cases/` contains 20 test cases, each with:
+`eval/initiative-dataset/cases/` contains 21 test cases, each with:
 
 | File | Purpose |
 |------|---------|
@@ -154,7 +156,7 @@ One case (`case-012`, tagged `sparse-input`) provides minimal context to test sp
 
 #### Weak-draft cases
 
-Cases `case-007`, `case-013` and `case-017` through `case-020` are deliberately weak drafts (`difficulty: hard`) that the pipeline is expected to auto-revise, the initiative counterpart of the RFE cases `case-021` to `case-025` above. Their `annotations.yaml` carries `tags: [weak-draft, revision-expected, <mode>...]`, where `<mode>` names the flaw: `why-missing` (the requester insists the only problem statement is "the platform does not have it" — the rubric's circular-justification 0), `prescriptive-how` (technology choices dictated as closed decisions, with an instruction not to soften them — the rubric's mandate 0) and `scope-missing` (no boundaries at all). Each flaw targets a criterion the rubric scores 0, protected by an in-character "do not add / do not soften" anchor, because the first calibration run (2026-09-17) showed that anything softer is repaired at create time: an honest "we have no data but suspect" earned WHY 1, an enumerated list of open scope questions earned Scope 1, and the drafts passed at 9; only the case with neither evidence nor boundaries failed first review. Target at most two zeros per case: the review contract routes three or more zeros to `reject`, which never enters the revise path (case-019 frames the work as implementation steps to keep WHAT thin, but its targeted zero is Open to HOW alone; case-020 was re-anchored on a firm deliverable after a run scored it WHAT, WHY and Scope at 0 and rejected it). `case-007` and `case-013` were recalibrated the same way (#155, prescriptive off-allowlist stack; negated WHY); the 2026-09-18 calibration run (#193) confirmed all six fail first review on the targeted criterion and get revised, so all six carry `revision-expected` (at 0.92 over 20 cases one may still go unrevised). The second calibration run confirmed all four: first reviews of 8, 8, 7 and 6 on the targeted criterion, all four revised, coverage 1.0. `expected_pass: false` and `expected_recommendation: revise` describe the first review. The revise agent then either adds evidence or, when there is none to add, flags the section with `[NEEDS: ...]` and sets `needs_attention`; the judge looks at neither marker, only at the revision itself — the same eight evidence signals as for RFEs (`auto_revised: true`, a moved score, a body that differs from the original, a companion artifact, a run-report revision, a non-empty Revision History). A flagged section is a body change, so an honest "no evidence" revision still counts.
+Cases `case-007`, `case-013` and `case-017` through `case-021` are deliberately weak drafts (`difficulty: hard`) that the pipeline is expected to auto-revise, the initiative counterpart of the RFE cases `case-021` to `case-026` above. Their `annotations.yaml` carries `tags: [weak-draft, revision-expected, <mode>...]`, where `<mode>` names the flaw: `why-missing` (the requester insists the only problem statement is "the platform does not have it" — the rubric's circular-justification 0), `prescriptive-how` (technology choices dictated as closed decisions, with an instruction not to soften them — the rubric's mandate 0) and `scope-missing` (no boundaries at all). Each flaw targets a criterion the rubric scores 0, protected by an in-character "do not add / do not soften" anchor, because the first calibration run (2026-09-17) showed that anything softer is repaired at create time: an honest "we have no data but suspect" earned WHY 1, an enumerated list of open scope questions earned Scope 1, and the drafts passed at 9; only the case with neither evidence nor boundaries failed first review. Target at most two zeros per case: the review contract routes three or more zeros to `reject`, which never enters the revise path (case-019 frames the work as implementation steps to keep WHAT thin, but its targeted zero is Open to HOW alone; case-020 was re-anchored on a firm deliverable after a run scored it WHAT, WHY and Scope at 0 and rejected it). `case-007` and `case-013` were recalibrated the same way (#155, prescriptive off-allowlist stack; negated WHY); the 2026-09-18 calibration run (#193) confirmed all six fail first review on the targeted criterion and get revised, so all six carry `revision-expected`, as does `case-021` (calibrated 2026-09-21: first review 8/10 on WHY 0, one revision to a pass; at 0.92 over 21 cases one of the seven may still go unrevised — the threshold note in `types/initiative/eval/fragment.yaml`). The second calibration run confirmed all four: first reviews of 8, 8, 7 and 6 on the targeted criterion, all four revised, coverage 1.0. `expected_pass: false` and `expected_recommendation: revise` describe the first review. The revise agent then either adds evidence or, when there is none to add, flags the section with `[NEEDS: ...]` and sets `needs_attention`; the judge looks at neither marker, only at the revision itself — the same eight evidence signals as for RFEs (`auto_revised: true`, a moved score, a body that differs from the original, a companion artifact, a run-report revision, a non-empty Revision History). A flagged section is a body change, so an honest "no evidence" revision still counts.
 
 Without these cases the initiative gate rested on the run-level rule alone, and passed only because `case-012` happened to be revised while the pipeline dropped the requester context; once #188 forwarded that context, a full run revised nothing and `revision_coverage` scored 0.0.
 
@@ -167,7 +169,7 @@ Without these cases the initiative gate rested on the run-level rule alone, and 
 | `run_report_exists` | check | Initiative run report YAML with required fields |
 | `recommendation_consistency` | check | pass/fail aligns with recommendation, infeasible != submit, weak alignment sets needs_attention |
 | `revision_flag_consistency` | check | `auto_revised` agrees with revision evidence (state file, history, moved score, removed-context) |
-| `revision_coverage` | check | Revise path exercised (20 cases, 4 tagged weak drafts; 0.92 allows one failing case): untagged-but-revised cases count; every case fails when a multi-item run revised nothing (single-item runs: tag alone decides) |
+| `revision_coverage` | check | Revise path exercised (21 cases, 7 tagged weak drafts; 0.92 allows one failing case): untagged-but-revised cases count; every case fails when a multi-item run revised nothing (single-item runs: tag alone decides) |
 | `pipeline_flow` | check | All three phases (create, auto-fix, submit) detected in stdout, no fatal tracebacks, no Phase 1 deletions |
 | `architecture_context_used` | check | Every feasibility file's writer transcript read `.context/architecture-context` (or the review declares the context not relevant); the prose fallback applies only to runs without transcript capture |
 | `initiative_quality` | LLM | Initiative quality (WHAT/WHY/Scope/HOW/Right-sized) + calibration accuracy |

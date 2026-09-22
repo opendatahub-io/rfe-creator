@@ -540,7 +540,145 @@ class TestPerTypeGate:
         assert len(hits) == 1
 
     def test_full_length_sha_is_accepted(self, types_copy):
+        # Both shipped types share the assess-rfe checkout, so a new pin moves both (rule 6).
+        for name in ("rfe", "initiative"):
+            _mutate(
+                types_copy, name, lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40)
+            )
+        assert _validate(types_copy).ok
+
+    def test_shipped_pins_are_one_full_sha(self):
+        """bootstrap-assess-rfe.sh checks out pipeline.rubric.ref and verifies the checkout,
+        so the shipped pins are the immutable full form (design §7.3) and, sharing one
+        repo, identical."""
+        refs = {
+            name: _read_yaml(TYPES_ROOT / name / "type.yaml")["pipeline"]["rubric"]["ref"]
+            for name in ("rfe", "initiative")
+        }
+        assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs.values()), refs
+        assert len(set(refs.values())) == 1, refs
+
+    def test_shared_repo_with_two_refs_is_a_cross_finding(self, types_copy):
+        """Rule 6: one checkout per external rubric repo — two pins cannot both be honoured."""
         _mutate(types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40))
+        report = _validate(types_copy)
+        hits = _assert_finding(
+            report, "pipeline.rubric.ref differs across the types sharing rubric repo", "*"
+        )
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+        assert hits[0].types == frozenset({"rfe", "initiative"})
+        assert "bootstrap-assess-rfe.sh keeps one checkout per repo" in hits[0].message
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "opendatahub-io/assess-rfe",
+            "https://github.com/OpenDataHub-io/Assess-RFE",
+            "https://github.com/opendatahub-io/assess-rfe.git",
+            "opendatahub-io/assess-rfe.git",
+        ],
+    )
+    def test_shared_repo_rule_canonicalizes_the_repo_spelling(self, types_copy, spelling):
+        """The schema accepts a slug or the https URL, with or without .git: the same
+        repository in two spellings is still one checkout, so two refs are a finding and
+        one ref is clean."""
+
+        def respell(d):
+            d["pipeline"]["rubric"]["repo"] = spelling
+
+        _mutate(types_copy, "rfe", respell)
+        assert _validate(types_copy).ok, _validate(types_copy).lines()
+        _mutate(types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "a" * 40))
+        report = _validate(types_copy)
+        hits = _assert_finding(report, "sharing rubric repo 'opendatahub-io/assess-rfe'", "*")
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+
+    def test_two_external_rubric_repos_are_a_cross_finding(self, types_copy):
+        """Rule 6a (CodeRabbit on #198, CWE-345): the bootstrap clones the descriptor's repo
+        into the one checkout, so a second external repository would load the wrong rubric
+        at the shared path; the lint refuses it until the bootstrap keeps one per repo."""
+        _mutate(
+            types_copy,
+            "rfe",
+            lambda d: d["pipeline"]["rubric"].__setitem__(
+                "repo", "https://github.com/other-org/other-rubrics"
+            ),
+        )
+        report = _validate(types_copy)
+        hits = _assert_finding(report, "external rubric repositories differ across types", "*")
+        assert len(hits) == 1 and len(report.findings) == 1, report.lines()
+        assert hits[0].types == frozenset({"rfe", "initiative"})
+        assert "opendatahub-io/assess-rfe (initiative)" in hits[0].message
+        assert "other-org/other-rubrics (rfe)" in hits[0].message
+        assert "needs bootstrap support" in hits[0].message
+
+    def test_userinfo_in_a_repo_url_reaches_no_finding(self, types_copy):
+        """No Sensitive Data In Logs: a credential in the URL is neither part of the rule-6 key
+        nor echoed by any finding — including the schema's, which quotes the instance (the
+        schema rejects such a URL; the canonicalizer and the redaction hold regardless)."""
+        token = "s3cr3t-t0ken"
+        _mutate(
+            types_copy,
+            "rfe",
+            lambda d: d["pipeline"]["rubric"].__setitem__(
+                "repo", f"https://alice:{token}@github.com/opendatahub-io/assess-rfe.git"
+            ),
+        )
+        report = _validate(types_copy)
+        assert not report.ok
+        for finding in report.findings:
+            assert token not in finding.message, finding.message
+            assert "alice" not in finding.message, finding.message
+        # Same repository as the initiative descriptor once canonicalized: no rule-6 finding.
+        assert not _find(report, "rubric repositories differ")
+        assert not _find(report, "differs across the types sharing")
+
+    def test_redact_userinfo(self):
+        """The schema's oneOf message does not quote the instance today; a message that did
+        (a plain pattern error) is redacted before it becomes a finding."""
+        redact = validate_types._redact_userinfo
+        assert redact("'https://alice:tok@host/x.git' does not match") == (
+            "'https://***@host/x.git' does not match"
+        )
+        assert redact("plain text, no url") == "plain text, no url"
+
+    @pytest.mark.parametrize(
+        "repo, key",
+        [
+            ("opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),
+            (
+                "https://alice:token@github.com/opendatahub-io/assess-rfe.git",
+                "opendatahub-io/assess-rfe",
+            ),
+            (
+                "https://alice:token@gitlab.example.com/Group/Rubrics.git",
+                "https://gitlab.example.com/group/rubrics",
+            ),
+            ("https://github.com/OpenDataHub-IO/Assess-RFE.git/", "opendatahub-io/assess-rfe"),
+            ("git@github.com:opendatahub-io/assess-rfe.git", "opendatahub-io/assess-rfe"),
+            ("ssh://git@github.com/opendatahub-io/assess-rfe", "opendatahub-io/assess-rfe"),
+            (
+                "https://gitlab.example.com/Group/Rubrics.git/",
+                "https://gitlab.example.com/group/rubrics",
+            ),
+            ("self", None),
+            (None, None),
+        ],
+    )
+    def test_canonical_rubric_repo(self, repo, key):
+        assert validate_types.canonical_rubric_repo(repo) == key
+
+    def test_shared_repo_rule_skips_malformed_refs_and_self_rubrics(self, types_copy):
+        """A malformed ref is the per-type finding only (never doubled by rule 6), and a D3
+        embedded rubric has no checkout to share."""
+        # A trailing newline passes the schema's `$` but fails the full-matching lint.
+        _mutate(
+            types_copy, "rfe", lambda d: d["pipeline"]["rubric"].__setitem__("ref", "e27d7ac\n")
+        )
+        report = _validate(types_copy)
+        assert len(report.findings) == 1, report.lines()
+        assert not _find(report, "differs across the types sharing")
+        _mutate(types_copy, "rfe", self._self_rubric())
         assert _validate(types_copy).ok
 
     def test_rubric_ref_regex_is_q9(self):

@@ -563,7 +563,11 @@ first two changed no verdict and the third removed exactly two false positives.
    `id_field`, poll/state prefixes (empty allowed for `rfe` only), snapshot prefixes non-empty and
    pairwise not prefix-of-each-other, `report_prefix` non-empty except `rfe`, no `local_prefix`
    stem equal to an effective project key, `rubric.ref` a 7–40-char hex SHA (or, for the D3
-   embedded rubric `rubric.repo: self`, `rubric.rubric_version` a 7–64-char hex content hash).
+   embedded rubric `rubric.repo: self`, `rubric.rubric_version` a 7–64-char hex content hash),
+   one external `rubric.repo` across all descriptors and one `rubric.ref` for it, repositories
+   compared as the canonical `owner/repo` whatever the spelling (the bootstrap keeps one checkout in
+   `.context/assess-rfe`, cloned from the descriptor's `rubric.repo` at its `rubric.ref`; a second
+   external rubric repository needs bootstrap support first, and the lint refuses one until then).
 2. **Gate 2 — `--with-deps`** (after bootstrap): `rubric.path` exists under `--assess-dir` (under
    the repo root when `rubric.repo` is `self`) and the agent file `agents/<scorer_agent>.md` is
    present in the assess checkout.
@@ -588,8 +592,9 @@ Alongside: `python3 scripts/lint_prefix_predicates.py` rejects new literal key/s
 
 `main` wins over the prose; each is commented inline: `resplit.below: 2` for both
 (`check_right_sized.py` reads it since PR-2a, so the initiative `1` of §8.2 is a deliberate later
-behaviour change, Q3), `rubric.ref` values are documentary until the
-bootstrap pins refs (PR-2), `rubric.repo` carries the full URL the bootstrap holds, rfe
+behaviour change, Q3), `rubric.ref` is the full SHA `bootstrap-assess-rfe.sh` checks out and verifies
+(one shared assess-rfe checkout, so both descriptors pin the same commit — validate_types cross rule 6;
+`ASSESS_RFE_REF` overrides for an ad-hoc run), `rubric.repo` carries the full URL the bootstrap holds, rfe
 `snapshot.prefix` is `issue-snapshot-` (submit's `''` is a grandfathered sentinel projection),
 `query_default` has no consumer, `auto_created`/`auto_revised`/`split_result`/`split_original` are
 emitted labels (first-class keys), `split_child_marker` lower-cases `{parent}`/`{child_id}`,

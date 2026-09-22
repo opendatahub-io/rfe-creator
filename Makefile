@@ -51,11 +51,11 @@ lint: ## Run skillsaw, ruff, shellcheck, work item type lints, and pytest
 .PHONY: test
 test: ## Run pytest (excludes integration tests)
 	@echo "Running tests..."
-	@python3 -m pytest tests/ -v -k "not integration"
+	@python3 -m pytest tests/ -v -rs -k "not integration"
 
 .PHONY: test-integration
 test-integration: ## Run the jira-emulator integration tests (pip install -r requirements-dev.txt)
 	@echo "Running integration tests..."
-	@python3 -m pytest tests/ -v -k integration
+	@python3 -m pytest tests/ -v -rs -k integration
 
 .DEFAULT_GOAL := help

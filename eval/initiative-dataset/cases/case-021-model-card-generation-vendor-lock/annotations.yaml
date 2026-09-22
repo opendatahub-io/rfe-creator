@@ -1,0 +1,23 @@
+difficulty: hard
+expected_alignment: not_assessed
+expected_feasibility: null
+expected_pass: false
+expected_recommendation: revise
+expected_scores:
+  what: null
+  why: 0
+  scope: null
+  open_to_how: null
+  right_sized: null
+expected_total: null
+known_issues:
+- 'Circular justification ("the platform does not generate model cards") with no evidence and a
+  do-not-pad anchor; should score why 0 on first review. The dictated vendor stack (Cardsmith
+  Cloud) is repaired by the create step: the 2026-09-21 calibration run drafted it open (first
+  review 8/10, WHY 0 only) and one revision took it to 9/10 and a pass.'
+score_tolerance: 1
+tags:
+- weak-draft
+- revision-expected
+- why-missing
+- prescriptive-how

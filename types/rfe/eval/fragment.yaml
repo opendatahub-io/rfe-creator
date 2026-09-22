@@ -64,9 +64,16 @@ revision:
     Or was it simply deleted without reframing the underlying need?
 threshold_notes:
   revision_coverage: |
-    with 25 cases of which 5 are tagged revision-expected,
-    3 of 5 revised leaves 2 failures -> 23/25 = 0.92 (pass); 2 of 5 revised
-    leaves 3 failures -> 22/25 = 0.88 (fail). The 2-failure slack is shared:
+    with 26 cases of which 6 are tagged revision-expected (case-021 to
+    case-026), 4 of 6 revised leaves 2 failures -> 24/26 = 0.923 (pass); 3 of 6
+    revised leaves 3 failures -> 23/26 = 0.885 (fail). case-026 (a maintenance
+    checklist with no business evidence) calibrated on 2026-09-21 as a
+    one-revision pass: first review 5/10 (WHY 0, not_a_task 0), revised once to
+    9/10 — the reviser pads WHY to 1 with a generic segment despite the draft's
+    do-not-pad anchor, so an "unfixable WHY" cannot be engineered reliably.
+    Second-revision coverage (AISDLC-45) comes instead from drafts whose first
+    revision does not pass: RFE-024 reached cycle 2 in both 2026-09-21 rfe runs
+    and RFE-021 in one. The 2-failure slack is shared:
     a tagged draft the create step repairs on its own, a tagged draft the
     first review rejects or splits instead of revising (correct pipeline
     behaviour, but it never enters the revise path and leaves no evidence),

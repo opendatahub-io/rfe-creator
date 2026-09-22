@@ -90,7 +90,7 @@ pipeline:
       blocking: true                                    # Q17: ASSESS wave waits on it (wait-for-wave --also-phase feasibility, pipeline_state.py:1193-1195); no script reads a blocking flag — unpinned
   rubric:
     repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 ASSESS_RFE_REPO default (verbatim URL)
-    ref: "e27d7ac"                                      # Q9: documentary at PR-1 — bootstrap-assess-rfe.sh:54-64 pins NO ref (git pull --ff-only; ASSESS_RFE_REF optional); e27d7ac is the vendored .context/assess-rfe checkout (== assess-rfe main); ref-pinning bootstrap is PR-2. Quoted: a digits-only ref would parse as a number
+    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # the commit bootstrap-assess-rfe.sh checks out (and verifies) when ASSESS_RFE_REF is unset — assess-rfe PR #10 merge == assess-rfe main on 2026-09-21; the env var overrides for an ad-hoc run. One checkout per repo, so every descriptor sharing this repo pins the same ref (validate_types cross rule 6). Full 40-hex SHA (design §7.3: immutable). Quoted: a digits-only ref would parse as a number
     path: skills/assess-rfe/scripts/agent_prompt.md     # bootstrap-assess-rfe.sh:48 RUBRIC_FILE; pipeline_state.py:101 == ".context/assess-rfe/" + path (gate 2, Q24)
     export: artifacts/rfe-rubric.md                     # bootstrap-assess-rfe.sh:103 export_rubric.py; AGENTS.md:11; rfe.create/SKILL.md:23
   resplit: { score_field: right_sized, below: 2 }       # check_right_sized.py reads score_field/below (registry-derived since PR-2a; was the type-blind `right_sized < 2`); rfe.split/SKILL.md:115 (Q3: stays 2 for rfe)
