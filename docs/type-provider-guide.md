@@ -55,7 +55,10 @@ author writes is the judgement: `types/<name>/template.md`, `prompts/create-guid
 shared review/revise skeletons read), `prompts/split-rules.md` (Tier 3 — the whole split prompt, with
 the launcher tokens for its mechanical lines) and `dimensions/<dimension>.md` (whole files, launched
 directly). `pipeline.prompts.*` and `pipeline.dimensions[].prompt` point at them; gate 1 checks they
-exist, that `split-rules.md` carries its tokens and that no typed file names a skill directory.
+exist, that `split-rules.md` carries its tokens, that `template.md` is named when the type creates or
+splits, and that no typed file names a skill directory. The headless dispatcher launches the
+`create`, `review`, `split` and `auto-fix` stages through the registry, so `pipeline.stages` must
+list them: `pipeline_state.py init` refuses a type that omits one before any state is written.
 Author the eval prose in `types/<name>/eval/fragment.yaml` (schema
 `types/_schema/eval-fragment.schema.json`) and `types/<name>/eval/pairwise-judge.md`, name the
 quality threshold `<name>_quality`, and let `python3 scripts/generate_eval_config.py --type <name>`

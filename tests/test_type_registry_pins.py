@@ -1671,20 +1671,18 @@ class TestPipelineTypes:
             # The Tier-2 skeleton is the prompt; review_rules reaches the agent as RULES_PATH.
             assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/review-agent.md"
             assert dict(launch(ctx.t))["RULES_PATH"] == prompts["review_rules"]
+            # One <NAME>_PATH per declared dimension and no other: pipeline.dimensions[] is the
+            # only source (a type without a feasibility dimension gets no FEASIBILITY_PATH).
             pin(
-                "dirs.reviews",
-                f"pipeline_state {phase}.vars.FEASIBILITY_PATH",
-                f"{rv}/{{ID}}-feasibility.md",
-                cfg[phase]["vars"]["FEASIBILITY_PATH"],
+                "pipeline.dimensions[].name × dirs.reviews",
+                f"pipeline_state {phase}.vars.<NAME>_PATH",
+                {f"{d.upper()}_PATH": f"{rv}/{{ID}}-{d}.md" for d in ctx.dims},
+                {
+                    k: v
+                    for k, v in cfg[phase]["vars"].items()
+                    if k.endswith("_PATH") and k != "ASSESS_PATH"
+                },
             )
-            assert ("ALIGNMENT_PATH" in cfg[phase]["vars"]) is ("alignment" in ctx.dims)
-            if "alignment" in ctx.dims:
-                pin(
-                    "dirs.reviews",
-                    f"pipeline_state {phase}.vars.ALIGNMENT_PATH",
-                    f"{rv}/{{ID}}-alignment.md",
-                    cfg[phase]["vars"]["ALIGNMENT_PATH"],
-                )
             assert cfg[phase]["vars"]["ASSESS_PATH"] == f"{ASSESS_STAGING}/{{ID}}.result.md"
         for phase in ("REVISE", "REASSESS_REVISE", "SPLIT_REVISE"):
             assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/revise-agent.md"

@@ -121,7 +121,10 @@ itself is fine — `resolve()` follows the link).
    launcher tokens gate 1 requires (`{TEMPLATE_PATH}`, `{NEXT_ID_FLAGS}`, `{TASKS_DIR}`, ...); no typed
    file may name a skill directory. `python3 scripts/type_registry.py launch-vars <name> review` prints
    the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
-   dispatcher read every typed literal from it.
+   dispatcher read every typed literal from it. `pipeline.stages` must list `create`, `review`,
+   `split` and `auto-fix` — the stages the dispatcher's phase table launches through the registry;
+   `python3 scripts/pipeline_state.py init` refuses a type that omits one before any state is
+   written, and gate 1 requires `pipeline.prompts.template` for a type that creates or splits.
 3. `python3 scripts/validate_types.py` (gate 1); after `bash scripts/bootstrap-assess-rfe.sh`,
    `python3 scripts/validate_types.py --with-deps` (gate 2). Inspect with
    `python3 scripts/type_registry.py show <name>` / `binding <name>`.

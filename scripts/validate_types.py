@@ -374,10 +374,22 @@ def typed_prompt_messages(desc, repo_root):
     """The required-line lint over the typed prompt files (PR-5b). A Tier-3 file carries the
     mechanical tokens of TIER3_REQUIRED_TOKENS (no shared skeleton protects it); no typed file
     under types/<t>/ names a skill directory — the skill tree is generic from PR-5, and a typed
-    file that pointed back into it would pin the collapse's own moving parts."""
+    file that pointed back into it would pin the collapse's own moving parts. A type that
+    creates or splits items must name pipeline.prompts.template: launch-vars renders it as
+    TEMPLATE_PATH into every create and split launch, and the schema leaves the key optional
+    (design Q1), so the stage list is what makes it required."""
     repo_root = Path(repo_root)
     messages = []
     prompts = _opt(desc, "pipeline.prompts") or {}
+    stages = _opt(desc, "pipeline.stages") or list(type_registry.DEFAULT_STAGES)
+    if isinstance(stages, list) and isinstance(prompts, dict):
+        needs_template = {"create", "split"} & {s for s in stages if isinstance(s, str)}
+        if needs_template and not prompts.get("template"):
+            messages.append(
+                "pipeline.prompts.template: required when pipeline.stages includes "
+                f"{' / '.join(sorted(needs_template))} (launch-vars would render TEMPLATE_PATH= "
+                "empty into every create and split launch)"
+            )
     dims = _opt(desc, "pipeline.dimensions") or []
     files = {}
     if isinstance(prompts, dict):

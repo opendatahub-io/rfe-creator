@@ -1741,6 +1741,76 @@ def test_gate1_ignores_malformed_dimension_names(tmp_path):
     assert not any("declared twice" in m for m in msgs)
 
 
+def _template_findings(desc, root):
+    return [
+        m
+        for m in validate_types.typed_prompt_messages(desc, root)
+        if m.startswith("pipeline.prompts.template:")
+    ]
+
+
+def test_gate1_requires_the_template_when_the_type_creates_or_splits(tmp_path):
+    """PR-5b: launch-vars renders pipeline.prompts.template as TEMPLATE_PATH into every create
+    and split launch. The schema leaves the key optional (design Q1); gate 1 requires it exactly
+    when pipeline.stages includes create or split (or is absent — the default stage list does)."""
+    (tmp_path / "rules.md").write_text("rules\n", encoding="utf-8")
+    (tmp_path / "template.md").write_text("# T\n", encoding="utf-8")
+    prompts = {"review_rules": "rules.md"}
+
+    def desc(stages=None, template=None):
+        data = {"pipeline.prompts": {**prompts, **({"template": template} if template else {})}}
+        if stages is not None:
+            data["pipeline.stages"] = stages
+        return _FakeDesc("x", data)
+
+    creating = _template_findings(desc(["create", "review"]), tmp_path)
+    assert creating == [
+        "pipeline.prompts.template: required when pipeline.stages includes create (launch-vars "
+        "would render TEMPLATE_PATH= empty into every create and split launch)"
+    ]
+    assert "includes split" in _template_findings(desc(["review", "split"]), tmp_path)[0]
+    assert "includes create / split" in _template_findings(desc(None), tmp_path)[0]
+    assert _template_findings(desc(["review", "submit"]), tmp_path) == []
+    assert _template_findings(desc(["create", "split"], "template.md"), tmp_path) == []
+
+
+def test_gate1_tier3_tokens_and_no_skill_tree_reference(tmp_path):
+    """The Tier-3 split prompt carries every launcher token of TIER3_REQUIRED_TOKENS; no typed
+    file under types/ names the generic skill tree."""
+    typed = tmp_path / "types" / "x" / "prompts"
+    typed.mkdir(parents=True)
+    (typed / "split-rules.md").write_text(
+        "Split with {TEMPLATE_PATH}, {NEXT_ID_FLAGS} and {TASKS_DIR}.\n", encoding="utf-8"
+    )
+    (typed / "review-rules.md").write_text(
+        "Read .claude/skills/rfe-review/SKILL.md first.\n", encoding="utf-8"
+    )
+    (typed / "template.md").write_text("# T\n", encoding="utf-8")
+    desc = _FakeDesc(
+        "x",
+        {
+            "pipeline.stages": ["split"],
+            "pipeline.prompts": {
+                "split_rules": "types/x/prompts/split-rules.md",
+                "review_rules": "types/x/prompts/review-rules.md",
+                "template": "types/x/prompts/template.md",
+            },
+        },
+    )
+    msgs = validate_types.typed_prompt_messages(desc, tmp_path)
+    lacking = {re.search(r"\{[A-Z_]+\}", m).group(0) for m in msgs if "lacks the launcher" in m}
+    assert lacking == set(validate_types.TIER3_REQUIRED_TOKENS["split_rules"]) - {
+        "{TEMPLATE_PATH}",
+        "{NEXT_ID_FLAGS}",
+        "{TASKS_DIR}",
+    }
+    assert [m for m in msgs if "names a skill directory" in m] == [
+        "pipeline.prompts.review_rules: types/x/prompts/review-rules.md names a skill directory "
+        "(.claude/skills/...); typed files must not point back into the generic skill tree"
+    ]
+    assert _template_findings(desc, tmp_path) == []
+
+
 # ── eval fragment gate (design §4.5, PR-4) ────────────────────────────────────────
 
 

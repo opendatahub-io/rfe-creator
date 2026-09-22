@@ -3146,6 +3146,14 @@ class TestLaunchVars:
         assert rfe["RUN_REPORT"] == "artifacts/auto-fix-runs/<timestamp>.yaml"
         assert init["RUN_REPORT"] == "artifacts/auto-fix-runs/initiative-run-<timestamp>.yaml"
         assert rfe["RUBRIC_EXPORT"] == "artifacts/rfe-rubric.md" and init["RUBRIC_EXPORT"] == "none"
+        # The verdict-label families follow the declared dimensions, in descriptor order.
+        assert rfe["VERDICT_LABELS"] == (
+            "feasibility.feasible, feasibility.infeasible, feasibility.indeterminate"
+        )
+        assert init["VERDICT_LABELS"] == (
+            "feasibility.feasible, feasibility.infeasible, feasibility.indeterminate, "
+            "alignment.strong, alignment.partial, alignment.weak"
+        )
 
     def test_deterministic_and_stage_scoped(self):
         reg = _shipped()

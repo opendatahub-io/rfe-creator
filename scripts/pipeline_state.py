@@ -197,6 +197,16 @@ _PHASE_TABLE_FACTS = (
     "pipeline.rubric.path",
     "pipeline.prompts.split_rules",
 )
+# The stages the phase table launches through the registry: the auto-fix launch block on every
+# agent, the review/revise skeletons and the split prompt, and the Phase-1 create barrier. A
+# registered type whose pipeline.stages omits one is refused at `init`, before any state is
+# written — otherwise _launch_block raises an uncaught ResolveError at the first wave.
+ENGINE_STAGES = ("create", "review", "split", "auto-fix")
+
+
+def _missing_engine_stages(ptype):
+    stages = _TYPES.get(ptype).get("pipeline.stages", None) or type_registry.DEFAULT_STAGES
+    return [stage for stage in ENGINE_STAGES if stage not in stages]
 
 
 def _pipeline_type_row(desc):
@@ -233,11 +243,16 @@ def _has_phase_table_facts(desc):
     return all(desc.get(dotted, None) is not None for dotted in _PHASE_TABLE_FACTS)
 
 
-PIPELINE_TYPES = {
-    name: _pipeline_type_row(_TYPES.get(name))
-    for name in _TYPES.names()
-    if _has_phase_table_facts(_TYPES.get(name))
-}
+def _pipeline_types(registry):
+    """The phase table of every registered type that carries the phase-table facts (D12)."""
+    return {
+        name: _pipeline_type_row(registry.get(name))
+        for name in registry.names()
+        if _has_phase_table_facts(registry.get(name))
+    }
+
+
+PIPELINE_TYPES = _pipeline_types(_TYPES)
 
 
 def _launch_block(state):
@@ -351,12 +366,12 @@ def _build_phase_config(pipeline_type):
             "FIRST_PASS": first_pass,
             "ID": "{ID}",
             "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
-            "FEASIBILITY_PATH": f"{t['reviews_dir']}/{{ID}}-feasibility.md",
         }
+        # One <NAME>_PATH per declared dimension — pipeline.dimensions[] only, so a type
+        # without a feasibility dimension gets no FEASIBILITY_PATH (D12).
         for dim in t["dimensions"]:
-            if dim["name"] != "feasibility":
-                key = dim["name"].upper().replace("-", "_")
-                v[f"{key}_PATH"] = f"{t['reviews_dir']}/{{ID}}-{dim['name']}.md"
+            key = dim["name"].upper().replace("-", "_")
+            v[f"{key}_PATH"] = f"{t['reviews_dir']}/{{ID}}-{dim['name']}.md"
         return v
 
     def _assess_parallel():
@@ -1231,8 +1246,9 @@ def cmd_init(args):
     # Registered type names (rfe first) that this script has a phase table for: an unknown
     # --type fails with that list (design §5 rung 1). PIPELINE_TYPES is projected from the
     # registry (PR-5b), so a registered descriptor that carries the phase-table facts gets a
-    # table automatically (D12); one that lacks them (a partial drop-in) is refused HERE,
-    # before any state is written, rather than by _validate_state_values later.
+    # table automatically (D12); one that lacks them (a partial drop-in), or one whose
+    # pipeline.stages omits a stage the table launches, is refused HERE, before any state is
+    # written, rather than by _validate_state_values or _launch_block later.
     parser.add_argument(
         "--type", choices=[n for n in _TYPES.choices() if n in PIPELINE_TYPES], default="rfe"
     )
@@ -1240,6 +1256,15 @@ def cmd_init(args):
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--announce-complete", action="store_true")
     opts = parser.parse_args(args)
+    missing = _missing_engine_stages(opts.type)
+    if missing:
+        parser.exit(
+            2,
+            f"{parser.prog}: error: type {opts.type!r} declares pipeline.stages without "
+            f"{', '.join(missing)}; the dispatcher launches every one of "
+            f"{', '.join(ENGINE_STAGES)} — add the missing stage(s) to the descriptor's "
+            "pipeline.stages or drive the type another way\n",
+        )
 
     os.makedirs("tmp", exist_ok=True)
     # Clean stale artifacts from prior runs.

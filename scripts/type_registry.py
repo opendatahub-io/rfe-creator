@@ -1505,9 +1505,10 @@ def launch_vars(desc, stage):
 
     Every typed literal a generic ``rfe-*`` body or a prompt skeleton needs — ids, dirs,
     schemas, state and poll prefixes, the scorer agent, the composed rubric path, the typed
-    prompt files, the dimensions, the score-field stubs, the declarative review rules, the
-    re-split threshold, the report prefix — rendered from the descriptor, so no body hand-writes
-    a typed path (PR-5 plan D13). Deterministic: same descriptor, same lines, same order.
+    prompt files, the dimensions and their verdict-label families, the score-field stubs, the
+    declarative review rules, the re-split threshold, the report prefix — rendered from the
+    descriptor, so no body hand-writes a typed path (PR-5 plan D13). Deterministic: same
+    descriptor, same lines, same order.
     Values are single-line; runtime placeholders (``{ID}``, ``{KEY}``) are left for the agent.
     ``stage`` must be one of the type's ``pipeline.stages``.
     """
@@ -1631,6 +1632,19 @@ def launch_vars(desc, stage):
             ("RESPLIT_BELOW", str(resplit.get("below", ""))),
             ("LABEL_PREFIX", desc.get("conventions.label_prefix")),
             ("NEEDS_ATTENTION_LABEL", labels.get("needs_attention", "")),
+            (
+                # The verdict-label families of the declared dimensions (conventions.labels
+                # keyed by a dimension name): what the submit body documents and the scripts
+                # keep mutually exclusive per family.
+                "VERDICT_LABELS",
+                ", ".join(
+                    f"{d['name']}.{verdict}"
+                    for d in dims
+                    if isinstance(labels.get(d["name"]), dict)
+                    for verdict in labels[d["name"]]
+                )
+                or "none",
+            ),
             ("QUERY_DEFAULT", desc.get("conventions.query_default", "") or ""),
             ("CONTEXT_DIR", CONTEXT_DIR),
         ]
