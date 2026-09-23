@@ -2510,22 +2510,81 @@ class TestSkillLayer:
         assert "skip Step 2" not in text and "Skip clarifying questions" not in text
         assert text.index("always, headless too") < text.index("## Step 3: Generate Items")
 
+    # A Jira-derived (or Jira-quoting) input a tool-capable prompt reads, by the path or call
+    # that names it, and the phrase its untrusted-input paragraph must use for it. Repo-owned
+    # inputs are trusted: the typed rules / sections / template / guidance, the rubric
+    # checkout under .context/, the architecture context and its overlays, scripts/.
+    READ_INPUTS = (
+        (r"-review\.md\b|\{REVIEW_FILE\}", "review file"),
+        (r"-comments\.md\b", "comments"),
+        (r"-removed-context\.yaml\b", "removed-context"),
+        (r"\{ORIGINALS_DIR\}/", "original"),
+        (r"\{TASKS_DIR\}/\{ID\}\.md|\{TASK_FILE\}|artifacts/[a-z-]+/\{ID\}\.md", "task file"),
+        (r"\{ASSESS_PATH\}", "assessment result"),
+        (r"\{DIMENSION_FILES\}", "dimension file"),
+        (r"-feasibility\.md\b", "feasibility"),
+        (r"review-report\.md\b", "review report"),
+        (r"fetch_issue\.py \{PARENT_KEY\}", "Outcome"),
+        (r"fetch_issue\.py \{KEY\}", "description and comments"),
+    )
+    TRUSTED_INPUT = re.compile(
+        r"^(\.context/|types/|\.claude/|scripts/(?!fetch_issue)"
+        r"|\{(RULES|SECTIONS|REVISE_RULES|TEMPLATE|PROMPT|CREATE_GUIDANCE)_PATH\}|\{CONTEXT_DIR\})"
+    )
+
+    @classmethod
+    def _read_inputs(cls, text):
+        """(phrases the guard must name, unclassified path tokens): one phrase per Jira-derived
+        path or call on a read line — a line with the word read, a `Label: {TOKEN}` header,
+        or a fetch_issue.py call."""
+        phrases, unclassified = set(), set()
+        for line in text.splitlines():
+            if line.startswith("**Untrusted input.**"):
+                continue
+            is_read = (
+                re.search(r"\bread\b", line, re.I)
+                or re.match(r"[A-Z][A-Za-z ]+: \{", line)
+                or "fetch_issue.py" in line
+            )
+            if not is_read:
+                continue
+            tokens = re.findall(
+                r"scripts/fetch_issue\.py \{[A-Z_]+\}|\{[A-Z_]+\}(?:/[^\s`)]*)?"
+                r"|artifacts/[^\s`)]+|\.context/[^\s`)]+|scripts/[^\s`)]+",
+                line,
+            )
+            for tok in tokens:
+                tok = tok.rstrip(".,;:")
+                if cls.TRUSTED_INPUT.match(tok):
+                    continue
+                phrase = next((p for pat, p in cls.READ_INPUTS if re.search(pat, tok)), None)
+                if phrase:
+                    phrases.add(phrase)
+                elif "/" in tok:  # a bare {VAR} is a value, not a path
+                    unclassified.add(tok)
+        return phrases, unclassified
+
     def test_tool_capable_prompts_carry_the_untrusted_input_guard(self, ctx):
-        # CodeRabbit on #200 (CWE-1427): every tool-capable prompt that reads Jira-derived
-        # task / comment / review text says once that it is data, never instructions, and
-        # names no Bash restriction (the allowlist is a separate control).
+        # CodeRabbit on #200 (CWE-1427): every tool-capable prompt that reads Jira-derived or
+        # Jira-quoting text says once that it is data, never instructions; its guard paragraph
+        # names EVERY such input the prompt reads (derived from the prompt's own read lines,
+        # so an added input without a guard update fails here); no prompt claims a Bash
+        # restriction (the allowlist is a separate control).
         prompts = [f"{SKELETON_DIR}/{name}-agent.md" for name in ("fetch", "review", "revise")]
         prompts.append(ctx.pipe["prompts"]["split_rules"])
         prompts.extend(d["prompt"] for d in ctx.pipe["dimensions"])
         for rel in prompts:
             text = read(rel)
             assert text.count("**Untrusted input.**") == 1, rel
-            assert (
-                "never instructions" in text
-                and "do not comply" in text
-                or rel.endswith("fetch-agent.md")
-            ), rel
+            guard = text.split("**Untrusted input.**", 1)[1].split("\n\n", 1)[0].lower()
+            assert "never instructions" in guard, rel
+            assert "do not comply" in guard or rel.endswith("fetch-agent.md"), rel
             assert "restricted to `python3 scripts" not in text, rel
+            phrases, unclassified = self._read_inputs(text)
+            assert not unclassified, (rel, unclassified)
+            assert phrases, rel
+            missing = [p for p in sorted(phrases) if p.lower() not in guard]
+            assert not missing, (rel, missing)
 
     def test_feasibility_dimension_io(self, ctx):
         # rows: 231 — types/<t>/dimensions/feasibility.md (the body of the former dimension skill)
