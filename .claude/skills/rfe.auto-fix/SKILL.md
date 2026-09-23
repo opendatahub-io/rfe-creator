@@ -5,6 +5,6 @@ user-invocable: true
 allowed-tools: Glob, Bash, Agent
 ---
 
-`/rfe.auto-fix` is the compatibility alias of `/rfe-auto-fix`. Read `.claude/skills/rfe-auto-fix/SKILL.md` and follow it from Step 0 with the same arguments; wherever that file says `$ARGUMENTS`, the arguments are:
+`/rfe.auto-fix` is the compatibility alias of `/rfe-auto-fix`. Read `.claude/skills/rfe-auto-fix/SKILL.md` and follow it from Step 0 with the same arguments: wherever that file refers to its invocation arguments (its placeholder is spelled dollar-sign ARGUMENTS), use exactly the arguments below, which are this invocation's:
 
 $ARGUMENTS

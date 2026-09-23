@@ -103,7 +103,7 @@ pipeline:
     ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # same commit as rfe (one shared checkout; validate_types cross rule 6): the assess-rfe PR #10 merge that brought skills/assess-initiative onto main. bootstrap-assess-rfe.sh checks it out and verifies it unless ASSESS_RFE_REF overrides. Quoted: a digits-only ref would parse as a number
     path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
     export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
-  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split
+  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). the RESPLIT_FIELD/RESPLIT_BELOW launch vars of rfe-split/SKILL.md Step 3 (D6: the one re-split trigger is this threshold; the legacy initiative body re-split on recommendation=split)
 
 batch: { extra_fields: [parent_key] }                   # validate_batch_input.py:43 INITIATIVE_KNOWN_FIELDS - RFE_KNOWN_FIELDS
 snapshot:

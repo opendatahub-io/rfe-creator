@@ -2077,8 +2077,12 @@ class TestSkillLayer:
             assert f"name: rfe.{stage}\n" in shim, stage
             assert f"Read `{GENERIC_SKILL.format(stage=stage)}`" in shim, stage
             assert "follow it from Step 0 with the same arguments" in shim, stage
-            assert "$ARGUMENTS" in shim, stage
-            assert len(shim.splitlines()) <= 12, stage
+            # Claude Code substitutes every occurrence of the token in the invoked skill's
+            # text: the shim binds it exactly once (a second, quoted spelling would render as
+            # the arguments themselves and map nothing).
+            assert shim.count("$ARGUMENTS") == 1, stage
+            assert "dollar-sign ARGUMENTS" in shim, stage
+            assert len(shim.splitlines()) <= 10, stage
             frontmatter = lambda text: dict(  # noqa: E731
                 ln.split(": ", 1) for ln in text.split("---", 2)[1].strip().splitlines()
             )

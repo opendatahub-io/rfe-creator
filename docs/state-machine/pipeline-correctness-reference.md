@@ -21,7 +21,7 @@ bodies, and the per-type judgement the steps read lives under `types/<type>/`.
 | `Draft` | Newly created, not yet reviewed or submitted | `artifact_utils.py:50-54` |
 | `Ready` | Fetched from Jira, available for processing | `fetch_issue.py` |
 | `Submitted` | Successfully pushed to Jira (new or updated) | `submit.py`, `split_submit.py` |
-| `Archived` | Parent archived after split decomposition; excluded from regular submit | `split-agent.md` Step 3 |
+| `Archived` | Parent archived after split decomposition; excluded from regular submit | `types/<t>/prompts/split-rules.md` Step 3 (Tier-3, launched as `prompt_file`) |
 
 Note: `Draft` and `Ready` are functionally equivalent for submission -- `submit.py`
 does not gate on either; it filters by exclusion (not Archived, not Submitted)
@@ -214,7 +214,7 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 | `CR_PARSE` | Parse arguments (`--headless`, `--priority`, `--labels`) | `rfe-create/SKILL.md` Step 0 |
 | `CR_RUBRIC` | Bootstrap assess-rfe, load rubric. Graceful fallback: if bootstrap or rubric export fails, proceeds without rubric (built-in question flow). No abort. | Step 1 |
 | `CR_QUESTIONS` | Ask 2-5 clarifying questions (skipped if headless) | Step 2 |
-| `CR_GENERATE` | Generate RFE content using `rfe-template.md` | Step 3 |
+| `CR_GENERATE` | Generate RFE content using `types/rfe/template.md` (`TEMPLATE_PATH` in the launch block) | Step 3 |
 | `CR_WRITE` | Allocate IDs via `next_rfe_id.py`, write files, rebuild index; status=Draft. **1-to-many:** a single invocation can produce multiple RFE files if input describes multiple distinct business needs. | Step 4 |
 
 ### 1.15 Assess-RFE Integration States
@@ -364,11 +364,11 @@ These scripts exist but are not part of the normal pipeline flow:
 | # | From | To | Trigger | Guard | Action | Code Location |
 |---|---|---|---|---|---|---|
 | T1 | (none) | Draft | /rfe-create writes new RFE | Always for new RFEs | frontmatter.py set status=Draft | rfe-create/SKILL.md Step 4 |
-| T1a | (none) | Draft | Split agent creates child RFE | Parent action=split | frontmatter.py set status=Draft + parent_key + size | split-agent.md Step 3 |
+| T1a | (none) | Draft | Split agent creates child RFE | Parent action=split | frontmatter.py set status=Draft + parent_key + size | types/<t>/prompts/split-rules.md Step 3 |
 | T2 | (none) | Ready | fetch_issue.py fetches from Jira | Remote ID fetched successfully | frontmatter.py set status=Ready | scripts/fetch_issue.py |
 | T3 | Draft | Submitted | submit.py creates issue in Jira | rec != reject/autorevise_reject, no parent_key | create_issue() + rename_to_jira_key() sets status=Submitted | submit.py:549-586, artifact_utils.py:753-757 |
 | T4 | Ready | Submitted | submit.py updates existing issue | rec != reject/autorevise_reject, no parent_key, content changed or label-only path | update_issue() or add_labels() sets status=Submitted | submit.py:499-514, 530-535 |
-| T5 | Ready/Draft | Archived | Split agent archives parent | Split agent determines action=split | frontmatter.py set status=Archived | split-agent.md Step 3 |
+| T5 | Ready/Draft | Archived | Split agent archives parent | Split agent determines action=split | frontmatter.py set status=Archived | types/<t>/prompts/split-rules.md Step 3 |
 | T6 | Archived | Ready | cleanup_partial_split.py restores parent | split_failed error during retry; parent actually Archived | Deletes child task/companion/review files + split-status.yaml; sets parent status=Ready. Does NOT clean child feasibility files (orphaned). **Partial operation possible:** child deletion and split-status removal are unconditional; parent restore only runs if parent file exists AND status=Archived. Script always exits 0; caller cannot detect partial cleanup. | cleanup_partial_split.py:33-69 |
 | T7 | Draft | Submitted | split_submit.py creates child in Jira | Child of split parent, Phase 2 | create_issue() + rename_to_jira_key() | split_submit.py:232, artifact_utils.py:753 |
 | T8 | Ready | Ready | Re-fetch after content change | Snapshot diff detects changed hash | fetch_issue.py overwrites task file. DESTRUCTIVE: only {rfe_id, title, priority, status, original_labels} restored; optional fields (size, parent_key) destroyed. | scripts/fetch_issue.py |
@@ -476,7 +476,7 @@ PROCESSED→ABSENT transition — once an issue enters the snapshot, it stays.
 | H4 | Speedrun Phase 3 | Submit | `SUBMIT=` from `collect_recommendations.py` | Passing IDs passed to `/rfe-submit` |
 | H5 | Auto-Fix dispatch loop | Review agents | `launch_wave` directives for FETCH/ASSESS/REVIEW/REVISE | `pipeline_state.py next-action` + the `wait-for-wave` barrier — the auto-fix skill never invokes `/rfe-review` |
 | H6 | — | — | removed (PR-5a) | The review skill's headless return to auto-fix read `tmp/autofix-config.yaml`, which nothing ever wrote; the dispatcher owns the batch loop in `tmp/pipeline-state.yaml` |
-| H7 | Auto-Fix dispatch loop | Split agents | `SPLIT=` ids from `collect_recommendations.py` | `launch_wave` for the SPLIT phase (`split-agent.md` prompt) |
+| H7 | Auto-Fix dispatch loop | Split agents | `SPLIT=` ids from `collect_recommendations.py` | `launch_wave` for the SPLIT phase (`types/<t>/prompts/split-rules.md` as `prompt_file`) |
 | H8 | Split Step 2 | Review | Child IDs | `/rfe-review --headless --caller split` |
 | H9 | Review (finalize) | Split | `caller=split` | Prose return protocol: "rfe-review step completed." + read tmp/split-config.yaml |
 | H10 | — | — | removed (PR-5a) | The split skill's headless return to auto-fix read `tmp/autofix-config.yaml`; a headless split now announces completion and stops, as the initiative twin always did |
@@ -545,7 +545,7 @@ stateDiagram-v2
         CR_Rubric --> CR_Generate : --headless (skip Q&A)
         CR_Rubric --> CR_Questions : bootstrap failed\n(built-in question flow)
         CR_Questions --> CR_Generate : answers received
-        CR_Generate --> CR_Write : apply rfe-template.md
+        CR_Generate --> CR_Write : apply types/rfe/template.md\n(TEMPLATE_PATH)
         CR_Write --> CR_Done : artifacts/rfe-tasks/RFE-NNN.md\nstatus=Draft
     }
 
@@ -872,7 +872,7 @@ persists until human resolution or a completely fresh review pass.
 ### 5.2 filter_for_revision Includes Split-Recommended IDs
 
 Intentional. The revise agent cannot change scope for right-sizing issues
-(`revise-agent.md: "Right-sizing is a recommendation, never auto-applied"`), so
+(`types/rfe/prompts/revise-rules.md`: "Right-sizing is a recommendation, never auto-applied"), so
 split-recommended IDs get a revision pass that fixes other rubric failures. The
 recommendation stays `split` through to `collect_recommendations.py`.
 
