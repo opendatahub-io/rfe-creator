@@ -527,6 +527,96 @@ class TestLowerOnly:
         assert "LOWERED=" not in result.stdout
 
 
+class TestStaleCompanions:
+    """An unchanged task's leftover removed-context companion is deleted in both batch modes.
+    2026-09-22 initiative eval, INIT-012: the revise agent wrote the companion
+    (check_content_preservation.py --write-yaml), reverted its edit, set the flag; FIXUP lowered
+    the flag but the companion made the judge count a revision, and the dry-run submit would
+    have posted a removed-context comment for content that was never removed."""
+
+    MODES = [(), ("--lower-only",)]
+
+    def _run(self, tmp_path, *args):
+        return subprocess.run(
+            ["python3", SCRIPT, "--batch", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+
+    def _companion(self, tmp_path, rfe_id, suffix="-removed-context.yaml"):
+        path = tmp_path / "artifacts" / "rfe-tasks" / f"{rfe_id}{suffix}"
+        path.write_text("blocks:\n- type: unclassified\n  text: never actually removed\n")
+        return path
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_identical_content_removes_the_companion(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3301", "Same.", "Same.", auto_revised=True)
+        path = self._companion(tmp_path, "RHAIRFE-3301")
+        result = self._run(tmp_path, *mode, "RHAIRFE-3301")
+        assert result.returncode == 0, result.stderr
+        assert not path.exists()
+        assert (
+            "RHAIRFE-3301: stale removed-context companion removed "
+            "(RHAIRFE-3301-removed-context.yaml; task body equals the original)"
+        ) in result.stdout
+        assert "STALE_COMPANIONS=RHAIRFE-3301" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3301-review.md")
+        assert fm["auto_revised"] is False
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_changed_content_keeps_the_companion(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3302", "Original.", "Revised.", auto_revised=True)
+        path = self._companion(tmp_path, "RHAIRFE-3302")
+        result = self._run(tmp_path, *mode, "RHAIRFE-3302")
+        assert result.returncode == 0, result.stderr
+        assert path.exists()
+        assert "STALE_COMPANIONS=\n" in result.stdout
+        assert "stale removed-context companion" not in result.stdout
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_no_companion_reports_an_empty_line(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3303", "Same.", "Same.", auto_revised=True)
+        result = self._run(tmp_path, *mode, "RHAIRFE-3303")
+        assert result.returncode == 0, result.stderr
+        assert "STALE_COMPANIONS=\n" in result.stdout
+        assert "stale removed-context companion" not in result.stdout
+        assert not list((tmp_path / "artifacts" / "rfe-tasks").glob("*-removed-context*"))
+
+    def test_legacy_markdown_companion_is_removed_too(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3304", "Same.", "Same.", auto_revised=False)
+        yaml_path = self._companion(tmp_path, "RHAIRFE-3304")
+        md_path = self._companion(tmp_path, "RHAIRFE-3304", "-removed-context.md")
+        result = self._run(tmp_path, "RHAIRFE-3304")
+        assert result.returncode == 0, result.stderr
+        assert not yaml_path.exists() and not md_path.exists()
+        assert (
+            "(RHAIRFE-3304-removed-context.yaml, RHAIRFE-3304-removed-context.md; "
+            "task body equals the original)"
+        ) in result.stdout
+
+    def test_the_comments_companion_is_never_touched(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3305", "Same.", "Same.", auto_revised=True)
+        comments = tmp_path / "artifacts" / "rfe-tasks" / "RHAIRFE-3305-comments.md"
+        comments.write_text("# Comments: RHAIRFE-3305\n")
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3305")
+        assert result.returncode == 0, result.stderr
+        assert comments.exists()
+        assert "STALE_COMPANIONS=\n" in result.stdout
+
+    def test_helper_returns_the_removed_names(self, tmp_path):
+        (tmp_path / "X-1-removed-context.yaml").write_text("x")
+        assert check_revised.remove_stale_companions(str(tmp_path), "X-1") == [
+            "X-1-removed-context.yaml"
+        ]
+        assert check_revised.remove_stale_companions(str(tmp_path), "X-1") == []
+        assert check_revised.REMOVED_CONTEXT_SUFFIXES == (
+            "-removed-context.yaml",
+            "-removed-context.md",
+        )
+
+
 BAD_REVIEW = (
     "---\nrfe_id: {rfe_id}\nauto_revised: true\n"
     "score: [unclosed owner: jane.doe@example.com\n---\nbody\n"

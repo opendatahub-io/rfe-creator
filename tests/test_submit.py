@@ -459,6 +459,63 @@ class TestAutoRevisedLabel:
         assert "rfe-creator-auto-revised" not in stdout
         assert "Label only" in stdout
 
+    COMPANION = (
+        "blocks:\n"
+        "- heading: Background\n"
+        "  content: Context the agent wrote down, then put back.\n"
+        "  type: unclassified\n"
+    )
+
+    def test_stale_removed_context_companion_is_deleted_before_the_comment(self, art_dir):
+        """2026-09-22 initiative eval (INIT-012): the revise agent wrote the removed-context
+        companion, reverted its edit and set the flag; FIXUP lowered the flag but the dry-run
+        submit still printed "Would post removed-context comment" — in production a misleading
+        Jira comment for content that was never removed. The start-up guard deletes the
+        companion of an unchanged task, so nothing is rendered."""
+        body = "## Problem\n\nSame content.\n"
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", body)
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            f"---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            f"priority: Major\nstatus: Ready\n---\n{body}",
+        )
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234-removed-context.yaml", self.COMPANION)
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert (
+            "Removed the stale removed-context companion of 1 unrevised item(s) (nothing to"
+            " post): RHAIRFE-1234"
+        ) in stdout
+        assert "Would post removed-context comment" not in stdout
+        assert not os.path.exists(f"{art_dir}/rfe-tasks/RHAIRFE-1234-removed-context.yaml")
+        assert "rfe-creator-auto-revised" not in stdout
+
+    def test_companion_of_a_revised_item_is_kept_and_posted(self, art_dir):
+        """A genuine revision keeps its companion: the dry run still renders the comment."""
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "## Problem\n\nOriginal content.\n")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1234.md",
+            "---\nrfe_id: RHAIRFE-1234\ntitle: Test RFE\n"
+            "priority: Major\nstatus: Ready\n---\n"
+            "## Problem\n\nRevised content with improvements.\n",
+        )
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1234-removed-context.yaml", self.COMPANION)
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+            REVIEW_FM.format(rfe_id="RHAIRFE-1234", auto_revised="true"),
+        )
+
+        stdout, _, rc = _run_submit(art_dir)
+        assert rc == 0
+        assert "stale removed-context companion" not in stdout
+        assert "RHAIRFE-1234: Would post removed-context comment" in stdout
+        assert os.path.exists(f"{art_dir}/rfe-tasks/RHAIRFE-1234-removed-context.yaml")
+
     def test_set_flag_on_changed_text_keeps_the_label(self, art_dir):
         """The guard is lower-only: a genuine revision keeps its flag and label."""
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1234.md", "## Problem\n\nOriginal content.\n")

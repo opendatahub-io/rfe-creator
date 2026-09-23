@@ -428,6 +428,12 @@ def _lower_unrevised_flags(artifacts_dir, type_name):
                 f"Lowered auto_revised on {len(ids)} item(s) whose text equals the original:"
                 f" {', '.join(ids)}"
             )
+        elif line.startswith("STALE_COMPANIONS=") and line[len("STALE_COMPANIONS=") :]:
+            ids = line[len("STALE_COMPANIONS=") :].split(",")
+            print(
+                f"Removed the stale removed-context companion of {len(ids)} unrevised item(s)"
+                f" (nothing to post): {', '.join(ids)}"
+            )
         elif line.startswith("SKIPPED=") and line[len("SKIPPED=") :]:
             # Ids only: the child's per-id stderr line carries the exception class, and its
             # message could have quoted frontmatter.

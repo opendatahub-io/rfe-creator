@@ -801,6 +801,25 @@ class TestBatchDone:
         )
         _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
         assert "REPORT flag guard: lowered=0 skipped=1\n" in summary
+        # A stale removed-context companion the guard deleted (an unrevised task) is counted
+        # too, between lowered= and skipped=.
+        monkeypatch.setattr(
+            ps,
+            "_run_script_soft",
+            lambda cmd: (
+                0,
+                "LOWERED=RHAIRFE-2\nSTALE_COMPANIONS=RHAIRFE-2\nSKIPPED=RHAIRFE-1\nUPDATED=1",
+            ),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert "REPORT flag guard: lowered=1 stale_companions=1 skipped=1\n" in summary
+        monkeypatch.setattr(
+            ps,
+            "_run_script_soft",
+            lambda cmd: (0, "LOWERED=\nSTALE_COMPANIONS=\nSKIPPED=\nUPDATED=0"),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert "flag guard" not in summary
 
     def test_final_guard_failure_does_not_abort_report_or_echo_stderr(
         self, tmp_dir, monkeypatch, capsys

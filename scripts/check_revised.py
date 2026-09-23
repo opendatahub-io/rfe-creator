@@ -7,6 +7,10 @@ Modes:
   Batch:  check_revised.py --batch [ID ...]
     Scans originals vs tasks for every ID (or all if none given),
     sets auto_revised in review frontmatter directly.  No LLM loop needed.
+    In both batch modes an unchanged task's leftover removed-context
+    companion (<tasks_dir>/<id>-removed-context.yaml, or the legacy .md)
+    is deleted: nothing was removed, so it documents nothing and would be
+    posted to Jira by submit.py. Prints STALE_COMPANIONS=<ids>.
     --lower-only: the last-reader guard (REPORT transition, submit.py
     start-up) — a set flag on a task whose body still equals its original
     is lowered; nothing is ever raised. Prints LOWERED=<ids>.
@@ -57,6 +61,29 @@ def check_pair(original_path, task_path):
     return original.strip() != task.strip()
 
 
+# The revise agent's content-preservation companion, written by check_content_preservation.py
+# --write-yaml next to the task (the .md form is the pre-YAML legacy companion).
+REMOVED_CONTEXT_SUFFIXES = ("-removed-context.yaml", "-removed-context.md")
+
+
+def remove_stale_companions(tasks_dir, rfe_id):
+    """Delete the removed-context companion(s) of a task whose body equals its original.
+
+    The revise agent may run check_content_preservation.py --write-yaml on an edit it then
+    reverts ("no changes made"): the task is byte-identical to the original, FIXUP lowers the
+    flag, and the companion is left behind — the eval judge reads it as revision evidence and
+    submit.py would post it to Jira as a removed-context comment for content that was never
+    removed (2026-09-22 initiative eval, INIT-012). Returns the removed file names.
+    """
+    removed = []
+    for suffix in REMOVED_CONTEXT_SUFFIXES:
+        path = os.path.join(tasks_dir, f"{rfe_id}{suffix}")
+        if os.path.isfile(path):
+            os.remove(path)
+            removed.append(os.path.basename(path))
+    return removed
+
+
 # Bare dir form: this script joins onto artifacts_dir itself (Q13).
 _TYPE_CONFIG = {
     name: {
@@ -84,6 +111,12 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
     "# KEY: Title" heading), so a task that differs from its original only by those keeps
     its flag: conservative, the guard never lowers when unsure.
 
+    Stale companions (both modes): a task whose body equals its original has had nothing
+    removed, so a leftover removed-context companion (``remove_stale_companions``) is deleted
+    and the id reported on the ``STALE_COMPANIONS=<ids>`` line — FIXUP, the REPORT-transition
+    guard and the submit-time guard all run this script, so none of them lets submit.py post
+    a removed-context comment for an unrevised item.
+
     Per-id isolation (both modes): one review that cannot be read or updated is skipped —
     ``check_revised: skipped <id> (<ExceptionClass>)`` on stderr, class name only, since the
     message can quote frontmatter — and reported on the ``SKIPPED=<ids>`` line; the rest of
@@ -105,6 +138,7 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
 
     changed = 0
     lowered = []
+    stale = []
     skipped = []
     for rfe_id in sorted(ids):
         try:
@@ -117,6 +151,14 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
             revised = check_pair(original, task)
             if revised is None:
                 continue
+            if not revised:
+                removed = remove_stale_companions(tasks_dir, rfe_id)
+                if removed:
+                    stale.append(rfe_id)
+                    print(
+                        f"{rfe_id}: stale removed-context companion removed "
+                        f"({', '.join(removed)}; task body equals the original)"
+                    )
 
             data, _ = read_frontmatter(review)
             current = data.get("auto_revised", False)
@@ -139,6 +181,7 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
 
     if lower_only:
         print(f"LOWERED={','.join(lowered)}")
+    print(f"STALE_COMPANIONS={','.join(stale)}")
     print(f"SKIPPED={','.join(skipped)}")
     print(f"UPDATED={changed}")
 
