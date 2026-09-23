@@ -49,7 +49,10 @@ per repository.
 Since PR-5b the skills are generic: `/rfe-create`, `/rfe-review`, `/rfe-split`, `/rfe-submit`,
 `/rfe-auto-fix` and `/rfe-speedrun` take `--type <name>` (or resolve it, design §5) and read every typed
 literal from `python3 scripts/type_registry.py launch-vars <name> <stage>` — ids, dirs, schemas, the
-scorer agent, the rubric path, the dimensions, the score-field stubs, the re-split threshold. What a type
+scorer agent, the rubric path, the dimensions, the score-field stubs, the re-split threshold. The
+typed-file paths in that block are absolute (a `types/<name>/...` path resolves from the descriptor's
+own directory, so a drop-in root carries its files wherever it lives) because subagents read them from
+an arbitrary working directory; commands and workspace paths stay relative. What a type
 author writes is the judgement: `types/<name>/template.md`, `prompts/create-guidance.md`,
 `prompts/review-rules.md`, `prompts/review-sections.md`, `prompts/revise-rules.md` (the Tier-2 slots the
 shared review/revise skeletons read), `prompts/split-rules.md` (Tier 3 — the whole split prompt, with

@@ -121,7 +121,11 @@ itself is fine — `resolve()` follows the link).
    launcher tokens gate 1 requires (`{TEMPLATE_PATH}`, `{NEXT_ID_FLAGS}`, `{TASKS_DIR}`, ...); no typed
    file may name a skill directory. `python3 scripts/type_registry.py launch-vars <name> review` prints
    the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
-   dispatcher read every typed literal from it. `pipeline.stages` must list `create`, `review`,
+   dispatcher read every typed literal from it. Typed-file paths render ABSOLUTE (resolved from
+   the descriptor's own directory for `types/<name>/...`, else from the plugin root) so the files
+   resolve from any working directory — a marketplace install runs the skills from the project,
+   not the checkout; workspace paths and every `python3 scripts/...` / bootstrap command stay
+   relative, since the headless allowlist matches command text literally. `pipeline.stages` must list `create`, `review`,
    `split` and `auto-fix` — the stages the dispatcher's phase table launches through the registry;
    `python3 scripts/pipeline_state.py init` refuses a type that omits one before any state is
    written, and gate 1 requires `pipeline.prompts.template` for a type that creates or splits.

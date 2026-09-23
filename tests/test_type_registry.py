@@ -3115,10 +3115,23 @@ class TestLaunchVars:
             assert pairs["DIMENSIONS"] == ",".join(d["name"] for d in pipe["dimensions"])
             for dim in pipe["dimensions"]:
                 key = dim["name"].upper()
-                assert pairs[f"DIMENSION_{key}_PROMPT"] == dim["prompt"]
+                # typed files render absolute, resolved from the descriptor's own directory
+                assert pairs[f"DIMENSION_{key}_PROMPT"] == str(
+                    (desc.path.parent / dim["prompt"].split(f"types/{name}/", 1)[1]).resolve()
+                )
                 assert (
                     pairs[f"DIMENSION_{key}_FILE"] == f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"
                 )
+            for var, field in (
+                ("TEMPLATE_PATH", "template"),
+                ("CREATE_GUIDANCE_PATH", "create_guidance"),
+                ("RULES_PATH", "review_rules"),
+                ("SECTIONS_PATH", "review_sections"),
+                ("REVISE_RULES_PATH", "revise_rules"),
+                ("SPLIT_RULES_PATH", "split_rules"),
+            ):
+                assert pairs[var] == desc.typed_path(pipe["prompts"][field])
+                assert pairs[var].startswith("/") and pairs[var].endswith(pipe["prompts"][field])
             assert pairs["RESPLIT_FIELD"] == pipe["resplit"]["score_field"]
             assert pairs["RESPLIT_BELOW"] == str(pipe["resplit"]["below"])
             assert pairs["NEXT_ID_FLAGS"] == (
@@ -3154,6 +3167,36 @@ class TestLaunchVars:
             "feasibility.feasible, feasibility.infeasible, feasibility.indeterminate, "
             "alignment.strong, alignment.partial, alignment.weak"
         )
+
+    def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path):
+        """A drop-in root carries its typed files wherever it lives: a `types/<name>/...` path
+        resolves under the descriptor's directory; a path outside its own directory (here the
+        shipped rfe dimension prompt) resolves under the plugin root."""
+        from conftest import write_drop_in
+
+        root = tmp_path / "extra"
+        write_drop_in(
+            str(root),
+            "memo",
+            overrides={
+                "pipeline.prompts.template": "types/memo/template.md",
+                "pipeline.prompts.review_rules": "types/memo/prompts/review-rules.md",
+            },
+        )
+        (root / "memo" / "prompts").mkdir(parents=True)
+        (root / "memo" / "template.md").write_text("# Memo\n", encoding="utf-8")
+        (root / "memo" / "prompts" / "review-rules.md").write_text("rules\n", encoding="utf-8")
+        desc = type_registry.load(extra_roots=[str(root)], env={}).get("memo")
+        pairs = dict(type_registry.launch_vars(desc, "review"))
+        assert pairs["TEMPLATE_PATH"] == str((root / "memo" / "template.md").resolve())
+        assert pairs["RULES_PATH"] == str((root / "memo" / "prompts" / "review-rules.md").resolve())
+        assert Path(pairs["TEMPLATE_PATH"]).is_file() and Path(pairs["RULES_PATH"]).is_file()
+        # kept from the rfe copy: types/rfe/... is not memo's own directory -> the plugin root
+        shipped = pairs["DIMENSION_FEASIBILITY_PROMPT"]
+        assert shipped == str(
+            (type_registry.PLUGIN_ROOT / "types/rfe/dimensions/feasibility.md").resolve()
+        )
+        assert desc.typed_path("") == ""
 
     def test_deterministic_and_stage_scoped(self):
         reg = _shipped()

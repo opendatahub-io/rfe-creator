@@ -143,7 +143,10 @@ import yaml
 
 # Default discovery root: <repo>/types, located relative to this file — never the cwd
 # (precedent: pipeline_state.py os.path.dirname(__file__), snapshot_fetch.py SCRIPT_DIR).
-DEFAULT_ROOT = Path(__file__).resolve().parent.parent / "types"
+# The plugin root: scripts/ and types/ ship together (a checkout or a marketplace install), so
+# the directory above scripts/ is what every repo_path in a shipped descriptor is relative to.
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_ROOT = PLUGIN_ROOT / "types"
 
 DESCRIPTOR_FILENAME = "type.yaml"
 EXTRA_ROOTS_ENV = "RFE_CREATOR_EXTRA_TYPES"
@@ -309,6 +312,22 @@ class Descriptor:
 
     def __repr__(self):
         return f"Descriptor({self.name!r}, path={str(self.path) if self.path else None!r})"
+
+    def typed_path(self, rel):
+        """The absolute path of a typed file a repo_path field names (``pipeline.prompts.*``,
+        ``pipeline.dimensions[].prompt``). A path under this type's own directory
+        (``types/<name>/...``) resolves against the descriptor's directory — a drop-in root
+        carries its typed files wherever it lives — and any other plugin-relative path against
+        the plugin root. Launch blocks carry these absolute values: subagents read the files
+        from an arbitrary working directory (a marketplace install runs the skills from the
+        project, not the checkout), where a relative path would not resolve. An empty value
+        (an absent optional file) stays empty."""
+        if not rel:
+            return ""
+        own = f"types/{self.name}/"
+        if self.path is not None and rel.startswith(own):
+            return str((self.path.parent / rel[len(own) :]).resolve())
+        return str((PLUGIN_ROOT / rel).resolve())
 
     # -- generic access -------------------------------------------------------------------
 
@@ -1511,6 +1530,12 @@ def launch_vars(desc, stage):
     descriptor, same lines, same order.
     Values are single-line; runtime placeholders (``{ID}``, ``{KEY}``) are left for the agent.
     ``stage`` must be one of the type's ``pipeline.stages``.
+
+    Typed-file paths (the template, the guidance, the rules, the sections, the split prompt,
+    every dimension prompt) are ABSOLUTE (``Descriptor.typed_path``) so the files resolve from
+    any working directory; workspace paths (``artifacts/...``, ``tmp/...``, the rubric under
+    ``.context/``) and every command (``BOOTSTRAP``, ``python3 scripts/...``) stay relative —
+    the headless allowlist matches command text literally, and the workspace is the cwd.
     """
     stages = list(desc.get("pipeline.stages", None) or DEFAULT_STAGES)
     if stage not in stages:
@@ -1578,19 +1603,19 @@ def launch_vars(desc, stage):
         ("PROMPT_PATH", f"{CONTEXT_DIR}/{rubric['path']}"),
         ("RUBRIC_EXPORT", rubric.get("export") or "none"),
         ("BOOTSTRAP", f"bash scripts/bootstrap-assess-rfe.sh --type {desc.name}"),
-        ("CREATE_GUIDANCE_PATH", prompts.get("create_guidance", "")),
-        ("TEMPLATE_PATH", prompts.get("template", "")),
-        ("RULES_PATH", prompts.get("review_rules", "")),
-        ("SECTIONS_PATH", prompts.get("review_sections", "")),
-        ("REVISE_RULES_PATH", prompts.get("revise_rules", "")),
-        ("SPLIT_RULES_PATH", prompts.get("split_rules", "")),
+        ("CREATE_GUIDANCE_PATH", desc.typed_path(prompts.get("create_guidance", ""))),
+        ("TEMPLATE_PATH", desc.typed_path(prompts.get("template", ""))),
+        ("RULES_PATH", desc.typed_path(prompts.get("review_rules", ""))),
+        ("SECTIONS_PATH", desc.typed_path(prompts.get("review_sections", ""))),
+        ("REVISE_RULES_PATH", desc.typed_path(prompts.get("revise_rules", ""))),
+        ("SPLIT_RULES_PATH", desc.typed_path(prompts.get("split_rules", ""))),
         ("DIMENSIONS", ",".join(d["name"] for d in dims)),
     ]
     for dim in dims:
         key = dim["name"].upper().replace("-", "_")
         out.extend(
             [
-                (f"DIMENSION_{key}_PROMPT", dim["prompt"]),
+                (f"DIMENSION_{key}_PROMPT", desc.typed_path(dim["prompt"])),
                 (f"DIMENSION_{key}_FILE", f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"),
                 (f"DIMENSION_{key}_BLOCKING", _flag(dim.get("blocking", True))),
                 (f"DIMENSION_{key}_CONDITION", _dimension_condition(dim)),

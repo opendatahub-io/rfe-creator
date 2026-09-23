@@ -212,10 +212,12 @@ def _missing_engine_stages(ptype):
 def _pipeline_type_row(desc):
     """One PIPELINE_TYPES row: the eight descriptor projections plus the two constants."""
     dirs = desc.dirs()
+    # Typed prompt files are absolute (Descriptor.typed_path): the orchestrator Reads them from
+    # whatever the working directory is; the skeleton prompts stay repo-relative constants.
     dims = [
         {
             "name": d["name"],
-            "prompt": d["prompt"],
+            "prompt": desc.typed_path(d["prompt"]),
             "blocking": bool(d.get("blocking", True)),
             "condition": d.get("condition"),
             "skip_stub": d.get("skip_stub"),
@@ -225,7 +227,7 @@ def _pipeline_type_row(desc):
     by_name = {d["name"]: d for d in dims}
     return {
         "review_prompts": REVIEW_PROMPTS,
-        "split_prompt": desc.get("pipeline.prompts.split_rules"),
+        "split_prompt": desc.typed_path(desc.get("pipeline.prompts.split_rules")),
         "scorer_type": desc.get("pipeline.scorer_agent"),
         "rubric_path": f"{type_registry.CONTEXT_DIR}/{desc.get('pipeline.rubric.path')}",
         "dimensions": dims,
