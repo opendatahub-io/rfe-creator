@@ -120,7 +120,7 @@ After completion, check prerequisites for each ID via Glob:
 For any missing prerequisite:
 
 ```bash
-python3 scripts/frontmatter.py set {REVIEWS_DIR}/<ID>-review.md {ID_FIELD}=<ID> score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true {SCORE_ZERO_SET} error="<assess_failed or feasibility_failed>: file not created" type={TYPE}
+python3 scripts/frontmatter.py set {REVIEWS_DIR}/<ID>-review.md {ID_FIELD}=<ID> score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true {SCORE_ZERO_SET} error="<assess_failed or <name>_failed>: file not created" type={TYPE}
 ```
 
 Remove failed IDs from the processing list and continue with remaining IDs.

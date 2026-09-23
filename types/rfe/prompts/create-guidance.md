@@ -25,7 +25,7 @@ Internalize the template's **Size Guide** — you will use it to determine each 
 
 - **WHAT/WHY only.** Describe the business need and its justification. Never prescribe architecture, technology choices, or implementation specifics.
 - **One RFE per distinct business need.** If the input describes multiple needs, create multiple RFEs. Each should map to roughly one strategy feature.
-- **Determine size from acceptance criteria count.** After drafting each RFE, count its acceptance criteria and assign a size using the Size Guide: S (1-2), M (3-5), L (5-8), XL (8+). Use the corresponding format (Concise/Standard/Full) from the template.
+- **Determine size from acceptance criteria count.** After drafting each RFE, count its acceptance criteria and assign a size using the Size Guide: S (1-2), M (3-4), L (5-7), XL (8+). Use the corresponding format (Concise/Standard/Full) from the template.
 - **Priority uses Jira values.** Choose from: Blocker, Critical, Major, Normal, Minor. Default to Normal unless the PM's input clearly indicates urgency.
 - **Acceptance criteria from the user's perspective.** "User can do X" not "System implements Y." No implementation details in acceptance criteria.
 - **Platform vocabulary is allowed in describing the problem domain** — terms like KServe, ModelMesh, RHOAI, Operator are fine for describing what area the RFE touches. But do not prescribe that specific technologies must be used in the solution.

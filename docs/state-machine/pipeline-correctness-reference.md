@@ -318,7 +318,7 @@ blocks as Jira comments; `reworded` and `non-substantive` are silently dropped.
 A companion next to a task whose body still equals its original is stale —
 nothing was removed (the agent reverted its edit after writing it) — and
 `check_revised.py --batch` deletes it in every pass that runs it (FIXUP, the
-REPORT-transition guard, the submit-time guard; A2 / A7 in §3.2), so
+REPORT-transition guard, the submit-time guard; A2 / A7 in §2.3), so
 `_render_jira_comment()` never reads one for an unrevised item.
 
 ### 1.20 Resume Logic: `check_resume.py`

@@ -98,7 +98,12 @@ def commands(text, dims=()):
         cmd = re.sub(r"\s--type\s+\S+", "", cmd)
         cmd = re.sub(r"\stype=\S+", "", cmd)
         cmd = re.sub(r"\{[A-Za-z_<>]+\}", "{}", cmd)
-        cmd = re.sub(r"<[^>]*>", "<>", cmd)
+        while True:  # nested slots (`<assess_failed or <name>_failed>`) fold innermost-first
+            folded = re.sub(r"<[^<>]*>", "\x00", cmd)
+            if folded == cmd:
+                break
+            cmd = folded
+        cmd = cmd.replace("\x00", "<>")
         for name in dims:
             cmd = re.sub(rf"\b{re.escape(name)}\b", "<>", cmd)
         out.append(re.sub(r"\s+", " ", cmd).strip())
@@ -160,6 +165,14 @@ for _t, _prefix in (("rfe", "rfe."), ("initiative", "initiative-")):
     )
     _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_DIMENSION_GENERIC_BODY)
 _allow("initiative", ".claude/skills/initiative-review/SKILL.md", *_DIMENSION_GENERIC_BODY_INIT)
+# CodeRabbit on #200: the acceptance-criteria size ranges were overlapping (5 -> M or L, 8 -> L or
+# XL) in the legacy body and template alike; the typed guidance and template use exclusive ranges
+# (S 1-2, M 3-4, L 5-7, XL 8+).
+_allow(
+    "rfe",
+    ".claude/skills/rfe.create/SKILL.md",
+    "assign a size using the size guide: s (1-2), m (3-5), l (5-8), xl (8+)",
+)
 _allow("rfe", ".claude/skills/rfe.review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW_RFE)
 # The revise skeleton's step list keeps the rfe wording ("Read the task file to see what needs
 # changing"); the initiative's "Read the initiative: <path>" is the same read, the path now the

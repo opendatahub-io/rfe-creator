@@ -5,8 +5,8 @@ Scale the output to match the size of the RFE. Use the appropriate section set b
 ## Size Guide
 
 - **S** (Small): A focused, well-understood need. 1-2 acceptance criteria. Use the Concise format.
-- **M** (Medium): A clear need with some nuance. 3-5 acceptance criteria. Use the Standard format.
-- **L** (Large): A significant need spanning multiple user scenarios. 5-8 acceptance criteria. Use the Full format.
+- **M** (Medium): A clear need with some nuance. 3-4 acceptance criteria. Use the Standard format.
+- **L** (Large): A significant need spanning multiple user scenarios. 5-7 acceptance criteria. Use the Full format.
 - **XL** (Extra Large): A major initiative with broad impact. 8+ acceptance criteria. Use the Full format with all optional sections.
 
 ---
