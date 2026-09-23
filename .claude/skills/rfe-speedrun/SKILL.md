@@ -146,13 +146,13 @@ python3 scripts/state.py read tmp/{STATE_PREFIX}speedrun-config.yaml
 python3 scripts/state.py read-ids tmp/{STATE_PREFIX}speedrun-all-ids.txt
 ```
 
-Invoke auto-fix using the **Skill** tool (NOT Agent — Agent runs in background and causes the session to terminate). Build the args from the config file and forward the resolved type explicitly:
+Invoke auto-fix using the **Skill** tool (NOT Agent — Agent runs in background and causes the session to terminate). Build the args from the config file and forward the resolved type explicitly — a bracketed flag is included only when the config says so:
 
 ```
-Skill(skill: "rfe-auto-fix", args: "{TYPE_FLAG} --headless --announce-complete --batch-size <batch_size> <all_IDs_from_file>")
+Skill(skill: "rfe-auto-fix", args: "{TYPE_FLAG} [--headless] [--announce-complete] --batch-size <batch_size> <all_IDs_from_file>")
 ```
 
-Pass `--headless` and `--announce-complete` through if set in the config. **Always** pass `--batch-size <batch_size>` using the value from `tmp/{STATE_PREFIX}speedrun-config.yaml` — never omit it, never let auto-fix's own default take over. The speedrun default (5) was already pinned in Step 0; relying on it here is what makes runs reproducible.
+Pass `--headless` only when the config's `headless` is true and `--announce-complete` only when `announce_complete` is true — an interactive speedrun never hands auto-fix either flag. **Always** pass `--batch-size <batch_size>` using the value from `tmp/{STATE_PREFIX}speedrun-config.yaml` — never omit it, never let auto-fix's own default take over. The speedrun default (5) was already pinned in Step 0; relying on it here is what makes runs reproducible.
 
 Auto-fix handles: assessment, the type's review dimensions (`DIMENSIONS={DIMENSIONS}`), review, auto-revision, re-assessment, splitting oversized items, retry queue, and report generation. The Skill call blocks until auto-fix completes — this is correct. **Do NOT stop, summarize, or skip remaining batches early** — the pipeline must process every ID through all phases. Never end a turn with a text-only response (no tool call) in order to wait for something — that hands control back, and you only run again if an agent-completion notification wakes you.
 
@@ -167,7 +167,7 @@ python3 scripts/check_autofix_complete.py {TYPE_FLAG}
 If incomplete (exit code 1), the output shows `MISSING_IDS={LOCAL_PREFIX}006,{LOCAL_PREFIX}007,...`. Re-invoke auto-fix with the Skill tool using only the missing IDs:
 
 ```
-Skill(skill: "rfe-auto-fix", args: "{TYPE_FLAG} --headless --batch-size <batch_size> <missing_IDs>")
+Skill(skill: "rfe-auto-fix", args: "{TYPE_FLAG} [--headless] --batch-size <batch_size> <missing_IDs>")
 ```
 
 Repeat the verify+retry cycle until all items have reviews or 3 retries have been exhausted.
@@ -196,13 +196,13 @@ Parse the `SUBMIT=` line for IDs ready to submit.
 
 If no IDs are ready to submit, skip to Phase 4.
 
-If IDs are ready, invoke submit using the **Skill** tool, forwarding the resolved type:
+If IDs are ready, invoke submit using the **Skill** tool, forwarding the resolved type — a bracketed flag is included only when the config says so:
 
 ```
-Skill(skill: "rfe-submit", args: "{TYPE_FLAG} --dry-run --headless <passing_IDs>")
+Skill(skill: "rfe-submit", args: "{TYPE_FLAG} [--dry-run] [--headless] <passing_IDs>")
 ```
 
-Pass `--dry-run` and `--headless` through if set in the config. If not headless, `/rfe-submit` will show a confirmation table before writing to Jira — this is the one mandatory interaction point.
+Pass `--dry-run` only when the config's `dry_run` is true and `--headless` only when `headless` is true — a normal speedrun writes its ready items to Jira. If not headless, `/rfe-submit` will show a confirmation table before writing to Jira — this is the one mandatory interaction point.
 
 ## Phase 4: Summary
 

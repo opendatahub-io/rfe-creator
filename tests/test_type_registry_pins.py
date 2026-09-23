@@ -2646,6 +2646,24 @@ class TestSkillLayer:
         ]("X")
         assert not text.startswith("---"), "the typed file is a body, not a skill"
 
+    def test_speedrun_handoffs_forward_flags_from_the_config(self, ctx):
+        # CodeRabbit on #200: the auto-fix and submit handoffs used to pass --headless,
+        # --announce-complete and --dry-run literally, so an interactive speedrun ran auto-fix
+        # headless and never wrote to Jira. Every optional flag is bracketed (included only when
+        # the persisted config says so); the type flag and the batch size stay literal.
+        text = skill(ctx.t, "speedrun")
+        handoffs = re.findall(r'Skill\(skill: "(rfe-[a-z-]+)", args: "([^"]*)"\)', text)
+        assert [name for name, _ in handoffs] == ["rfe-auto-fix", "rfe-auto-fix", "rfe-submit"]
+        for name, args in handoffs:
+            assert args.startswith(f"--type {ctx.t} "), args
+            for flag in ("--headless", "--announce-complete", "--dry-run"):
+                assert not re.search(rf"(?<!\[){flag}(?!\])", args), (name, args)
+        assert "[--headless] [--announce-complete] --batch-size <batch_size>" in handoffs[0][1]
+        assert "[--headless] --batch-size <batch_size> <missing_IDs>" in handoffs[1][1]
+        assert handoffs[2][1] == f"--type {ctx.t} [--dry-run] [--headless] <passing_IDs>"
+        assert "only when the config's `headless` is true" in text
+        assert "only when the config's `dry_run` is true" in text
+
     def test_speedrun_forwards_clarifying_context_to_create(self, ctx):
         """The batch entry's clarifying_context reaches the create agent only if the launch
         line says so (the 2026-09-15 eval run on #187 saw an orchestrator drop it): the generic
