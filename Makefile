@@ -3,13 +3,18 @@ help: ## Show this help message
 	@echo "Available targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
+# The skillsaw release CI runs (.github/workflows/lint.yml pins the action at v0.11.2); an
+# unpinned uvx pulls the latest release, whose newer rules and deprecation warnings fail the
+# strict gate for reasons CI never sees.
+SKILLSAW_VERSION ?= 0.11.2
+
 .PHONY: skillsaw
 skillsaw: ## Run skillsaw linter on skills and plugins
 	@echo "Running skillsaw..."
 	@if [ -n "$${SKILLSAW_BIN:-}" ]; then \
 		"$${SKILLSAW_BIN}"; \
 	else \
-		uvx skillsaw; \
+		uvx --from 'skillsaw==$(SKILLSAW_VERSION)' skillsaw; \
 	fi
 
 .PHONY: skillsaw-fix
@@ -18,7 +23,7 @@ skillsaw-fix: ## Auto-fix fixable skillsaw issues
 	@if [ -n "$${SKILLSAW_BIN:-}" ]; then \
 		"$${SKILLSAW_BIN}" fix; \
 	else \
-		uvx skillsaw fix; \
+		uvx --from 'skillsaw==$(SKILLSAW_VERSION)' skillsaw fix; \
 	fi
 
 .PHONY: lint
