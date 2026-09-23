@@ -15,6 +15,8 @@ Modes:
     start-up) — a set flag on a task whose body still equals its original
     is lowered; nothing is ever raised. Prints LOWERED=<ids>.
     --artifacts-dir DIR: resolve the bare type dirs under DIR, not ./artifacts.
+    Every id given (argument or --ids-file entry) must be a plain file-name
+    stem: a path-shaped id exits 2 before any file is touched.
 
 Usage:
     python3 scripts/check_revised.py artifacts/rfe-originals/ID.md artifacts/rfe-tasks/ID.md
@@ -32,6 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import type_registry
 from artifact_utils import find_review_file, read_frontmatter, read_ids_file, update_frontmatter
+from preserve_review_state import validate_item_id
 
 _TYPES = type_registry.load()
 # Usage text: "rfe|initiative" today, following the registry when a type is added.
@@ -128,6 +131,13 @@ def batch_mode(ids, artifacts_dir="artifacts", pipeline_type="rfe", lower_only=F
     tc = _TYPE_CONFIG[pipeline_type]
     originals_dir = os.path.join(artifacts_dir, tc["originals_dir"])
     tasks_dir = os.path.join(artifacts_dir, tc["tasks_dir"])
+
+    # The batch boundary (CWE-22): an id is joined onto the originals, tasks and reviews dirs
+    # and names the companion remove_stale_companions deletes, so a --batch argument or an
+    # --ids-file entry must be a plain file-name stem. The pipeline validates its id files
+    # before calling; this guards direct CLI use (ValueError -> exit 2 in main).
+    for rfe_id in ids or []:
+        validate_item_id(rfe_id)
 
     # If no IDs given, discover from originals dir
     if not ids:
@@ -253,12 +263,16 @@ def main():
         rest, artifacts_dir = _extract_option(rest, "--artifacts-dir")
         lower_only = "--lower-only" in rest
         args = [a for a in rest if a not in ("--batch", "--lower-only")]
-        batch_mode(
-            args + file_ids,
-            artifacts_dir=artifacts_dir or "artifacts",
-            pipeline_type=pipeline_type,
-            lower_only=lower_only,
-        )
+        try:
+            batch_mode(
+                args + file_ids,
+                artifacts_dir=artifacts_dir or "artifacts",
+                pipeline_type=pipeline_type,
+                lower_only=lower_only,
+            )
+        except ValueError as exc:  # a path-shaped id: nothing was read or written
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(2)
         return
 
     if len(argv) != 2:

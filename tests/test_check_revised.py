@@ -617,6 +617,59 @@ class TestStaleCompanions:
         )
 
 
+class TestBatchIdBoundary:
+    """CodeRabbit on #200 (CWE-22): a --batch argument or --ids-file entry is joined onto the
+    type dirs and names the companion remove_stale_companions deletes, so a path-shaped id is
+    refused (preserve_review_state.validate_item_id) before any file is read or written."""
+
+    def _run(self, tmp_path, *args):
+        return subprocess.run(
+            ["python3", SCRIPT, "--batch", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+
+    def _decoy(self, tmp_path):
+        """A companion one level above the tasks dir: what '../evil' would resolve to."""
+        _setup_batch(tmp_path, "RHAIRFE-3400", "Same.", "Same.", auto_revised=True)
+        decoy = tmp_path / "artifacts" / "evil-removed-context.yaml"
+        decoy.write_text("blocks: []\n")
+        return decoy
+
+    @pytest.mark.parametrize("bad", ["../evil", "/abs/evil", "sub/evil", ".", ".."])
+    def test_a_path_shaped_argument_exits_2(self, tmp_path, bad):
+        decoy = self._decoy(tmp_path)
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3400", bad)
+        assert result.returncode == 2, result.stdout
+        assert f"ERROR: invalid item id: {bad!r}" in result.stderr
+        assert result.stdout == ""  # nothing processed, not even the valid id
+        assert decoy.exists()
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3400-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_a_path_shaped_ids_file_entry_exits_2(self, tmp_path):
+        decoy = self._decoy(tmp_path)
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAIRFE-3400\n../evil\n")
+        result = self._run(tmp_path, "--ids-file", str(ids_file))
+        assert result.returncode == 2
+        assert "ERROR: invalid item id: '../evil'" in result.stderr
+        assert decoy.exists()
+
+    def test_plain_stems_still_run(self, tmp_path):
+        self._decoy(tmp_path)
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3400")
+        assert result.returncode == 0, result.stderr
+        assert "LOWERED=RHAIRFE-3400" in result.stdout
+
+    def test_library_call_raises_before_discovery(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="invalid item id"):
+            check_revised.batch_mode(["../evil"])
+
+
 BAD_REVIEW = (
     "---\nrfe_id: {rfe_id}\nauto_revised: true\n"
     "score: [unclosed owner: jane.doe@example.com\n---\nbody\n"
