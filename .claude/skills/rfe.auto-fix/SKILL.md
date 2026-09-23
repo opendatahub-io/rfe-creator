@@ -124,7 +124,7 @@ agents:
     vars: |
       DATA_FILE=tmp/rfe-assess/single/RHAIRFE-1234.md
       RUN_DIR=tmp/rfe-assess/single
-      PROMPT_PATH=.context/assess-rfe/scripts/agent_prompt.md
+      PROMPT_PATH=.context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md
   - prompt_file: .claude/skills/rfe-feasibility-review/SKILL.md
     vars: |
       ID=RHAIRFE-1234

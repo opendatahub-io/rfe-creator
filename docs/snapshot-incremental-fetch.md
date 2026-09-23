@@ -103,15 +103,15 @@ A full CI run executes these steps in order:
 # 1. Fetch and diff
 #    Reads:   artifacts/auto-fix-runs/issue-snapshot-*.yaml  (previous snapshot)
 #    Writes:  artifacts/auto-fix-runs/issue-snapshot-<ts>.yaml (new snapshot)
-#             tmp/autofix-all-ids.txt                        (all IDs to process)
-#             tmp/autofix-changed-ids.txt                    (changed-only IDs)
+#             tmp/pipeline-all-ids.txt                        (all IDs to process)
+#             tmp/pipeline-changed-ids.txt                    (changed-only IDs)
 python3 scripts/snapshot_fetch.py fetch "<jql>" \
-  --ids-file tmp/autofix-all-ids.txt \
-  --changed-file tmp/autofix-changed-ids.txt \
+  --ids-file tmp/pipeline-all-ids.txt \
+  --changed-file tmp/pipeline-changed-ids.txt \
   [--limit 100] [--data-dir "<path>"]
 
 # 2. Review and process (auto-fix pipeline steps 1-5)
-#    Reads:   tmp/autofix-all-ids.txt, tmp/autofix-changed-ids.txt
+#    Reads:   tmp/pipeline-all-ids.txt, tmp/pipeline-changed-ids.txt
 #    Writes:  artifacts/rfe-tasks/*, artifacts/rfe-reviews/*
 #             artifacts/auto-fix-runs/<run-id>.yaml (run report)
 
@@ -132,8 +132,8 @@ git push
 |------|-----------|---------|----------|
 | `artifacts/auto-fix-runs/issue-snapshot-<ts>.yaml` | `snapshot_fetch.py fetch`, updated by `submit.py` | `snapshot_fetch.py fetch` (next run) | Permanent (accumulates) |
 | `artifacts/auto-fix-runs/<YYYYMMDD-HHMMSS>.yaml` | auto-fix pipeline (run report) | `bootstrap_snapshot.py` | Permanent (one per run) |
-| `tmp/autofix-all-ids.txt` | `snapshot_fetch.py fetch` | auto-fix pipeline, `check_resume.py` | Current run only |
-| `tmp/autofix-changed-ids.txt` | `snapshot_fetch.py fetch` | `check_resume.py` | Current run only |
+| `tmp/pipeline-all-ids.txt` | `snapshot_fetch.py fetch` | auto-fix pipeline, `check_resume.py` | Current run only |
+| `tmp/pipeline-changed-ids.txt` | `snapshot_fetch.py fetch` | `check_resume.py` | Current run only |
 
 ### Ordering Constraints
 

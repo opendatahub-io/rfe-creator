@@ -17,7 +17,7 @@ Parse `$ARGUMENTS` for flags and IDs:
 Persist parsed flags (survives context compression):
 
 ```bash
-python3 scripts/state.py init tmp/review-config.yaml headless=<true/false> caller=<autofix|split|none>
+python3 scripts/state.py init tmp/review-config.yaml headless=<true/false> caller=<split|none>
 ```
 
 Persist all IDs to disk (survives context compression):
@@ -79,10 +79,16 @@ For each ID being reviewed:
 python3 scripts/prep_assess.py <ID>
 ```
 
+Resolve the rubric path from the type descriptor (context-relative; `{PROMPT_PATH}` below is `.context/assess-rfe/` + this value):
+
+```bash
+python3 scripts/type_registry.py get rfe pipeline.rubric.path
+```
+
 **Launch assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer):
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>
 ```
 
 **Launch feasibility agent** (model: opus, run_in_background: true) — one per ID:
@@ -221,10 +227,16 @@ rm tmp/rfe-assess/single/<ID>.result.md  # for each reassess ID
 python3 scripts/prep_assess.py <ID>
 ```
 
+Resolve the rubric path from the type descriptor as in Step 2 (`{PROMPT_PATH}` is `.context/assess-rfe/` + the value):
+
+```bash
+python3 scripts/type_registry.py get rfe pipeline.rubric.path
+```
+
 Launch an **assess agent** (model: opus, run_in_background: true, subagent_type: rfe-scorer) for each reassess ID:
 
 ```
-Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/scripts/agent_prompt.md
+Read .claude/skills/rfe.review/prompts/assess-agent.md and follow all instructions. Substitute: {KEY}=<ID>, {DATA_FILE}=tmp/rfe-assess/single/<ID>.md, {RUN_DIR}=tmp/rfe-assess/single, {PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>
 ```
 
 Launch all assess agents in parallel.
@@ -306,20 +318,14 @@ python3 scripts/state.py read tmp/review-config.yaml
 ```
 
 ```bash
-python3 scripts/state.py read tmp/autofix-config.yaml
-```
-
-```bash
 python3 scripts/state.py read tmp/split-config.yaml
 ```
 
 A "State file not found" error just means that caller's config does not exist — continue with what was found.
 
 Check the `caller` field above:
-- **`autofix`**: Returning to **Step 3b: Collect Results** of `/rfe.auto-fix`. Re-read batch IDs from `tmp/autofix-batch-N-ids.txt` (where N = `current_batch` from `tmp/autofix-config.yaml`). If the autofix config is not visible, re-read `/rfe.auto-fix` SKILL.md for the full batch loop.
-- **`split`**: Returning to **Split Step 3: Right-sizing Self-Correction** of `/rfe.split`. Re-read parent IDs from `tmp/split-all-ids.txt`. If the split config is not visible, re-read `/rfe.split` SKILL.md for the full flow.
-
-Do not summarize or stop.
+- **`split`**: Returning to **Split Step 3: Right-sizing Self-Correction** of `/rfe.split`. Re-read parent IDs from `tmp/split-all-ids.txt`. If the split config is not visible, re-read `/rfe.split` SKILL.md for the full flow. Do not summarize or stop.
+- **`none`** (a direct `/rfe.review --headless <IDs>` with no calling skill): nothing to return to — stop here; the completion text above was the announcement.
 
 **If interactive (no `--headless`)**: Re-read ID list and present summary:
 

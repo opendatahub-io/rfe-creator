@@ -366,7 +366,7 @@ class TestDetectFast:
         os.makedirs("tmp", exist_ok=True)
         import yaml
 
-        with open("tmp/autofix-config.yaml", "w") as f:
+        with open("tmp/review-config.yaml", "w") as f:
             yaml.dump({"headless": False}, f)
         assert _detect_fast(False) is True
 
@@ -375,7 +375,7 @@ class TestDetectFast:
         os.makedirs("tmp", exist_ok=True)
         import yaml
 
-        with open("tmp/autofix-config.yaml", "w") as f:
+        with open("tmp/review-config.yaml", "w") as f:
             yaml.dump({"headless": True}, f)
         assert _detect_fast(False) is False
 

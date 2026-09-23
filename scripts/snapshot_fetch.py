@@ -12,8 +12,8 @@ never selected remain absent (staying NEW until selected).
 
 Usage:
     python3 scripts/snapshot_fetch.py fetch "<jql>" \\
-        --ids-file tmp/autofix-all-ids.txt \\
-        --changed-file tmp/autofix-changed-ids.txt \\
+        --ids-file tmp/pipeline-all-ids.txt \\
+        --changed-file tmp/pipeline-changed-ids.txt \\
         [--limit 100] [--data-dir <path>]
 
 Selection: changed and new IDs are written to --ids-file. Unchanged-processed

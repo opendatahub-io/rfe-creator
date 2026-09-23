@@ -316,15 +316,15 @@ def _detect_fast(explicit_flag):
     # would ADD tmp/initiative-speedrun-config.yaml, which initiative-speedrun writes but this
     # allowlist never polled, so interactive initiative speedruns would start auto-enabling
     # fast polling. That drift is fixed on purpose by a separate change, not by this
-    # behavior-neutral migration.
+    # behavior-neutral migration. The auto-fix skills drive tmp/pipeline-state.yaml through
+    # pipeline_state.py and never wrote a *-autofix-config.yaml (PR-5a removed the dead
+    # entries).
     for cfg in (
         "tmp/review-config.yaml",
         "tmp/split-config.yaml",
-        "tmp/autofix-config.yaml",
         "tmp/speedrun-config.yaml",
         "tmp/initiative-review-config.yaml",
         "tmp/initiative-split-config.yaml",
-        "tmp/initiative-autofix-config.yaml",
     ):
         if os.path.exists(cfg):
             try:

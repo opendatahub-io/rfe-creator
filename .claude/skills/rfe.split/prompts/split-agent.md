@@ -22,7 +22,7 @@ If the 1/2 score reflects delivery-coupled capabilities, write the split-status 
 bash scripts/bootstrap-assess-rfe.sh
 ```
 
-Read the scoring rubric from `.context/assess-rfe/scripts/agent_prompt.md`. Find the **Right-sized** criterion and its calibration examples. This defines what "right-sized" means — use it to guide split proposals and verify each child RFE would score 2/2.
+Read the scoring rubric from `.context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md`. Find the **Right-sized** criterion and its calibration examples. This defines what "right-sized" means — use it to guide split proposals and verify each child RFE would score 2/2.
 
 If the bootstrap fails, use a basic heuristic: each child RFE should map to a single strategy feature — you should be able to write one strategy-feature summary sentence for it.
 
