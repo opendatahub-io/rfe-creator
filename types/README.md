@@ -81,7 +81,7 @@ itself is fine — `resolve()` follows the link).
 | `bootstrap_snapshot.py` | `BOOTSTRAP_CONFIG` (`snapshot.report_prefix`, `reporting.item_key`), `--type` choices; the effective `identity.jira.{project,issue_type}` of `--type`, which its JQL positional is checked against exactly as `snapshot_fetch.py` checks its own, before the credentials, the results directory or any snapshot are read; the type name, cross-checked against each run report's `type:` before the report is read into the snapshot | PR-2c; PR-3c (2/3): JQL/binding check and report-type check ("Fetch verification" below; a legacy report without `type:` is read as today); the `issue-snapshot-` run-dir probe (`_run_dir_has_snapshots`) reads the rfe descriptor's `snapshot.prefix` and stays rfe-only for every `--type` (grandfathered; the per-type probe is a deliberate follow-up, design §10 PR-10) |
 | `check_conflicts.py` | `_TYPE_CONFIG` (`dirs.originals`, `id_field`), `--type` choices; task scan via `artifact_utils.scan_tasks(desc)`; the resolved type's effective binding (`resolve` + `assert_registered_binding`): its `key_prefixes` decide which tasks are existing issues (the `is_existing` rule) and its `(project, issue_type)` is what each fetched issue is verified against | PR-2a, PR-2b; PR-3c (3/3) ("Effective binding in the writers" below): the write-prefix `startswith` is gone — a binding mismatch is a `CONFLICT:` line, a `tracker_ref` another type owns is exit 2 |
 | `check_revised.py` | `_TYPE_CONFIG`; `--type` validated through `type_registry.parse_type_arg` (unknown → exit 2 with the registered list) | PR-2a; PR-3a (validation) |
-| `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices | PR-2b; `_detect_fast` config allowlist literal until the `initiative-speedrun-config` drift is fixed deliberately; the rfe-only `create` row (`_CREATE_BARRIER_TYPES`, lifted in PR-5) and the initiative row order (`_LEGACY_ROW_ORDER`, CLI choices text) are documented legacy literals |
+| `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices; the Phase-1 `create` row for every type (PR-5b: the generic speedrun body polls `<poll_prefix>create`); the `_detect_fast` config allowlist is the descriptor projection `state_prefix` × {review, split, speedrun} written out | PR-2b; PR-5b (create row, allowlist) |
 | `check_right_sized.py` | `_TYPE_CONFIG`, `pipeline.resplit`; `--type` validated through `type_registry.parse_type_arg` (unknown → exit 2 with the registered list) | PR-2a; PR-3a (validation) |
 | `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
@@ -108,12 +108,27 @@ itself is fine — `resolve()` follows the link).
 | `cleanup_partial_split.py` | inline dir branch | pending |
 | `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
 | `jira_utils.py` | `strip_metadata` prefix regex | pending |
-| `pipeline_state.py` | `init --type` choices = `_TYPES.choices()` (unknown → argparse exit 2 with the registered list); `PIPELINE_TYPES` literal, pinned (prompt/skill entries move in PR-5) | PR-3a (choices); table pending — the dispatch entries are untouched by PR-3c |
+| `pipeline_state.py` | `init --type` choices = the registered types that carry the phase-table facts (unknown → argparse exit 2 with the registered list); `PIPELINE_TYPES` projected from the descriptor — `pipeline.scorer_agent`, `.context/assess-rfe/` + `pipeline.rubric.path`, `pipeline.dimensions[]` (prompt, blocking, condition, skip_stub), `dirs.{tasks,reviews,originals}`, `pipeline.poll_prefix`, `pipeline.prompts.split_rules`; the review prompt directory is the type-invariant skeleton dir and `dispatch_skill` names the legacy driving body until PR-5c (D7); every agent launch carries `type_registry.launch_vars` | PR-3a (choices); PR-5b (table) |
 
 ## Adding a type
 
 1. `cp -r types/rfe types/<name>` and set `type: <name>` (must equal the directory name).
 2. Edit only the extension points listed below; leave the shared machinery keys as they are.
+   Author the typed files the generic skills read (design §4.2 tiers, §8.1 layout): `types/<name>/template.md`,
+   `prompts/{create-guidance,review-rules,review-sections,revise-rules,split-rules}.md` and
+   `dimensions/<name>.md` for each `pipeline.dimensions[]` entry; point `pipeline.prompts.*` and
+   `dimensions[].prompt` at them. `split-rules.md` is the split agent prompt itself and must carry the
+   launcher tokens gate 1 requires (`{TEMPLATE_PATH}`, `{NEXT_ID_FLAGS}`, `{TASKS_DIR}`, ...); no typed
+   file may name a skill directory. `python3 scripts/type_registry.py launch-vars <name> review` prints
+   the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
+   dispatcher read every typed literal from it. Typed-file paths render ABSOLUTE (resolved from
+   the descriptor's own directory for `types/<name>/...`, else from the plugin root) so the files
+   resolve from any working directory — a marketplace install runs the skills from the project,
+   not the checkout; workspace paths and every `python3 scripts/...` / bootstrap command stay
+   relative, since the headless allowlist matches command text literally. `pipeline.stages` must list `create`, `review`,
+   `split` and `auto-fix` — the stages the dispatcher's phase table launches through the registry;
+   `python3 scripts/pipeline_state.py init` refuses a type that omits one before any state is
+   written, and gate 1 requires `pipeline.prompts.template` for a type that creates or splits.
 3. `python3 scripts/validate_types.py` (gate 1); after `bash scripts/bootstrap-assess-rfe.sh`,
    `python3 scripts/validate_types.py --with-deps` (gate 2). Inspect with
    `python3 scripts/type_registry.py show <name>` / `binding <name>`.
@@ -553,8 +568,11 @@ first two changed no verdict and the third removed exactly two false positives.
 
 1. **Gate 1 — lint time** (`python3 scripts/validate_types.py`, in `make lint` and CI): at least one
    descriptor is discovered (an empty root fails, never a vacuous pass); JSON Schema; `kind` is
-   `work-item`; every repo-relative reference exists (`pipeline.prompts.*`, `dimensions[].prompt`,
-   `eval.config`, `eval.dataset`); `score_fields` non-empty and the review schema accepts the
+   `work-item`; every referenced file exists — the typed files (`pipeline.prompts.*`,
+   `dimensions[].prompt`) resolved as `launch-vars` resolves them (under the descriptor's own
+   directory for `types/<name>/...`, else the plugin root), so a drop-in root's own files are the
+   ones checked and a missing one is never masked by a repository file of the same relative path;
+   `eval.config` and `eval.dataset` repo-relative; `score_fields` non-empty and the review schema accepts the
    `verify_phase` error stub; the eval fragment exists, validates against
    `_schema/eval-fragment.schema.json` and renders with the skeleton, and (CLI, `--no-eval-sync`
    to skip) the committed `eval.config` equals a fresh render; no executable code under a

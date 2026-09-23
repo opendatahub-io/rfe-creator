@@ -14,8 +14,8 @@ description: End-to-end ${type.display.entity} pipeline — create, review, auto
 # Execution — how the skill processes test cases (runner-agnostic)
 execution:
   mode: batch
-  skill: ${fragment.execution.skill}
-  arguments: --headless --dry-run --input batch.yaml
+  skill: ${gen.skill}
+  arguments: ${gen.arguments}
   timeout: ${type.eval.timeout}          # ${fragment.execution.timeout_note}
   max_budget_usd: 100.0  # Per-invocation cost cap
 
@@ -658,7 +658,7 @@ judges:
       if "rm ${type.dirs.tasks}/" in stdout:
           errors.append("${type.display.entity} task file deleted during execution")
       phases_found = []
-      if "Phase 1" in stdout or "Phase 1:" in stdout or "${fragment.execution.create_skill}" in stdout.lower():
+      if "Phase 1" in stdout or "Phase 1:" in stdout or "${gen.create_skill}" in stdout.lower():
           phases_found.append("create")
       if "auto-fix" in stdout.lower() or "AUTOFIX" in stdout or "Batch " in stdout:
           phases_found.append("auto-fix")

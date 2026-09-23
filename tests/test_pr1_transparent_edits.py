@@ -283,6 +283,15 @@ SCRIPT_APPEND_STAMPS = {("scripts/verify_phase.py", "type")}
 # .claude/skills/**/*.md: the `frontmatter.py set` commands that stamp, (file, fields).
 # Bodies are Builder-C territory; tests/test_type_registry_pins.py pins the command tails.
 SKILL_STAMPS = {
+    # PR-5b: the generic bodies and skeletons stamp through the launch block (type={TYPE});
+    # the typed split prompts (types/<t>/prompts/split-rules.md) stamp the split children the
+    # same way — the scan covers types/<t>/prompts and types/<t>/dimensions too.
+    ("types/rfe/prompts/split-rules.md", ("type",)),
+    ("types/initiative/prompts/split-rules.md", ("type",)),
+    (".claude/skills/rfe-create/SKILL.md", ("type",)),
+    (".claude/skills/rfe-review/prompts/fetch-agent.md", ("type", "tracker_ref")),
+    (".claude/skills/rfe-review/SKILL.md", ("type",)),  # orchestrator error stubs
+    (".claude/skills/rfe-split/SKILL.md", ("type",)),  # orchestrator error stub
     (".claude/skills/rfe.create/SKILL.md", ("type",)),
     (".claude/skills/rfe.split/prompts/split-agent.md", ("type",)),
     (".claude/skills/rfe.review/prompts/fetch-agent.md", ("type", "tracker_ref")),
@@ -359,32 +368,47 @@ def _frontmatter_calls_with_the_fields(callees):
     return found
 
 
+# The prose roots the writer scans cover: our skill bodies and, since PR-5b, the typed prompt
+# and dimension files under types/<t>/ that the generic bodies launch.
+PROSE_ROOTS = (".claude/skills",) + tuple(
+    f"types/{t}/{sub}"
+    for t in sorted(os.listdir(os.path.join(REPO_ROOT, "types")))
+    if not t.startswith("_")
+    for sub in ("prompts", "dimensions")
+)
+
+
+def _prose_files():
+    for root in PROSE_ROOTS:
+        for dirpath, dirnames, filenames in os.walk(os.path.join(REPO_ROOT, root)):
+            # Vendored assess-rfe skills are runtime-installed, not ours.
+            dirnames[:] = [
+                d for d in dirnames if d not in ("assess-rfe", "assess-initiative", "export-rubric")
+            ]
+            for name in sorted(filenames):
+                if name.endswith(".md"):
+                    yield os.path.relpath(os.path.join(dirpath, name), REPO_ROOT)
+
+
 def _skill_stamps():
     """(file, fields) for every `python3 scripts/frontmatter.py set` command in our skill
-    bodies that carries `type=` / `tracker_ref=` (backslash continuations joined)."""
+    bodies and typed prompt files that carries `type=` / `tracker_ref=` (backslash
+    continuations joined)."""
     found = {}
-    for dirpath, dirnames, filenames in os.walk(os.path.join(REPO_ROOT, ".claude/skills")):
-        # Vendored assess-rfe skills are runtime-installed, not ours.
-        dirnames[:] = [
-            d for d in dirnames if d not in ("assess-rfe", "assess-initiative", "export-rubric")
-        ]
-        for name in sorted(filenames):
-            if not name.endswith(".md"):
-                continue
-            rel = os.path.relpath(os.path.join(dirpath, name), REPO_ROOT)
-            lines = _read(rel).splitlines()
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-                if "frontmatter.py set" in line:
-                    command = line
-                    while command.rstrip().endswith("\\") and i + 1 < len(lines):
-                        i += 1
-                        command = command.rstrip()[:-1] + " " + lines[i].strip()
-                    fields = tuple(dict.fromkeys(_STAMP_FIELD.findall(command)))
-                    if fields:
-                        found.setdefault(rel, set()).update(fields)
-                i += 1
+    for rel in _prose_files():
+        lines = _read(rel).splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if "frontmatter.py set" in line:
+                command = line
+                while command.rstrip().endswith("\\") and i + 1 < len(lines):
+                    i += 1
+                    command = command.rstrip()[:-1] + " " + lines[i].strip()
+                fields = tuple(dict.fromkeys(_STAMP_FIELD.findall(command)))
+                if fields:
+                    found.setdefault(rel, set()).update(fields)
+            i += 1
     return {(rel, tuple(f for f in NEW_FIELDS if f in fields)) for rel, fields in found.items()}
 
 
@@ -419,22 +443,20 @@ class TestSelfDescribingWriters:
         """The PR-1 scan, kept as a ceiling: a `frontmatter.py ... type=` line may appear
         only in the files named above."""
         allowed = {rel for rel, _ in SCRIPT_ARGV_STAMPS} | {rel for rel, _ in SKILL_STAMPS}
+        scripts = [
+            f"scripts/{name}"
+            for name in sorted(os.listdir(os.path.join(REPO_ROOT, "scripts")))
+            if name.endswith(".py")
+        ]
         hits = set()
-        for root in ("scripts", ".claude/skills"):
-            for dirpath, dirnames, filenames in os.walk(os.path.join(REPO_ROOT, root)):
-                dirnames[:] = [
-                    d
-                    for d in dirnames
-                    if d not in ("assess-rfe", "assess-initiative", "export-rubric")
-                ]
-                for name in filenames:
-                    if not name.endswith((".py", ".md")):
-                        continue
-                    rel = os.path.relpath(os.path.join(dirpath, name), REPO_ROOT)
-                    for line in _read(rel).splitlines():
-                        if _STAMP_FIELD.search(line) and "frontmatter.py" in line:
-                            hits.add(rel)
+        for rel in scripts + list(_prose_files()):
+            for line in _read(rel).splitlines():
+                if _STAMP_FIELD.search(line) and "frontmatter.py" in line:
+                    hits.add(rel)
         assert hits <= allowed, hits - allowed
+        # the ceiling scans the typed prompt and dimension files of every shipped type
+        for t in ("rfe", "initiative"):
+            assert f"types/{t}/prompts" in PROSE_ROOTS and f"types/{t}/dimensions" in PROSE_ROOTS
 
     def test_review_stamp_is_verify_phase_not_a_prompt(self):
         """D8: no review-agent / revise-agent prompt sets `type=`; verify() does, once, on a

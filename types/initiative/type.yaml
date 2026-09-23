@@ -75,25 +75,26 @@ schema:
       - { when: { field: alignment, equals: weak }, then: needs_attention }   # Q22: prompt rule only — initiative-review/prompts/review-agent.md:60; eval-initiative.yaml:277-278 judge; no script consumer, unpinned
 
 pipeline:
-  stages: [create, review, submit, split, auto-fix, speedrun]   # .claude/skills/initiative-{create,review,submit,split,auto-fix,speedrun}/SKILL.md
+  stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); the legacy initiative-* tree stays until PR-5c
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
     - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "initiative"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
   poll_prefix: "initiative-"                            # pipeline_state.py:119; check_review_progress.py:28-34 keys initiative-{split,fetch,assess,feasibility,review,revise,alignment}; REPORT_CONFIG.default_output "initiative-review-report.html" (generate_review_pdf.py:69, Q15)
-  state_prefix: "initiative-"                           # check_autofix_complete.py:22 tmp/initiative-speedrun-all-ids.txt; check_review_progress.py:139-141 tmp/initiative-{review,split,autofix}-config.yaml
-  scorer_agent: initiative-scorer                       # pipeline_state.py:112 scorer_type; bootstrap-assess-rfe.sh:52 INITIATIVE_AGENT="initiative-scorer.md"; initiative-review/prompts/assess-agent.md:12
-  prompts:                                              # Q1: today's live paths; PIPELINE_TYPES["initiative"] pipeline_state.py:110-111; the types/<t>/prompts/* move is PR-5
-    create_guidance: .claude/skills/initiative-create/SKILL.md                 # Step 1 "Clarifying Questions" (:22); template .claude/skills/initiative-create/initiative-template.md (:35)
-    review_rules: .claude/skills/initiative-review/prompts/review-agent.md     # dirname == PIPELINE_TYPES["initiative"]["review_prompts"]
-    review_sections: .claude/skills/initiative-review/prompts/review-agent.md  # same file today (rules and body headings are not split)
-    revise_rules: .claude/skills/initiative-review/prompts/revise-agent.md
-    split_rules: .claude/skills/initiative-split/prompts/split-agent.md        # == PIPELINE_TYPES["initiative"]["split_prompt"]
+  state_prefix: "initiative-"                           # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies
+  scorer_agent: initiative-scorer                       # pipeline_state.PIPELINE_TYPES scorer_type (subagent_type of every assess wave) and the SCORER_AGENT launch var read by .claude/skills/rfe-review/prompts/assess-agent.md
+  prompts:                                            # PR-5b: the typed judgement files under types/<t>/ (design §4.2 tiers, §8.1 layout); rendered into every launch by `type_registry.py launch-vars` (RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH, TEMPLATE_PATH, CREATE_GUIDANCE_PATH); gate 1 checks each exists
+    template: types/initiative/template.md                 # Tier 3 — the create template (from .claude/skills/initiative-create/initiative-template.md); D16
+    create_guidance: types/initiative/prompts/create-guidance.md   # Tier 3 — questions, writing rules and don'ts of the generic rfe-create body
+    review_rules: types/initiative/prompts/review-rules.md         # Tier 2 slot of .claude/skills/rfe-review/prompts/review-agent.md
+    review_sections: types/initiative/prompts/review-sections.md   # Tier 2 slot — the typed body headings
+    revise_rules: types/initiative/prompts/revise-rules.md         # Tier 2 slot of .claude/skills/rfe-review/prompts/revise-agent.md
+    split_rules: types/initiative/prompts/split-rules.md           # Tier 3 — IS the split agent prompt (pipeline_state SPLIT.prompt_file)
   dimensions:
     - name: feasibility                                 # poll phase "initiative-feasibility" (check_review_progress.py:31; pipeline_state.py:198)
-      prompt: .claude/skills/initiative-feasibility-review/SKILL.md   # pipeline_state.py:114 feasibility_skill
+      prompt: types/initiative/dimensions/feasibility.md   # pipeline_state.py:114 feasibility_skill
       blocking: true                                    # Q17: ASSESS wave waits on it (pipeline_state.py:1193-1195 --also-phase); no script reads a blocking flag — unpinned
     - name: alignment                                   # poll phase "initiative-alignment" (check_review_progress.py:34; pipeline_state.py:206)
-      prompt: .claude/skills/strategic-alignment-review/SKILL.md      # pipeline_state.py:115 alignment_skill (truthiness is the only switch, :202)
+      prompt: types/initiative/dimensions/alignment.md      # pipeline_state.py:115 alignment_skill (truthiness is the only switch, :202)
       blocking: false                                   # Q17: initiative-review/SKILL.md:124 "Alignment is informational, not blocking"; :129 — unpinned
       condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208)
       skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
@@ -127,7 +128,7 @@ eval:
   config: eval-initiative.yaml
   dataset: eval/initiative-dataset/cases                # eval-initiative.yaml:36 dataset.path (§8.2 omits /cases)
   mlflow_experiment: initiative-speedrun-eval           # eval-initiative.yaml:33
-  timeout: 8100                                         # eval-initiative.yaml:9
+  timeout: 10800                                        # eval-initiative.yaml:12 — 3 h: 21 cases at opus pace ran ~107 min on 2026-09-22
   thresholds:                                           # eval-initiative.yaml:872-904, verbatim judge names — AUTHORITATIVE from PR-4 (design §4.5)
     files_exist: { min_pass_rate: 1.0 }
     frontmatter_valid: { min_pass_rate: 1.0 }

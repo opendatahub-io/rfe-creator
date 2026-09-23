@@ -8,6 +8,8 @@ design-proposals/work-item-types-unified.md §3.3:
   Gate 1 — lint-time, always on:
     * JSON Schema (types/_schema/type.schema.json, Draft 2020-12)
     * every repo-relative file reference exists: pipeline.prompts.*,
+      (and, PR-5b, the typed files under types/<t>/ carry the Tier-3 launcher tokens
+      and never name a skill directory — typed_prompt_messages)
       pipeline.dimensions[].prompt, eval.config, eval.dataset
       (pipeline.rubric.export is an OUTPUT the bootstrap writes — not required;
       pipeline.rubric.path lives in the assess checkout — gate 2, Q24)
@@ -305,23 +307,28 @@ def schema_messages(desc, schema):
 
 
 def path_messages(desc, repo_root):
-    """Every repo-relative reference gate 1 requires to exist (Q24)."""
+    """Every reference gate 1 requires to exist (Q24). A typed file (``pipeline.prompts.*``,
+    ``pipeline.dimensions[].prompt``) resolves through ``Descriptor.typed_path`` — the same
+    projection ``launch-vars`` and the dispatcher use, so a drop-in root's own files are checked
+    where they live and a missing one is never masked by a repository file of the same relative
+    path; every other reference is repo-relative."""
     repo_root = Path(repo_root)
     messages = []
 
-    def missing(dotted, rel, want_file):
+    def missing(dotted, rel, want_file, typed=False):
         if not isinstance(rel, str) or not rel:
             return  # shape problems belong to the JSON-Schema finding
-        target = repo_root / rel
+        target = Path(desc.typed_path(rel)) if typed else repo_root / rel
         ok = target.is_file() if want_file else target.exists()
         if not ok:
             kind = "file" if want_file else "path"
-            messages.append(f"{dotted}: {kind} not found: {rel} (relative to {repo_root})")
+            where = f"resolved to {target}" if typed else f"relative to {repo_root}"
+            messages.append(f"{dotted}: {kind} not found: {rel} ({where})")
 
     prompts = _opt(desc, "pipeline.prompts") or {}
     if isinstance(prompts, dict):
         for key, rel in prompts.items():
-            missing(f"pipeline.prompts.{key}", rel, want_file=True)
+            missing(f"pipeline.prompts.{key}", rel, want_file=True, typed=True)
 
     dimensions = _opt(desc, "pipeline.dimensions") or []
     if isinstance(dimensions, list):
@@ -338,12 +345,92 @@ def path_messages(desc, repo_root):
             elif dname in seen_names:
                 messages.append(f"pipeline.dimensions name {dname!r} is declared twice")
             seen_names.add(dname)
+        # A name whose derived <NAME>_PATH is a fixed launch-block key (rules, template, ...),
+        # or two names that normalise to one stem (a-b / a_b), would shadow a launch line
+        # silently (type_registry.LAUNCH_KEYS is the shared list).
+        for dname, why in type_registry.dimension_key_collisions(
+            d.get("name") for d in dimensions if isinstance(d, dict)
+        ):
+            messages.append(f"pipeline.dimensions name {dname!r} {why}")
         for i, dim in enumerate(dimensions):
             if isinstance(dim, dict):
-                missing(f"pipeline.dimensions[{i}].prompt", dim.get("prompt"), want_file=True)
+                missing(
+                    f"pipeline.dimensions[{i}].prompt",
+                    dim.get("prompt"),
+                    want_file=True,
+                    typed=True,
+                )
 
     missing("eval.config", _opt(desc, "eval.config"), want_file=True)
     missing("eval.dataset", _opt(desc, "eval.dataset"), want_file=False)
+    return messages
+
+
+# The launcher variables a Tier-3 typed file must carry instead of a literal (design §4.2:
+# "drift-prone mechanical lines inside them ... are replaced by launcher-substituted variables"):
+# the split prompt mints children, so its template path, id allocation, output dirs and the
+# id/size fields are tokens rendered by `type_registry.py launch-vars`.
+TIER3_REQUIRED_TOKENS = {
+    "split_rules": (
+        "{TEMPLATE_PATH}",
+        "{NEXT_ID_FLAGS}",
+        "{TASKS_DIR}",
+        "{REVIEWS_DIR}",
+        "{LOCAL_PREFIX}",
+        "{ID_FIELD}",
+        "{SIZE_SET}",
+        "{TYPE}",
+        "{PROMPT_PATH}",
+        "{BOOTSTRAP}",
+    ),
+}
+_SKILL_TREE_PREFIX = ".claude/skills/"
+
+
+def typed_prompt_messages(desc, repo_root):
+    """The required-line lint over the typed prompt files (PR-5b). A Tier-3 file carries the
+    mechanical tokens of TIER3_REQUIRED_TOKENS (no shared skeleton protects it); no typed file
+    under types/<t>/ names a skill directory — the skill tree is generic from PR-5, and a typed
+    file that pointed back into it would pin the collapse's own moving parts. A type that
+    creates or splits items must name pipeline.prompts.template: launch-vars renders it as
+    TEMPLATE_PATH into every create and split launch, and the schema leaves the key optional
+    (design Q1), so the stage list is what makes it required. Files resolve through
+    ``Descriptor.typed_path`` (a drop-in root's own split prompt is the one linted)."""
+    messages = []
+    prompts = _opt(desc, "pipeline.prompts") or {}
+    stages = _opt(desc, "pipeline.stages") or list(type_registry.DEFAULT_STAGES)
+    if isinstance(stages, list) and isinstance(prompts, dict):
+        needs_template = {"create", "split"} & {s for s in stages if isinstance(s, str)}
+        if needs_template and not prompts.get("template"):
+            messages.append(
+                "pipeline.prompts.template: required when pipeline.stages includes "
+                f"{' / '.join(sorted(needs_template))} (launch-vars would render TEMPLATE_PATH= "
+                "empty into every create and split launch)"
+            )
+    dims = _opt(desc, "pipeline.dimensions") or []
+    files = {}
+    if isinstance(prompts, dict):
+        files.update({f"pipeline.prompts.{k}": v for k, v in prompts.items() if isinstance(v, str)})
+    if isinstance(dims, list):
+        for i, dim in enumerate(dims):
+            if isinstance(dim, dict) and isinstance(dim.get("prompt"), str):
+                files[f"pipeline.dimensions[{i}].prompt"] = dim["prompt"]
+    for dotted, rel in files.items():
+        target = Path(desc.typed_path(rel))
+        if not target.is_file():
+            continue  # path_messages reports the absence
+        text = target.read_text(encoding="utf-8")
+        if rel.startswith("types/") and _SKILL_TREE_PREFIX in text:
+            messages.append(
+                f"{dotted}: {rel} names a skill directory ({_SKILL_TREE_PREFIX}...); typed "
+                "files must not point back into the generic skill tree"
+            )
+        key = dotted.rsplit(".", 1)[-1]
+        for token in TIER3_REQUIRED_TOKENS.get(key, ()):
+            if token not in text:
+                messages.append(
+                    f"{dotted}: {rel} lacks the launcher token {token} (Tier-3 required line)"
+                )
     return messages
 
 
@@ -546,6 +633,7 @@ def per_type_findings(
         messages.extend(schema_messages(desc, schema))
     messages.extend(kind_messages(desc))
     messages.extend(path_messages(desc, repo_root))
+    messages.extend(typed_prompt_messages(desc, repo_root))
     messages.extend(score_fields_messages(desc))
     messages.extend(local_id_pattern_messages(desc))
     messages.extend(alignment_labels_messages(desc))

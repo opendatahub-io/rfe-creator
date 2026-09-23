@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import type_registry  # noqa: E402
 from check_review_progress import (  # noqa: E402
     PHASE_CHECKS,
     _check_phase,
@@ -18,6 +19,8 @@ from check_review_progress import (  # noqa: E402
     _format_status,
     check_id,
 )
+
+REG = type_registry.load(extra_roots=[], env={})
 
 # ── check_id ──
 
@@ -934,6 +937,12 @@ def _phases_used(text):
     return re.findall(r"--phase\s+([a-z-]+)", text)
 
 
+def _phases_used_rendered(text):
+    """Literal phase names in a rendered generic body: a templated `--phase <prefix><name>`
+    (the dimension loop) is not one."""
+    return re.findall(r"--phase ([a-z][a-z-]*[a-z])(?![\w<-])", text)
+
+
 class TestSkillBarrierUsage:
     """The barrier is prose, so nothing else in the suite exercises it.
 
@@ -970,12 +979,64 @@ class TestSkillBarrierUsage:
         assert len(_phases_used(init)) >= len(_phases_used(rfe))
         assert init.count("NEXT_POLL") >= rfe.count("NEXT_POLL")
 
+    # PR-5b: the generic bodies poll through `--phase {POLL_PREFIX}<phase>`. Rendered per type
+    # with the launch block (`type_registry.py launch-vars`) they must name PHASE_CHECKS keys
+    # only — the guard above, restated on the surface a type actually runs through — and poll
+    # at least as much as the legacy bodies they replace (kept until PR-5c).
+
+    @staticmethod
+    def _rendered(t, stage):
+        with open(os.path.join(SKILLS_DIR, f"rfe-{stage}", "SKILL.md")) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(REG.get(t), stage):
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    @staticmethod
+    def _dimension_polls(text):
+        """The per-dimension loop polls `--phase <prefix><name>` — one line for every blocking
+        dimension, templated on <name>."""
+        return re.findall(r"--phase [a-z-]*<name>", text)
+
+    @pytest.mark.parametrize("t", REG.names())
+    def test_generic_bodies_poll_known_phases_only(self, t):
+        desc = REG.get(t)
+        pp = desc.get("pipeline.poll_prefix")
+        for stage in ("review", "split", "speedrun"):
+            text = self._rendered(t, stage)
+            used = _phases_used_rendered(text)
+            assert used, (t, stage)
+            unknown = [p for p in used if p not in PHASE_CHECKS]
+            assert not unknown, f"rfe-{stage} rendered for {t}: unknown poll phases {unknown}"
+        for dim in desc.get("pipeline.dimensions"):
+            assert f"{pp}{dim['name']}" in PHASE_CHECKS, dim["name"]
+        assert self._dimension_polls(self._rendered(t, "review"))
+        assert f"{pp}create" in _phases_used_rendered(self._rendered(t, "speedrun"))
+
+    @pytest.mark.parametrize("t", REG.names())
+    def test_generic_bodies_poll_as_much_as_the_legacy_bodies(self, t):
+        legacy = {"rfe": "rfe.", "initiative": "initiative-"}[t]
+        blocking = [d for d in REG.get(t).get("pipeline.dimensions") if d.get("blocking", True)]
+        for stage in ("review", "split"):
+            new, old = self._rendered(t, stage), _skill_text(f"{legacy}{stage}")
+            barriers = len(_phases_used_rendered(new)) + len(blocking) * len(
+                self._dimension_polls(new)
+            )
+            assert barriers >= len(_phases_used(old)), (t, stage)
+            # The generic body states the NEXT_POLL rule once and invokes it at every poll
+            # site (the legacy bodies repeated the sleep sentence per site): at least one
+            # NEXT_POLL reference per checker invocation.
+            checks = len(re.findall(r"check_review_progress\.py --phase", new))
+            assert checks and new.count("NEXT_POLL") >= checks, (t, stage)
+
 
 # ── Registry derivation ──
 
 
-# The 14 poll phases in the order the literal table had. argparse renders the --phase /
-# --also-phase choices from this order, so it is CLI surface, not an implementation detail.
+# The 15 poll phases in the order the literal table had (PR-5b added initiative-create after
+# initiative-fetch: every type polls the Phase-1 create barrier). argparse renders the
+# --phase / --also-phase choices from this order, so it is CLI surface, not an implementation
+# detail.
 _TODAYS_PHASES = [
     "fetch",
     "create",
@@ -986,6 +1047,7 @@ _TODAYS_PHASES = [
     "split",
     "initiative-split",
     "initiative-fetch",
+    "initiative-create",
     "initiative-assess",
     "initiative-feasibility",
     "initiative-review",
@@ -1023,12 +1085,14 @@ class TestDerivedFromRegistry:
                 name = dim["name"]
                 assert PHASE_CHECKS[f"{pp}{name}"]("X-1") == f"{dirs['reviews']}/X-1-{name}.md"
 
-    def test_create_row_is_rfe_only(self):
-        """#148's Phase-1 barrier is grandfathered to rfe until PR-5's generic body."""
+    def test_create_row_for_every_type(self):
+        """#148's Phase-1 barrier is polled by every type since PR-5b (the generic speedrun
+        body renders `--phase <poll_prefix>create`); the row watches the fetch path with the
+        stricter frontmatter check."""
         for desc in _hermetic_registry():
             pp = desc.get("pipeline.poll_prefix")
-            assert (f"{pp}create" in PHASE_CHECKS) is (desc.name == "rfe")
-        assert PHASE_CHECKS["create"]("X-1") == PHASE_CHECKS["fetch"]("X-1")
+            assert f"{pp}create" in PHASE_CHECKS, desc.name
+            assert PHASE_CHECKS[f"{pp}create"]("X-1") == PHASE_CHECKS[f"{pp}fetch"]("X-1")
 
     def test_create_mode_uses_the_owning_types_id_field(self, tmp_path, monkeypatch):
         """The create check compares identity.id_field, not a literal — rfe_id for rfe."""
@@ -1189,6 +1253,7 @@ class TestDerivedFromRegistry:
         got = json.loads(result.stdout)
         widget_keys = [
             "widget-fetch",
+            "widget-create",
             "widget-assess",
             "widget-feasibility",
             "widget-security",
@@ -1196,9 +1261,10 @@ class TestDerivedFromRegistry:
             "widget-revise",
             "widget-split",
         ]
-        assert got["keys"] == _TODAYS_PHASES + widget_keys  # shipped rows first, no widget-create
+        assert got["keys"] == _TODAYS_PHASES + widget_keys  # shipped rows first
         assert got["paths"] == {
             "widget-fetch": "artifacts/widgets/W-1.md",
+            "widget-create": "artifacts/widgets/W-1.md",
             "widget-assess": "tmp/rfe-assess/single/W-1.result.md",
             "widget-feasibility": "artifacts/widget-reviews/W-1-feasibility.md",
             "widget-security": "artifacts/widget-reviews/W-1-security.md",

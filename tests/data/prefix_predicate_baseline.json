@@ -4,6 +4,5 @@
   "scripts/clone_results_repo.py": 1,
   "scripts/collect_children.py": 1,
   "scripts/fetch_issue.py": 1,
-  "scripts/jira_utils.py": 1,
-  "scripts/pipeline_state.py": 1
+  "scripts/jira_utils.py": 1
 }

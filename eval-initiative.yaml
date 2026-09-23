@@ -7,9 +7,9 @@ description: End-to-end Initiative pipeline — create, review, auto-fix, split,
 # Execution — how the skill processes test cases (runner-agnostic)
 execution:
   mode: batch
-  skill: initiative-speedrun
-  arguments: --headless --dry-run --input batch.yaml
-  timeout: 8100          # 2 hours 15 minutes
+  skill: rfe-speedrun
+  arguments: --headless --dry-run --input batch.yaml --type initiative
+  timeout: 10800          # 3 hours — 26 rfe / 21 initiative cases at opus pace ran 105–110 min on 2026-09-22 with three evals sharing the runners; 2 h left no headroom
   max_budget_usd: 100.0  # Per-invocation cost cap
 
 # Runner — agent harness + runner-specific knobs
@@ -665,7 +665,7 @@ judges:
       if "rm artifacts/initiatives/" in stdout:
           errors.append("Initiative task file deleted during execution")
       phases_found = []
-      if "Phase 1" in stdout or "Phase 1:" in stdout or "initiative-create" in stdout.lower():
+      if "Phase 1" in stdout or "Phase 1:" in stdout or "rfe-create" in stdout.lower():
           phases_found.append("create")
       if "auto-fix" in stdout.lower() or "AUTOFIX" in stdout or "Batch " in stdout:
           phases_found.append("auto-fix")

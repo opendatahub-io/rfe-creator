@@ -9,8 +9,48 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import check_revised  # noqa: E402
+import type_registry  # noqa: E402
 
+REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_revised.py")
+GENERIC_REVIEW_SKELETON = ".claude/skills/rfe-review/prompts/review-agent.md"
+REVIEW_PROMPT_SURFACES = [
+    ".claude/skills/rfe.review/prompts/review-agent.md",  # legacy, until PR-5c
+    ".claude/skills/initiative-review/prompts/review-agent.md",  # legacy, until PR-5c
+    "rfe:generic",
+    "initiative:generic",
+]
+
+
+def _set_commands(text):
+    """Every `python3 scripts/frontmatter.py set` command, backslash continuations joined."""
+    lines, out, i = text.splitlines(), [], 0
+    while i < len(lines):
+        if "frontmatter.py set" in lines[i]:
+            command = lines[i]
+            while command.rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                command = command.rstrip()[:-1] + " " + lines[i].strip()
+            out.append(command)
+        i += 1
+    return out
+
+
+def _review_prompt(surface):
+    """(text, id_field) of a review-agent prompt surface: a legacy file, or the generic
+    skeleton rendered for a type with its launch block (`type_registry.py launch-vars`)."""
+    if surface.endswith(":generic"):
+        t = surface.split(":")[0]
+        desc = type_registry.load(extra_roots=[], env={}).get(t)
+        with open(os.path.join(REPO_ROOT, GENERIC_REVIEW_SKELETON)) as f:
+            text = f.read()
+        for key, value in type_registry.launch_vars(desc, "review"):
+            text = text.replace("{" + key + "}", value)
+        return text, desc.id_field
+    with open(os.path.join(REPO_ROOT, surface)) as f:
+        return f.read(), ("rfe_id" if "/rfe." in surface else "initiative_id")
+
+
 FM_SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "frontmatter.py")
 
 
@@ -320,28 +360,17 @@ class TestReassessCyclePreservation:
         fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-2003-review.md")
         assert fm["auto_revised"] is True
 
-    def test_review_agent_prompt_excludes_auto_revised(self):
-        """The review agent prompt must NOT include auto_revised in its
-        frontmatter.py set call — only the revise agent and FIXUP set it."""
-        prompt_path = os.path.join(
-            os.path.dirname(__file__), "..", ".claude/skills/rfe.review/prompts/review-agent.md"
-        )
-        with open(prompt_path) as f:
-            content = f.read()
-        lines = content.split("\n")
-        in_set_block = False
-        set_block = []
-        for line in lines:
-            if "frontmatter.py set" in line and "rfe_id=" in line:
-                in_set_block = True
-            if in_set_block:
-                set_block.append(line)
-                if not line.rstrip().endswith("\\"):
-                    break
-        set_cmd = " ".join(set_block)
-        assert "auto_revised" not in set_cmd, (
-            "review-agent.md frontmatter.py set must not include auto_revised"
-        )
+    @pytest.mark.parametrize("surface", REVIEW_PROMPT_SURFACES)
+    def test_review_agent_prompt_excludes_auto_revised(self, surface):
+        """The review agent prompt must NOT include auto_revised in its frontmatter.py set
+        call — only the revise agent and FIXUP set it. Held on the legacy prompts (until PR-5c)
+        and on the generic review skeleton rendered per type (`{ID_FIELD}={ID}` renders to the
+        type's id field)."""
+        text, id_field = _review_prompt(surface)
+        review_sets = [c for c in _set_commands(text) if f"{id_field}={{ID}}" in c]
+        assert review_sets, f"{surface}: no frontmatter.py set command carries {id_field}={{ID}}"
+        for command in review_sets:
+            assert "auto_revised" not in command, f"{surface}: {command}"
 
 
 class TestTypeArg:
@@ -496,6 +525,149 @@ class TestLowerOnly:
         )
         assert "RHAIRFE-3007: auto_revised False -> True" in result.stdout
         assert "LOWERED=" not in result.stdout
+
+
+class TestStaleCompanions:
+    """An unchanged task's leftover removed-context companion is deleted in both batch modes.
+    2026-09-22 initiative eval, INIT-012: the revise agent wrote the companion
+    (check_content_preservation.py --write-yaml), reverted its edit, set the flag; FIXUP lowered
+    the flag but the companion made the judge count a revision, and the dry-run submit would
+    have posted a removed-context comment for content that was never removed."""
+
+    MODES = [(), ("--lower-only",)]
+
+    def _run(self, tmp_path, *args):
+        return subprocess.run(
+            ["python3", SCRIPT, "--batch", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+
+    def _companion(self, tmp_path, rfe_id, suffix="-removed-context.yaml"):
+        path = tmp_path / "artifacts" / "rfe-tasks" / f"{rfe_id}{suffix}"
+        path.write_text("blocks:\n- type: unclassified\n  text: never actually removed\n")
+        return path
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_identical_content_removes_the_companion(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3301", "Same.", "Same.", auto_revised=True)
+        path = self._companion(tmp_path, "RHAIRFE-3301")
+        result = self._run(tmp_path, *mode, "RHAIRFE-3301")
+        assert result.returncode == 0, result.stderr
+        assert not path.exists()
+        assert (
+            "RHAIRFE-3301: stale removed-context companion removed "
+            "(RHAIRFE-3301-removed-context.yaml; task body equals the original)"
+        ) in result.stdout
+        assert "STALE_COMPANIONS=RHAIRFE-3301" in result.stdout
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3301-review.md")
+        assert fm["auto_revised"] is False
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_changed_content_keeps_the_companion(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3302", "Original.", "Revised.", auto_revised=True)
+        path = self._companion(tmp_path, "RHAIRFE-3302")
+        result = self._run(tmp_path, *mode, "RHAIRFE-3302")
+        assert result.returncode == 0, result.stderr
+        assert path.exists()
+        assert "STALE_COMPANIONS=\n" in result.stdout
+        assert "stale removed-context companion" not in result.stdout
+
+    @pytest.mark.parametrize("mode", MODES, ids=["fixup", "lower-only"])
+    def test_no_companion_reports_an_empty_line(self, tmp_path, mode):
+        _setup_batch(tmp_path, "RHAIRFE-3303", "Same.", "Same.", auto_revised=True)
+        result = self._run(tmp_path, *mode, "RHAIRFE-3303")
+        assert result.returncode == 0, result.stderr
+        assert "STALE_COMPANIONS=\n" in result.stdout
+        assert "stale removed-context companion" not in result.stdout
+        assert not list((tmp_path / "artifacts" / "rfe-tasks").glob("*-removed-context*"))
+
+    def test_legacy_markdown_companion_is_removed_too(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3304", "Same.", "Same.", auto_revised=False)
+        yaml_path = self._companion(tmp_path, "RHAIRFE-3304")
+        md_path = self._companion(tmp_path, "RHAIRFE-3304", "-removed-context.md")
+        result = self._run(tmp_path, "RHAIRFE-3304")
+        assert result.returncode == 0, result.stderr
+        assert not yaml_path.exists() and not md_path.exists()
+        assert (
+            "(RHAIRFE-3304-removed-context.yaml, RHAIRFE-3304-removed-context.md; "
+            "task body equals the original)"
+        ) in result.stdout
+
+    def test_the_comments_companion_is_never_touched(self, tmp_path):
+        _setup_batch(tmp_path, "RHAIRFE-3305", "Same.", "Same.", auto_revised=True)
+        comments = tmp_path / "artifacts" / "rfe-tasks" / "RHAIRFE-3305-comments.md"
+        comments.write_text("# Comments: RHAIRFE-3305\n")
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3305")
+        assert result.returncode == 0, result.stderr
+        assert comments.exists()
+        assert "STALE_COMPANIONS=\n" in result.stdout
+
+    def test_helper_returns_the_removed_names(self, tmp_path):
+        (tmp_path / "X-1-removed-context.yaml").write_text("x")
+        assert check_revised.remove_stale_companions(str(tmp_path), "X-1") == [
+            "X-1-removed-context.yaml"
+        ]
+        assert check_revised.remove_stale_companions(str(tmp_path), "X-1") == []
+        assert check_revised.REMOVED_CONTEXT_SUFFIXES == (
+            "-removed-context.yaml",
+            "-removed-context.md",
+        )
+
+
+class TestBatchIdBoundary:
+    """CodeRabbit on #200 (CWE-22): a --batch argument or --ids-file entry is joined onto the
+    type dirs and names the companion remove_stale_companions deletes, so a path-shaped id is
+    refused (preserve_review_state.validate_item_id) before any file is read or written."""
+
+    def _run(self, tmp_path, *args):
+        return subprocess.run(
+            ["python3", SCRIPT, "--batch", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": os.path.dirname(SCRIPT)},
+        )
+
+    def _decoy(self, tmp_path):
+        """A companion one level above the tasks dir: what '../evil' would resolve to."""
+        _setup_batch(tmp_path, "RHAIRFE-3400", "Same.", "Same.", auto_revised=True)
+        decoy = tmp_path / "artifacts" / "evil-removed-context.yaml"
+        decoy.write_text("blocks: []\n")
+        return decoy
+
+    @pytest.mark.parametrize("bad", ["../evil", "/abs/evil", "sub/evil", ".", ".."])
+    def test_a_path_shaped_argument_exits_2(self, tmp_path, bad):
+        decoy = self._decoy(tmp_path)
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3400", bad)
+        assert result.returncode == 2, result.stdout
+        assert f"ERROR: invalid item id: {bad!r}" in result.stderr
+        assert result.stdout == ""  # nothing processed, not even the valid id
+        assert decoy.exists()
+        fm = _read_frontmatter(tmp_path / "artifacts/rfe-reviews/RHAIRFE-3400-review.md")
+        assert fm["auto_revised"] is True
+
+    def test_a_path_shaped_ids_file_entry_exits_2(self, tmp_path):
+        decoy = self._decoy(tmp_path)
+        ids_file = tmp_path / "ids.txt"
+        ids_file.write_text("RHAIRFE-3400\n../evil\n")
+        result = self._run(tmp_path, "--ids-file", str(ids_file))
+        assert result.returncode == 2
+        assert "ERROR: invalid item id: '../evil'" in result.stderr
+        assert decoy.exists()
+
+    def test_plain_stems_still_run(self, tmp_path):
+        self._decoy(tmp_path)
+        result = self._run(tmp_path, "--lower-only", "RHAIRFE-3400")
+        assert result.returncode == 0, result.stderr
+        assert "LOWERED=RHAIRFE-3400" in result.stdout
+
+    def test_library_call_raises_before_discovery(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="invalid item id"):
+            check_revised.batch_mode(["../evil"])
 
 
 BAD_REVIEW = (

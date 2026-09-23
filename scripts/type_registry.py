@@ -143,7 +143,10 @@ import yaml
 
 # Default discovery root: <repo>/types, located relative to this file — never the cwd
 # (precedent: pipeline_state.py os.path.dirname(__file__), snapshot_fetch.py SCRIPT_DIR).
-DEFAULT_ROOT = Path(__file__).resolve().parent.parent / "types"
+# The plugin root: scripts/ and types/ ship together (a checkout or a marketplace install), so
+# the directory above scripts/ is what every repo_path in a shipped descriptor is relative to.
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_ROOT = PLUGIN_ROOT / "types"
 
 DESCRIPTOR_FILENAME = "type.yaml"
 EXTRA_ROOTS_ENV = "RFE_CREATOR_EXTRA_TYPES"
@@ -309,6 +312,22 @@ class Descriptor:
 
     def __repr__(self):
         return f"Descriptor({self.name!r}, path={str(self.path) if self.path else None!r})"
+
+    def typed_path(self, rel):
+        """The absolute path of a typed file a repo_path field names (``pipeline.prompts.*``,
+        ``pipeline.dimensions[].prompt``). A path under this type's own directory
+        (``types/<name>/...``) resolves against the descriptor's directory — a drop-in root
+        carries its typed files wherever it lives — and any other plugin-relative path against
+        the plugin root. Launch blocks carry these absolute values: subagents read the files
+        from an arbitrary working directory (a marketplace install runs the skills from the
+        project, not the checkout), where a relative path would not resolve. An empty value
+        (an absent optional file) stays empty."""
+        if not rel:
+            return ""
+        own = f"types/{self.name}/"
+        if self.path is not None and rel.startswith(own):
+            return str((self.path.parent / rel[len(own) :]).resolve())
+        return str((PLUGIN_ROOT / rel).resolve())
 
     # -- generic access -------------------------------------------------------------------
 
@@ -1472,6 +1491,295 @@ def _artifact_dirs(desc):
     return [value for value in dirs.values() if isinstance(value, str)]
 
 
+# -- launch vars (design §4.1, §8.3; PR-5b) -------------------------------------------------
+
+# The vendored assess-rfe checkout (bootstrap-assess-rfe.sh CONTEXT_DIR); pipeline.rubric.path is
+# relative to it.
+CONTEXT_DIR = ".context/assess-rfe"
+# The generic create skill's pre-assigned id flag (PR-5 plan D15).
+ID_FLAG = "--id"
+DEFAULT_STAGES = ("create", "review", "submit", "split", "auto-fix", "speedrun")
+# The fixed keys of every launch block, in emission order (the per-dimension DIMENSION_<NAME>_*
+# keys follow the dimension list). launch_vars checks its output against this tuple so the two
+# cannot drift; gate 1 and the dispatcher refuse a dimension whose derived <NAME>_PATH key
+# (pipeline_state._review_vars) would shadow one of these.
+LAUNCH_KEYS = (
+    "STAGE",
+    "TYPE",
+    "TYPE_FLAG",
+    "ENTITY",
+    "ENTITY_PLURAL",
+    "ID_FIELD",
+    "ID_FLAG",
+    "LOCAL_PREFIX",
+    "KEY_PREFIX",
+    "ID_GRAMMAR",
+    "LOCAL_ID_EXAMPLE",
+    "KEY_EXAMPLE",
+    "TASK_SCHEMA",
+    "REVIEW_SCHEMA",
+    "TASKS_DIR",
+    "ORIGINALS_DIR",
+    "REVIEWS_DIR",
+    "INDEX_ENABLED",
+    "COMMENTS_COMPANION",
+    "COMMENTS_FIELD",
+    "STATE_PREFIX",
+    "POLL_PREFIX",
+    "POLL_FILE_PREFIX",
+    "ASSESS_STAGING",
+    "SCORER_AGENT",
+    "PROMPT_PATH",
+    "RUBRIC_EXPORT",
+    "BOOTSTRAP",
+    "CREATE_GUIDANCE_PATH",
+    "TEMPLATE_PATH",
+    "RULES_PATH",
+    "SECTIONS_PATH",
+    "REVISE_RULES_PATH",
+    "SPLIT_RULES_PATH",
+    "DIMENSIONS",
+    "DIMENSION_FILES",
+    "SCORE_FIELDS",
+    "SCORE_SET",
+    "BEFORE_SCORE_SET",
+    "SCORE_ZERO_SET",
+    "REVIEW_EXTRA_FIELDS",
+    "REVIEW_EXTRA_SET",
+    "EXTRA_RULES",
+    "SIZE_FIELD",
+    "SIZE_SET",
+    "SIZE_ENUM",
+    "BATCH_EXTRA_FIELDS",
+    "PARENT_FLAG",
+    "NEXT_ID_FLAGS",
+    "REPORT_PREFIX",
+    "RUN_REPORT",
+    "HTML_REPORT",
+    "RESPLIT_FIELD",
+    "RESPLIT_BELOW",
+    "LABEL_PREFIX",
+    "NEEDS_ATTENTION_LABEL",
+    "VERDICT_LABELS",
+    "QUERY_DEFAULT",
+    "CONTEXT_DIR",
+)
+# The phase-var keys the dispatcher adds beside the launch block (pipeline_state._review_vars,
+# _assess_vars): a dimension may not shadow these either.
+PHASE_VAR_KEYS = ("FIRST_PASS", "ID", "KEY", "ASSESS_PATH", "DATA_FILE", "RUN_DIR")
+
+
+def dimension_key(name):
+    """The launch-var stem of a dimension name: ``a-b`` and ``a_b`` both give ``A_B``."""
+    return str(name).upper().replace("-", "_")
+
+
+def dimension_key_collisions(names):
+    """Why a dimension list cannot render: ``(name, reason)`` for a name whose ``<KEY>_PATH``
+    is a fixed launch-block or phase-var key, and for a pair of names that normalise to the
+    same stem (their DIMENSION_<KEY>_* and <KEY>_PATH lines would shadow each other)."""
+    problems, seen = [], {}
+    for name in names:
+        if not isinstance(name, str):
+            continue
+        key = dimension_key(name)
+        if f"{key}_PATH" in LAUNCH_KEYS or f"{key}_PATH" in PHASE_VAR_KEYS:
+            problems.append((name, f"renders {key}_PATH, a launch-block key"))
+        if key in seen and seen[key] != name:
+            problems.append((name, f"normalises to {key} like {seen[key]!r}"))
+        seen.setdefault(key, name)
+    return problems
+
+
+# Interactive skills poll through a second prefix the descriptor does not carry (tmp/<type>-poll-).
+_POLL_FILE_PREFIX = "tmp/{type}-poll-"
+_ASSESS_STAGING = "tmp/rfe-assess/single"
+
+
+def _flag(value):
+    return "true" if value else "false"
+
+
+def _dimension_condition(dim):
+    cond = dim.get("condition")
+    if not cond:
+        return "always"
+    if "frontmatter_field" in cond:
+        return f"{cond['frontmatter_field']} startswith {cond['prefix']}"
+    if "context_exists" in cond:
+        return f"context_exists {cond['context_exists']}"
+    return "always"
+
+
+def launch_vars(desc, stage):
+    """The ``KEY=value`` block a launch directive carries for ``stage`` (design §8.3).
+
+    Every typed literal a generic ``rfe-*`` body or a prompt skeleton needs — ids, dirs,
+    schemas, state and poll prefixes, the scorer agent, the composed rubric path, the typed
+    prompt files, the dimensions and their verdict-label families, the score-field stubs, the
+    declarative review rules, the re-split threshold, the report prefix — rendered from the
+    descriptor, so no body hand-writes a typed path (PR-5 plan D13). Deterministic: same
+    descriptor, same lines, same order.
+    Values are single-line; runtime placeholders (``{ID}``, ``{KEY}``) are left for the agent.
+    ``stage`` must be one of the type's ``pipeline.stages``.
+
+    Typed-file paths (the template, the guidance, the rules, the sections, the split prompt,
+    every dimension prompt) are ABSOLUTE (``Descriptor.typed_path``) so the files resolve from
+    any working directory; workspace paths (``artifacts/...``, ``tmp/...``, the rubric under
+    ``.context/``) and every command (``BOOTSTRAP``, ``python3 scripts/...``) stay relative —
+    the headless allowlist matches command text literally, and the workspace is the cwd.
+    """
+    stages = list(desc.get("pipeline.stages", None) or DEFAULT_STAGES)
+    if stage not in stages:
+        raise ResolveError(
+            f"{desc.name}: stage {stage!r} is not one of the type's pipeline.stages "
+            f"({', '.join(stages)})",
+            exit_code=2,
+        )
+    dirs = desc.dirs()
+    pipe = desc.get("pipeline")
+    prompts = pipe.get("prompts") or {}
+    dims = list(pipe.get("dimensions") or [])
+    rubric = pipe.get("rubric") or {}
+    resplit = pipe.get("resplit") or {}
+    display = desc.get("display")
+    score_fields = desc.score_fields
+    review_schema = desc.get("schema.review") or {}
+    extra_fields = review_schema.get("extra_fields") or {}
+    task_extra = desc.get("schema.task.extra_fields", None) or {}
+    batch_extra = list(desc.get("batch.extra_fields", None) or [])
+    labels = desc.get("conventions.labels") or {}
+    write_prefix = desc.write_prefix or ""
+    local_prefix = desc.local_prefix
+    comments = bool(desc.get("companions.comments", False))
+    report_prefix = desc.get("snapshot.report_prefix", "") or ""
+    size = task_extra.get("size") if isinstance(task_extra, dict) else None
+
+    rules = []
+    for rule in review_schema.get("extra_rules") or []:
+        when, then = rule.get("when") or {}, rule.get("then")
+        rules.append(f"If `{when.get('field')}` is `{when.get('equals')}`, set `{then}=true`.")
+    extra_set = "".join(
+        f" {name}=<{'/'.join(str(v) for v in spec.get('enum', []))}>"
+        if isinstance(spec, dict) and spec.get("enum")
+        else f" {name}=<value>"
+        for name, spec in extra_fields.items()
+    )
+
+    out = [
+        ("STAGE", stage),
+        ("TYPE", desc.name),
+        ("TYPE_FLAG", f"--type {desc.name}"),
+        ("ENTITY", display["entity"]),
+        ("ENTITY_PLURAL", display["entity_plural"]),
+        ("ID_FIELD", desc.id_field),
+        ("ID_FLAG", ID_FLAG),
+        ("LOCAL_PREFIX", local_prefix),
+        ("KEY_PREFIX", write_prefix),
+        ("ID_GRAMMAR", f"{write_prefix}NNNN or {local_prefix}NNN"),
+        ("LOCAL_ID_EXAMPLE", f"{local_prefix}001"),
+        ("KEY_EXAMPLE", f"{write_prefix}1234"),
+        ("TASK_SCHEMA", f"{desc.name}-task"),
+        ("REVIEW_SCHEMA", f"{desc.name}-review"),
+        ("TASKS_DIR", dirs["tasks"]),
+        ("ORIGINALS_DIR", dirs["originals"]),
+        ("REVIEWS_DIR", dirs["reviews"]),
+        ("INDEX_ENABLED", _flag(desc.get("index.enabled", False))),
+        ("COMMENTS_COMPANION", _flag(comments)),
+        ("COMMENTS_FIELD", ',"comment"' if comments else ""),
+        ("STATE_PREFIX", pipe.get("state_prefix", "") or ""),
+        ("POLL_PREFIX", pipe.get("poll_prefix", "") or ""),
+        ("POLL_FILE_PREFIX", _POLL_FILE_PREFIX.format(type=desc.name)),
+        ("ASSESS_STAGING", _ASSESS_STAGING),
+        ("SCORER_AGENT", pipe["scorer_agent"]),
+        ("PROMPT_PATH", f"{CONTEXT_DIR}/{rubric['path']}"),
+        ("RUBRIC_EXPORT", rubric.get("export") or "none"),
+        ("BOOTSTRAP", f"bash scripts/bootstrap-assess-rfe.sh --type {desc.name}"),
+        ("CREATE_GUIDANCE_PATH", desc.typed_path(prompts.get("create_guidance", ""))),
+        ("TEMPLATE_PATH", desc.typed_path(prompts.get("template", ""))),
+        ("RULES_PATH", desc.typed_path(prompts.get("review_rules", ""))),
+        ("SECTIONS_PATH", desc.typed_path(prompts.get("review_sections", ""))),
+        ("REVISE_RULES_PATH", desc.typed_path(prompts.get("revise_rules", ""))),
+        ("SPLIT_RULES_PATH", desc.typed_path(prompts.get("split_rules", ""))),
+        ("DIMENSIONS", ",".join(d["name"] for d in dims)),
+    ]
+    for dim in dims:
+        key = dim["name"].upper().replace("-", "_")
+        out.extend(
+            [
+                (f"DIMENSION_{key}_PROMPT", desc.typed_path(dim["prompt"])),
+                (f"DIMENSION_{key}_FILE", f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"),
+                (f"DIMENSION_{key}_BLOCKING", _flag(dim.get("blocking", True))),
+                (f"DIMENSION_{key}_CONDITION", _dimension_condition(dim)),
+            ]
+        )
+    out.extend(
+        [
+            (
+                "DIMENSION_FILES",
+                "; ".join(
+                    f"{d['name']}: {dirs['reviews']}/{{ID}}-{d['name']}.md"
+                    + ("" if d.get("blocking", True) else " (if it exists)")
+                    for d in dims
+                ),
+            ),
+            ("SCORE_FIELDS", ",".join(score_fields)),
+            ("SCORE_SET", " ".join(f"scores.{f}=<n>" for f in score_fields)),
+            ("BEFORE_SCORE_SET", " ".join(f"before_scores.{f}=<n>" for f in score_fields)),
+            ("SCORE_ZERO_SET", " ".join(f"scores.{f}=0" for f in score_fields)),
+            ("REVIEW_EXTRA_FIELDS", ",".join(str(k) for k in extra_fields)),
+            ("REVIEW_EXTRA_SET", extra_set),
+            ("EXTRA_RULES", " ".join(rules) if rules else "none"),
+            ("SIZE_FIELD", _flag(size)),
+            ("SIZE_SET", " size=<size>" if size else ""),
+            (
+                "SIZE_ENUM",
+                ",".join(str(v) for v in size.get("enum", [])) if isinstance(size, dict) else "",
+            ),
+            ("BATCH_EXTRA_FIELDS", ",".join(str(f) for f in batch_extra)),
+            ("PARENT_FLAG", "--parent" if "parent_key" in batch_extra else ""),
+            (
+                "NEXT_ID_FLAGS",
+                f"--prefix {local_prefix.rstrip('-')} --dir {dirs['tasks']}",
+            ),
+            ("REPORT_PREFIX", report_prefix),
+            ("RUN_REPORT", f"artifacts/auto-fix-runs/{report_prefix}<timestamp>.yaml"),
+            ("HTML_REPORT", f"artifacts/auto-fix-runs/{report_prefix}<timestamp>-report.html"),
+            ("RESPLIT_FIELD", str(resplit.get("score_field", ""))),
+            ("RESPLIT_BELOW", str(resplit.get("below", ""))),
+            ("LABEL_PREFIX", desc.get("conventions.label_prefix")),
+            ("NEEDS_ATTENTION_LABEL", labels.get("needs_attention", "")),
+            (
+                # The verdict-label families of the declared dimensions (conventions.labels
+                # keyed by a dimension name): what the submit body documents and the scripts
+                # keep mutually exclusive per family.
+                "VERDICT_LABELS",
+                ", ".join(
+                    f"{d['name']}.{verdict}"
+                    for d in dims
+                    if isinstance(labels.get(d["name"]), dict)
+                    for verdict in labels[d["name"]]
+                )
+                or "none",
+            ),
+            ("QUERY_DEFAULT", desc.get("conventions.query_default", "") or ""),
+            ("CONTEXT_DIR", CONTEXT_DIR),
+        ]
+    )
+    fixed = [key for key, _ in out if not key.startswith("DIMENSION_") or key in LAUNCH_KEYS]
+    if fixed != list(LAUNCH_KEYS):
+        raise RegistryError("launch_vars drifted from LAUNCH_KEYS; update the tuple with the block")
+    for key, value in out:
+        if not isinstance(value, str) or "\n" in value:
+            raise RegistryError(f"{desc.name}: launch var {key} is not a single line: {value!r}")
+    return out
+
+
+def render_launch_vars(pairs):
+    """``KEY=value`` lines, one per pair, trailing newline."""
+    return "".join(f"{key}={value}\n" for key, value in pairs)
+
+
 # -- the shared --type hand-parser (design §5 rung 1) ---------------------------------------
 
 
@@ -1542,6 +1850,16 @@ def _cmd_show(reg, args):
 def _cmd_get(reg, args):
     desc = reg.get(args.type)
     _emit(desc.get(args.dotted), args.json)
+    return 0
+
+
+def _cmd_launch_vars(reg, args):
+    desc = reg.get(args.type)
+    pairs = launch_vars(desc, args.stage)
+    if args.json:
+        _emit(dict(pairs), True)
+    else:
+        sys.stdout.write(render_launch_vars(pairs))
     return 0
 
 
@@ -1645,6 +1963,15 @@ def _build_parser():
     p_get.add_argument("type")
     p_get.add_argument("dotted", metavar="dotted.path")
     p_get.set_defaults(func=_cmd_get)
+
+    p_vars = sub.add_parser(
+        "launch-vars",
+        parents=[common],
+        help="print the KEY=value launch block of one stage (design §8.3; PR-5)",
+    )
+    p_vars.add_argument("type")
+    p_vars.add_argument("stage", help="one of the type's pipeline.stages")
+    p_vars.set_defaults(func=_cmd_launch_vars)
 
     p_binding = sub.add_parser(
         "binding", parents=[common], help="print the effective tracker binding"

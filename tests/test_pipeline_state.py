@@ -17,6 +17,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import pipeline_state as ps
 
 
+def _memo_overrides():
+    from conftest import MEMO_OVERRIDES
+
+    return dict(MEMO_OVERRIDES)
+
+
 @pytest.fixture
 def tmp_dir(tmp_path, monkeypatch):
     """Run tests from a temp directory with isolated state."""
@@ -795,6 +801,25 @@ class TestBatchDone:
         )
         _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
         assert "REPORT flag guard: lowered=0 skipped=1\n" in summary
+        # A stale removed-context companion the guard deleted (an unrevised task) is counted
+        # too, between lowered= and skipped=.
+        monkeypatch.setattr(
+            ps,
+            "_run_script_soft",
+            lambda cmd: (
+                0,
+                "LOWERED=RHAIRFE-2\nSTALE_COMPANIONS=RHAIRFE-2\nSKIPPED=RHAIRFE-1\nUPDATED=1",
+            ),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert "REPORT flag guard: lowered=1 stale_companions=1 skipped=1\n" in summary
+        monkeypatch.setattr(
+            ps,
+            "_run_script_soft",
+            lambda cmd: (0, "LOWERED=\nSTALE_COMPANIONS=\nSKIPPED=\nUPDATED=0"),
+        )
+        _, summary = ps.advance(make_state(phase="BATCH_DONE", batch=1, total_batches=1))
+        assert "flag guard" not in summary
 
     def test_final_guard_failure_does_not_abort_report_or_echo_stderr(
         self, tmp_dir, monkeypatch, capsys
@@ -2955,7 +2980,8 @@ class TestInitTypeChoices:
         assert buf.getvalue() == f"Initialized pipeline state: type={ptype} batch_size=50\n"
 
     def test_pipeline_types_cover_the_choices(self):
-        """PIPELINE_TYPES stays a literal table; every registered choice must have a row."""
+        """PIPELINE_TYPES is projected from the registry (PR-5b): every registered choice that
+        carries the phase-table facts has a row — for the shipped registry, all of them."""
         assert list(ps.PIPELINE_TYPES) == ps._TYPES.choices()
 
 
@@ -3031,29 +3057,159 @@ class TestHeadlessMarker:
         assert os.environ[ps.HEADLESS_MARKER_ENV] == "1"
 
 
-class TestInitRefusesTypesWithoutAPhaseTable:
-    def test_a_registered_type_without_a_phase_table_is_refused_at_init(self, tmp_dir, monkeypatch):
-        """A drop-in type (RFE_CREATOR_EXTRA_TYPES) is registered but PIPELINE_TYPES is still a
-        literal table: init refuses it with argparse's exit 2 before any state is written,
-        instead of _validate_state_values refusing the run later."""
+class TestLaunchVarCollisions:
+    """CodeRabbit on #200: a dimension whose <NAME>_PATH shadows a launch-block key, or two
+    dimensions that normalise to one stem, fail loudly instead of emitting two lines under one
+    key."""
+
+    def test_render_vars_refuses_a_conflicting_duplicate_key(self):
+        block = [("STAGE", "auto-fix"), ("RULES_PATH", "/abs/rules.md")]
+        with pytest.raises(ValueError, match="duplicate launch var.*RULES_PATH"):
+            ps._render_vars(block, {"RULES_PATH": "artifacts/x/{ID}-rules.md"}, "RFE-001")
+        with pytest.raises(ValueError, match="A_B_PATH"):
+            ps._render_vars(block + [("A_B_PATH", "1"), ("A_B_PATH", "2")], {}, "RFE-001")
+        out = ps._render_vars(block, {"ID": "{ID}"}, "RFE-001")
+        assert out == "STAGE=auto-fix\nRULES_PATH=/abs/rules.md\nID=RFE-001\n"
+        # a phase var repeating a launch line verbatim (the assess PROMPT_PATH) is emitted once
+        block = [("PROMPT_PATH", ".context/assess-rfe/x.md")]
+        out = ps._render_vars(block, {"PROMPT_PATH": ".context/assess-rfe/x.md"}, "RFE-001")
+        assert out.count("PROMPT_PATH=") == 1
+
+    def test_review_vars_refuse_a_shadowing_dimension(self, tmp_dir, monkeypatch, drop_in_root):
+        import type_registry
+
+        dims = [
+            {"name": "feasibility", "prompt": "types/rfe/dimensions/feasibility.md"},
+            {"name": "rules", "prompt": "types/rfe/dimensions/feasibility.md"},
+        ]
+        drop_in_root.add("memo", overrides={**_memo_overrides(), "pipeline.dimensions": dims})
+        reg = type_registry.load(extra_roots=[drop_in_root.path], env={})
+        monkeypatch.setattr(ps, "_TYPES", reg)
+        monkeypatch.setattr(ps, "PIPELINE_TYPES", ps._pipeline_types(reg))
+        with pytest.raises(ValueError, match="dimension 'rules' renders RULES_PATH"):
+            ps._build_phase_config("memo")
+
+
+class TestWritePollStub:
+    """CodeRabbit on #200: the descriptor's skip_stub is serialized with a YAML dumper — a
+    reason containing ': ' or a value such as 'yes' must round-trip, not break or retype the
+    frontmatter the review agent reads."""
+
+    def test_descriptor_values_round_trip(self, tmp_dir):
+        import yaml
+
+        stub = {
+            "result": "not_assessed",
+            "reason": "skipped: no RHAISTRAT parent (see #12)",
+            "confirmed": "yes",
+            "note": "[not] a list",
+        }
+        ps._write_poll_stub("initiative-alignment", "INIT-001", stub)
+        text = open("artifacts/initiative-reviews/INIT-001-alignment.md").read()
+        assert text.startswith("---\n") and text.endswith("---\n")
+        assert yaml.safe_load(text.split("---")[1]) == stub
+        assert "confirmed: 'yes'" in text  # the string stays a string
+
+    def test_shipped_stub_is_byte_identical_to_the_old_lines(self, tmp_dir):
+        row = ps.PIPELINE_TYPES["initiative"]
+        stub = next(d["skip_stub"] for d in row["dimensions"] if d["name"] == "alignment")
+        ps._write_poll_stub("initiative-alignment", "INIT-002")  # descriptor fallback
+        text = open("artifacts/initiative-reviews/INIT-002-alignment.md").read()
+        assert text == "---\n" + "".join(f"{k}: {v}\n" for k, v in stub.items()) + "---\n"
+
+
+class TestInitAndTheRegistry:
+    """D12: PIPELINE_TYPES is a projection of the registry. A registered drop-in descriptor
+    (RFE_CREATOR_EXTRA_TYPES) that carries the phase-table facts gets a phase table and `init
+    --type` accepts it; an unregistered name, a partial descriptor and one whose pipeline.stages
+    omits a stage the table launches are refused with exit 2 before any state is written."""
+
+    def _registry(self, monkeypatch, root):
+        import type_registry
+
+        reg = type_registry.load(extra_roots=[root], env={})
+        monkeypatch.setattr(ps, "_TYPES", reg)
+        monkeypatch.setattr(ps, "PIPELINE_TYPES", ps._pipeline_types(reg))
+        monkeypatch.setattr(ps, "_LAUNCH_BLOCKS", {})
+        return reg
+
+    def _init(self, argv):
         import io
         from contextlib import redirect_stderr, redirect_stdout
 
-        class _Registry:
-            def choices(self):
-                return ["rfe", "initiative", "memo"]
-
-        monkeypatch.setattr(ps, "_TYPES", _Registry())
         err = io.StringIO()
-        with redirect_stderr(err), pytest.raises(SystemExit) as exc_info:
+        with redirect_stderr(err), redirect_stdout(io.StringIO()), pytest.raises(SystemExit) as e:
+            ps.cmd_init(argv)
+        return e.value.code, err.getvalue()
+
+    def test_a_registered_drop_in_with_the_facts_gets_a_phase_table(
+        self, tmp_dir, monkeypatch, drop_in_root
+    ):
+        import io
+        from contextlib import redirect_stdout
+
+        self._registry(monkeypatch, drop_in_root.memo())
+        assert list(ps.PIPELINE_TYPES) == ["rfe", "initiative", "memo"]
+        row = ps.PIPELINE_TYPES["memo"]
+        assert row["tasks_dir"] == "artifacts/memo-tasks"
+        assert row["reviews_dir"] == "artifacts/memo-reviews"
+        assert row["dispatch_skill"] == ps.GENERIC_DISPATCH_SKILL  # no legacy body to drive it
+        with redirect_stdout(io.StringIO()):
             ps.cmd_init(["--type", "memo"])
-        assert exc_info.value.code == 2
-        assert "invalid choice: 'memo'" in err.getvalue()
+        state = ps._load_state()
+        assert state["type"] == "memo"
+        cfg = ps._build_phase_config("memo")
+        assert cfg["REVIEW"]["prompt"] == f"{ps.REVIEW_PROMPTS}/review-agent.md"
+        assert cfg["REVIEW"]["vars"]["FEASIBILITY_PATH"] == (
+            "artifacts/memo-reviews/{ID}-feasibility.md"
+        )
+        assert dict(ps._launch_block(state))["TYPE"] == "memo"
+
+    def test_a_type_without_dimensions_gets_a_scorer_only_wave(
+        self, tmp_dir, monkeypatch, drop_in_root
+    ):
+        drop_in_root.add("memo", overrides={**_memo_overrides(), "pipeline.dimensions": []})
+        self._registry(monkeypatch, drop_in_root.path)
+        cfg = ps._build_phase_config("memo")
+        assert cfg["ASSESS"]["parallel"] == []
+        assert [k for k in cfg["REVIEW"]["vars"] if k.endswith("_PATH")] == ["ASSESS_PATH"]
+
+    def test_an_unregistered_name_exits_2_with_the_registered_list(
+        self, tmp_dir, monkeypatch, drop_in_root
+    ):
+        self._registry(monkeypatch, drop_in_root.memo())
+        code, err = self._init(["--type", "bogus"])
+        assert code == 2
+        assert "invalid choice: 'bogus'" in err and "'memo'" in err
         assert not os.path.exists(ps.STATE_FILE)
-        # the two shipped types are still accepted, in the registry's order
-        with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
-            ps.cmd_init(["--type", "initiative"])
-        assert ps._load_state()["type"] == "initiative"
+
+    def test_a_partial_drop_in_is_refused_before_any_state_is_written(
+        self, tmp_dir, monkeypatch, drop_in_root
+    ):
+        self._registry(monkeypatch, drop_in_root.memo(drop=("pipeline.prompts.split_rules",)))
+        assert "memo" in ps._TYPES.choices() and "memo" not in ps.PIPELINE_TYPES
+        code, err = self._init(["--type", "memo"])
+        assert code == 2 and "invalid choice: 'memo'" in err
+        assert not os.path.exists(ps.STATE_FILE)
+
+    def test_a_type_whose_stages_omit_an_engine_stage_is_refused_at_init(
+        self, tmp_dir, monkeypatch, drop_in_root
+    ):
+        """The phase table renders the auto-fix launch block on every agent: a registered type
+        that does not ship the stage would raise an uncaught ResolveError at the first wave."""
+        stages = ["create", "review", "submit", "split", "speedrun"]
+        drop_in_root.add("memo", overrides={**_memo_overrides(), "pipeline.stages": stages})
+        self._registry(monkeypatch, drop_in_root.path)
+        assert "memo" in ps.PIPELINE_TYPES
+        assert ps._missing_engine_stages("memo") == ["auto-fix"]
+        code, err = self._init(["--type", "memo"])
+        assert code == 2
+        assert "type 'memo' declares pipeline.stages without auto-fix" in err
+        assert "create, review, split, auto-fix" in err
+        assert not os.path.exists(ps.STATE_FILE)
+        assert (
+            ps._missing_engine_stages("rfe") == [] and ps._missing_engine_stages("initiative") == []
+        )
 
     def test_children_inherit_the_marker(self, tmp_dir, monkeypatch):
         """The point of the export: a subprocess launched after init --headless sees it."""
@@ -3432,7 +3588,8 @@ class TestWaveStall:
         assert "ASSESS → REVIEW" in capsys.readouterr().err
         assert ps._load_state()["phase"] == "REVIEW"
         assert action["action"] == "launch_wave" and action["phase"] == "REVIEW"
-        assert [a["vars"].splitlines()[1] for a in action["agents"]] == ["ID=RHAIRFE-1001"]
+        # the launch block precedes the phase vars (PR-5b); the survivor is the only id
+        assert ["ID=RHAIRFE-1001" in a["vars"].splitlines() for a in action["agents"]] == [True]
         assert read_ids("tmp/pipeline-active-ids.txt") == ["RHAIRFE-1001"]
         assert all(os.path.exists(p) for p in outputs)
         from artifact_utils import read_frontmatter

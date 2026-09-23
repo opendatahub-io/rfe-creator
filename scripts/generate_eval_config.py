@@ -70,6 +70,9 @@ _FRAGMENT_DERIVED_KEYS = ("architecture_context.not_relevant_pattern",)
 # ${gen.<name>} values, for the skeleton author. Each is documented at its builder below.
 DERIVED = (
     "name",
+    "skill",
+    "arguments",
+    "create_skill",
     "batch_pattern",
     "write_prefix",
     "score_fields_slash",
@@ -86,6 +89,11 @@ DERIVED = (
     "pairwise_prompt_file",
     "thresholds",
 )
+
+
+# The generic skills the harness drives since PR-5b (design §4.4).
+GENERIC_SPEEDRUN_SKILL = "rfe-speedrun"
+GENERIC_CREATE_SKILL = "rfe-create"
 
 
 class GenerateError(ValueError):
@@ -324,6 +332,13 @@ def derived_values(desc, fragment_flat, repo_root=None):
     return {
         # <type>-speedrun: the harness's run name (eval/runs/<name>/<run-id>).
         "name": f"{desc.name}-speedrun",
+        # The generic speedrun skill every type runs through (design §4.4; PR-5b) and the
+        # explicit type it is given — `--type <t>` for every type, rfe included, so the CI
+        # form never relies on the headless legacy default (plan D2).
+        "skill": GENERIC_SPEEDRUN_SKILL,
+        "arguments": f"--headless --dry-run --input batch.yaml --type {desc.name}",
+        # The generic create skill: the pipeline_flow judge's Phase-1 marker (plan D3).
+        "create_skill": GENERIC_CREATE_SKILL,
         # identity.local_prefix + the harness's zero-padded batch index.
         "batch_pattern": f"{desc.local_prefix}{{n:03d}}",
         # key_prefixes[0]: how fetched items are named.

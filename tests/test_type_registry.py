@@ -3081,3 +3081,159 @@ class TestAssertNotShorthand:
         assert result.line() == "TYPE RESOLVED: rfe (--type; binding override project=KONFLUX)"
         with pytest.raises(RegistryError, match="not honoured by the artifact layer"):
             type_registry.assert_not_shorthand(result.type_name, result.binding)
+
+
+# ── launch-vars (design §4.1, §8.3; PR-5b) ─────────────────────────────────────────────────
+
+
+class TestLaunchVars:
+    """``launch-vars <type> <stage>`` prints the KEY=value block the generic bodies and the
+    dispatcher render agent launches from: a projection of the descriptor, deterministic,
+    single-line values, refused for a stage the type does not ship."""
+
+    def test_projection_for_both_shipped_types(self):
+        reg = _shipped()
+        for name in reg.names():
+            desc = reg.get(name)
+            pairs = dict(type_registry.launch_vars(desc, "review"))
+            dirs = desc.dirs()
+            pipe = desc.get("pipeline")
+            assert pairs["TYPE"] == name and pairs["TYPE_FLAG"] == f"--type {name}"
+            assert pairs["ID_FIELD"] == desc.id_field and pairs["ID_FLAG"] == "--id"
+            assert pairs["TASKS_DIR"] == dirs["tasks"]
+            assert pairs["ORIGINALS_DIR"] == dirs["originals"]
+            assert pairs["REVIEWS_DIR"] == dirs["reviews"]
+            assert pairs["TASK_SCHEMA"] == f"{name}-task"
+            assert pairs["REVIEW_SCHEMA"] == f"{name}-review"
+            assert pairs["SCORER_AGENT"] == pipe["scorer_agent"]
+            assert pairs["PROMPT_PATH"] == f".context/assess-rfe/{pipe['rubric']['path']}"
+            assert pairs["POLL_PREFIX"] == pipe["poll_prefix"]
+            assert pairs["STATE_PREFIX"] == pipe["state_prefix"]
+            assert pairs["POLL_FILE_PREFIX"] == f"tmp/{name}-poll-"
+            assert pairs["SCORE_FIELDS"] == ",".join(desc.score_fields)
+            assert pairs["SCORE_ZERO_SET"].split() == [f"scores.{f}=0" for f in desc.score_fields]
+            assert pairs["DIMENSIONS"] == ",".join(d["name"] for d in pipe["dimensions"])
+            for dim in pipe["dimensions"]:
+                key = dim["name"].upper()
+                # typed files render absolute, resolved from the descriptor's own directory
+                assert pairs[f"DIMENSION_{key}_PROMPT"] == str(
+                    (desc.path.parent / dim["prompt"].split(f"types/{name}/", 1)[1]).resolve()
+                )
+                assert (
+                    pairs[f"DIMENSION_{key}_FILE"] == f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"
+                )
+            for var, field in (
+                ("TEMPLATE_PATH", "template"),
+                ("CREATE_GUIDANCE_PATH", "create_guidance"),
+                ("RULES_PATH", "review_rules"),
+                ("SECTIONS_PATH", "review_sections"),
+                ("REVISE_RULES_PATH", "revise_rules"),
+                ("SPLIT_RULES_PATH", "split_rules"),
+            ):
+                assert pairs[var] == desc.typed_path(pipe["prompts"][field])
+                assert pairs[var].startswith("/") and pairs[var].endswith(pipe["prompts"][field])
+            assert pairs["RESPLIT_FIELD"] == pipe["resplit"]["score_field"]
+            assert pairs["RESPLIT_BELOW"] == str(pipe["resplit"]["below"])
+            assert pairs["NEXT_ID_FLAGS"] == (
+                f"--prefix {desc.local_prefix.rstrip('-')} --dir {dirs['tasks']}"
+            )
+            assert pairs["INDEX_ENABLED"] == ("true" if desc.get("index.enabled") else "false")
+            assert pairs["COMMENTS_COMPANION"] == (
+                "true" if desc.get("companions.comments") else "false"
+            )
+            for value in pairs.values():
+                assert "\n" not in value
+
+    def test_type_specific_values(self):
+        reg = _shipped()
+        rfe = dict(type_registry.launch_vars(reg.get("rfe"), "create"))
+        init = dict(type_registry.launch_vars(reg.get("initiative"), "create"))
+        assert rfe["EXTRA_RULES"] == "none" and rfe["REVIEW_EXTRA_SET"] == ""
+        assert init["EXTRA_RULES"] == "If `alignment` is `weak`, set `needs_attention=true`."
+        assert init["REVIEW_EXTRA_SET"] == " alignment=<strong/partial/weak/not_assessed>"
+        assert rfe["SIZE_SET"] == " size=<size>" and init["SIZE_SET"] == ""
+        assert rfe["PARENT_FLAG"] == "" and init["PARENT_FLAG"] == "--parent"
+        assert rfe["COMMENTS_FIELD"] == ',"comment"' and init["COMMENTS_FIELD"] == ""
+        assert init["DIMENSION_ALIGNMENT_CONDITION"] == "parent_key startswith RHAISTRAT-"
+        assert init["DIMENSION_ALIGNMENT_BLOCKING"] == "false"
+        assert rfe["RUN_REPORT"] == "artifacts/auto-fix-runs/<timestamp>.yaml"
+        assert init["RUN_REPORT"] == "artifacts/auto-fix-runs/initiative-run-<timestamp>.yaml"
+        assert rfe["RUBRIC_EXPORT"] == "artifacts/rfe-rubric.md" and init["RUBRIC_EXPORT"] == "none"
+        # The verdict-label families follow the declared dimensions, in descriptor order.
+        assert rfe["VERDICT_LABELS"] == (
+            "feasibility.feasible, feasibility.infeasible, feasibility.indeterminate"
+        )
+        assert init["VERDICT_LABELS"] == (
+            "feasibility.feasible, feasibility.infeasible, feasibility.indeterminate, "
+            "alignment.strong, alignment.partial, alignment.weak"
+        )
+
+    def test_launch_keys_are_the_fixed_keys_in_order(self):
+        """LAUNCH_KEYS is what gate 1 and the dispatcher check dimension names against, so it
+        must equal the block's fixed keys, in order, for every shipped type and stage."""
+        reg = _shipped()
+        for name in reg.names():
+            for stage in reg.get(name).get("pipeline.stages"):
+                keys = [k for k, _ in type_registry.launch_vars(reg.get(name), stage)]
+                fixed = [
+                    k
+                    for k in keys
+                    if not k.startswith("DIMENSION_") or k in type_registry.LAUNCH_KEYS
+                ]
+                assert fixed == list(type_registry.LAUNCH_KEYS), (name, stage)
+                assert len(keys) == len(set(keys))
+        assert type_registry.dimension_key("a-b") == type_registry.dimension_key("a_b") == "A_B"
+
+    def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path):
+        """A drop-in root carries its typed files wherever it lives: a `types/<name>/...` path
+        resolves under the descriptor's directory; a path outside its own directory (here the
+        shipped rfe dimension prompt) resolves under the plugin root."""
+        from conftest import write_drop_in
+
+        root = tmp_path / "extra"
+        write_drop_in(
+            str(root),
+            "memo",
+            overrides={
+                "pipeline.prompts.template": "types/memo/template.md",
+                "pipeline.prompts.review_rules": "types/memo/prompts/review-rules.md",
+            },
+        )
+        (root / "memo" / "prompts").mkdir(parents=True)
+        (root / "memo" / "template.md").write_text("# Memo\n", encoding="utf-8")
+        (root / "memo" / "prompts" / "review-rules.md").write_text("rules\n", encoding="utf-8")
+        desc = type_registry.load(extra_roots=[str(root)], env={}).get("memo")
+        pairs = dict(type_registry.launch_vars(desc, "review"))
+        assert pairs["TEMPLATE_PATH"] == str((root / "memo" / "template.md").resolve())
+        assert pairs["RULES_PATH"] == str((root / "memo" / "prompts" / "review-rules.md").resolve())
+        assert Path(pairs["TEMPLATE_PATH"]).is_file() and Path(pairs["RULES_PATH"]).is_file()
+        # kept from the rfe copy: types/rfe/... is not memo's own directory -> the plugin root
+        shipped = pairs["DIMENSION_FEASIBILITY_PROMPT"]
+        assert shipped == str(
+            (type_registry.PLUGIN_ROOT / "types/rfe/dimensions/feasibility.md").resolve()
+        )
+        assert desc.typed_path("") == ""
+
+    def test_deterministic_and_stage_scoped(self):
+        reg = _shipped()
+        desc = reg.get("rfe")
+        assert type_registry.launch_vars(desc, "split") == type_registry.launch_vars(desc, "split")
+        keys = [k for k, _ in type_registry.launch_vars(desc, "split")]
+        assert keys[0] == "STAGE" and len(keys) == len(set(keys))
+        with pytest.raises(type_registry.ResolveError) as exc_info:
+            type_registry.launch_vars(desc, "bogus")
+        assert exc_info.value.exit_code == 2
+        assert "pipeline.stages" in exc_info.value.args[0]
+
+    def test_cli_text_and_json(self):
+        result = _cli("launch-vars", "rfe", "review", env=_clean_env())
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        assert lines[0] == "STAGE=review" and "TYPE_FLAG=--type rfe" in lines
+        assert all("=" in line for line in lines)
+        as_json = _cli("--json", "launch-vars", "initiative", "speedrun", env=_clean_env())
+        assert as_json.returncode == 0, as_json.stderr
+        data = json.loads(as_json.stdout)
+        assert data["STAGE"] == "speedrun" and data["SCORER_AGENT"] == "initiative-scorer"
+        bad = _cli("launch-vars", "rfe", "bogus", env=_clean_env())
+        assert bad.returncode == 2 and "pipeline.stages" in bad.stderr

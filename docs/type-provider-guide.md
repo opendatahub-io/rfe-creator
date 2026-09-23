@@ -45,6 +45,23 @@ Keep `pipeline.rubric.repo` and `pipeline.rubric.ref` identical to the shipped d
 bootstrap clones that repository once, at that commit, into `.context/assess-rfe`, and gate 1 refuses
 a second external rubric repository or a second pin (rule 6) until the bootstrap can keep a checkout
 per repository.
+
+Since PR-5b the skills are generic: `/rfe-create`, `/rfe-review`, `/rfe-split`, `/rfe-submit`,
+`/rfe-auto-fix` and `/rfe-speedrun` take `--type <name>` (or resolve it, design §5) and read every typed
+literal from `python3 scripts/type_registry.py launch-vars <name> <stage>` — ids, dirs, schemas, the
+scorer agent, the rubric path, the dimensions, the score-field stubs, the re-split threshold. The
+typed-file paths in that block are absolute (a `types/<name>/...` path resolves from the descriptor's
+own directory, so a drop-in root carries its files wherever it lives) because subagents read them from
+an arbitrary working directory; commands and workspace paths stay relative. What a type
+author writes is the judgement: `types/<name>/template.md`, `prompts/create-guidance.md`,
+`prompts/review-rules.md`, `prompts/review-sections.md`, `prompts/revise-rules.md` (the Tier-2 slots the
+shared review/revise skeletons read), `prompts/split-rules.md` (Tier 3 — the whole split prompt, with
+the launcher tokens for its mechanical lines) and `dimensions/<dimension>.md` (whole files, launched
+directly). `pipeline.prompts.*` and `pipeline.dimensions[].prompt` point at them; gate 1 checks they
+exist, that `split-rules.md` carries its tokens, that `template.md` is named when the type creates or
+splits, and that no typed file names a skill directory. The headless dispatcher launches the
+`create`, `review`, `split` and `auto-fix` stages through the registry, so `pipeline.stages` must
+list them: `pipeline_state.py init` refuses a type that omits one before any state is written.
 Author the eval prose in `types/<name>/eval/fragment.yaml` (schema
 `types/_schema/eval-fragment.schema.json`) and `types/<name>/eval/pairwise-judge.md`, name the
 quality threshold `<name>_quality`, and let `python3 scripts/generate_eval_config.py --type <name>`

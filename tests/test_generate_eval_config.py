@@ -54,7 +54,7 @@ REVISION_TEXT = gen.load_fragment(REG.get("rfe"))["revision"]["assessments"]
 
 def _mini_fragment(**extra):
     """The smallest fragment MINI accepts (every key must be used), plus the given sections."""
-    frag = {"schema_version": 1, "execution": {"skill": "rfe.speedrun"}}
+    frag = {"schema_version": 1}
     for key, value in extra.items():
         frag.setdefault(key, {}).update(value) if isinstance(value, dict) else frag.__setitem__(
             key, value
@@ -77,7 +77,7 @@ MINI = """\
 #@ skeleton-only line
 name: ${gen.name}
 entity: ${type.display.entity}
-skill: ${fragment.execution.skill}
+skill: ${gen.skill}
 judges:
   - name: ${gen.quality_judge}
     check: |
@@ -106,7 +106,7 @@ class TestTemplateLanguage:
         out = _render_mini()
         assert out.startswith("# GENERATED")
         assert "skeleton-only" not in out
-        assert "name: rfe-speedrun\nentity: RFE\nskill: rfe.speedrun\n" in out
+        assert "name: rfe-speedrun\nentity: RFE\nskill: rfe-speedrun\n" in out
         assert "  - name: rfe_quality\n" in out
 
     def test_block_slot_keeps_indentation_and_blank_lines(self):

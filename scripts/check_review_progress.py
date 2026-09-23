@@ -43,19 +43,22 @@ _TYPES = type_registry.load()
 # Type-neutral assess staging dir (design §10: kept byte-stable for every type).
 ASSESS_STAGING = "tmp/rfe-assess/single"
 
-# PR #148 gave rfe.speedrun a Phase-1 "create" barrier; no other pipeline polls one, so the row
-# stays rfe-only (an `initiative-create` row would change the --phase choices text). PR-5's
-# generic speedrun body gives every type a create barrier keyed on dirs.tasks + id_field, and
-# this grandfather goes with it.
-_CREATE_BARRIER_TYPES = ("rfe",)
-
 # Key order is CLI surface: argparse renders the --phase/--also-phase choices from it, so each
 # type's rows are emitted in the order the literal table had. The rfe block is the generic
 # order of _phase_rows(); the initiative block was appended split-first and gained alignment
 # last when that dimension landed. Neither order is a descriptor fact, hence this table; a
 # type without an entry (a drop-in) gets the generic order.
 _LEGACY_ROW_ORDER = {
-    "initiative": ("split", "fetch", "assess", "feasibility", "review", "revise", "alignment"),
+    "initiative": (
+        "split",
+        "fetch",
+        "create",
+        "assess",
+        "feasibility",
+        "review",
+        "revise",
+        "alignment",
+    ),
 }
 
 # The descriptor fields a type must declare to be polled. Both shipped types declare them
@@ -132,11 +135,11 @@ def _phase_rows(desc):
     plus one ``<reviews>/<id>-<name>.md`` row per ``pipeline.dimensions`` entry."""
     dirs = desc.dirs()
     rows = {"fetch": lambda id: f"{dirs['tasks']}/{id}.md"}
-    if desc.name in _CREATE_BARRIER_TYPES:
-        # Same path as "fetch", but a stricter check — see check_id(). Create agents
-        # write the task file first and set frontmatter in a later tool call, so
-        # existence alone would release the barrier mid-write.
-        rows["create"] = lambda id: f"{dirs['tasks']}/{id}.md"
+    # Same path as "fetch", but a stricter check — see check_id(). Create agents write the
+    # task file first and set frontmatter in a later tool call, so existence alone would
+    # release the barrier mid-write. Every type polls it since PR-5b: the generic speedrun
+    # body inherits PR #148's Phase-1 barrier (`--phase <poll_prefix>create`).
+    rows["create"] = lambda id: f"{dirs['tasks']}/{id}.md"
     rows["assess"] = lambda id: f"{ASSESS_STAGING}/{id}.result.md"
     seen = set()
     for dimension in desc.get("pipeline.dimensions", []):
@@ -311,20 +314,20 @@ def _detect_fast(explicit_flag):
     """Return True if fast-poll should be used."""
     if explicit_flag:
         return True
-    # The interactive skills write tmp/<pipeline.state_prefix><stage>-config.yaml. This list
-    # is deliberately still the literal: the descriptor projection (state_prefix x stages)
-    # would ADD tmp/initiative-speedrun-config.yaml, which initiative-speedrun writes but this
-    # allowlist never polled, so interactive initiative speedruns would start auto-enabling
-    # fast polling. That drift is fixed on purpose by a separate change, not by this
-    # behavior-neutral migration. The auto-fix skills drive tmp/pipeline-state.yaml through
-    # pipeline_state.py and never wrote a *-autofix-config.yaml (PR-5a removed the dead
-    # entries).
+    # The interactive skills write tmp/<pipeline.state_prefix><stage>-config.yaml. The list
+    # is the descriptor projection (state_prefix x the interactive stages review/split/
+    # speedrun) written out: PR-5b added tmp/initiative-speedrun-config.yaml — the generic
+    # speedrun body gives an interactive initiative speedrun the same Phase-1 barrier as the
+    # rfe one, which must poll at the interactive cadence. The auto-fix skills drive
+    # tmp/pipeline-state.yaml through pipeline_state.py and never wrote a *-autofix-config.yaml
+    # (PR-5a removed the dead entries).
     for cfg in (
         "tmp/review-config.yaml",
         "tmp/split-config.yaml",
         "tmp/speedrun-config.yaml",
         "tmp/initiative-review-config.yaml",
         "tmp/initiative-split-config.yaml",
+        "tmp/initiative-speedrun-config.yaml",
     ):
         if os.path.exists(cfg):
             try:
