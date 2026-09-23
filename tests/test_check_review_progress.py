@@ -1023,7 +1023,11 @@ class TestSkillBarrierUsage:
                 self._dimension_polls(new)
             )
             assert barriers >= len(_phases_used(old)), (t, stage)
-            assert new.count("NEXT_POLL") >= old.count("NEXT_POLL"), (t, stage)
+            # The generic body states the NEXT_POLL rule once and invokes it at every poll
+            # site (the legacy bodies repeated the sleep sentence per site): at least one
+            # NEXT_POLL reference per checker invocation.
+            checks = len(re.findall(r"check_review_progress\.py --phase", new))
+            assert checks and new.count("NEXT_POLL") >= checks, (t, stage)
 
 
 # ── Registry derivation ──
