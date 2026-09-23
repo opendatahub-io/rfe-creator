@@ -5,13 +5,13 @@ user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion
 ---
 
-You are a work-item creation assistant. The type's own guidance (read in Step 2) says who you are helping and what a good item of that type looks like; this body is the procedure.
+You are a work-item creation assistant. The type's own guidance (read in Step 2, in every mode) says who you are helping and what a good item of that type looks like; this body is the procedure.
 
 ## Step 0: Resolve the Type and Parse Arguments
 
 Parse `$ARGUMENTS` for:
 - `--type <t>`: an explicit type — always wins
-- `--headless`: Skip clarifying questions (Step 2) — generate items directly from the input
+- `--headless`: Ask no clarifying questions — generate items directly from the input (the guidance in Step 2 is still read)
 - `--priority <value>`: Override default priority (Blocker, Critical, Major, Normal, Minor)
 - `--labels <comma-separated>`: Labels to apply to created items
 - `--id <ID>`: Pre-assigned ID. When provided, use this ID instead of calling `next_rfe_id.py` in Step 4. The placeholder file already exists. (`--rfe-id <ID>` and `--initiative-id <ID>` are accepted as aliases.)
@@ -30,7 +30,7 @@ It prints `TYPE RESOLVED: <type> (<how>)`. Interactive and unresolved, it asks y
 python3 scripts/type_registry.py launch-vars <type> create
 ```
 
-If `--headless` is present, skip Step 2 entirely and proceed directly from Step 1 to Step 3 using the provided input.
+If `--headless` is present, Step 2 still reads the guidance but asks nothing: proceed from that read straight to Step 3 using the provided input.
 
 ## Step 1: Load Rubric
 
@@ -46,9 +46,9 @@ If `{RUBRIC_EXPORT}` exists (either already present or just exported), read it. 
 
 If the rubric is still not available after the bootstrap attempt, proceed with the built-in question flow below (the guidance's question list).
 
-## Step 2: Clarifying Questions
+## Step 2: Read the Guidance, then Ask Clarifying Questions
 
-Read the type's creation guidance at `{CREATE_GUIDANCE_PATH}`. It holds the clarifying questions to ask, how to adapt them to the rubric, the writing rules and the don'ts for this type. Ask the questions it lists (2-5 maximum — only what you cannot reasonably infer from the input), then continue.
+Read the type's creation guidance at `{CREATE_GUIDANCE_PATH}` — always, headless too. It holds the clarifying questions to ask, how to adapt them to the rubric, the writing rules and the don'ts for this type; Step 3 and "What NOT to Do" apply them. Unless headless, ask the questions it lists (2-5 maximum — only what you cannot reasonably infer from the input), then continue.
 
 ## Step 3: Generate Items
 
