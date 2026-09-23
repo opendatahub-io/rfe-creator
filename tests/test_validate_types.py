@@ -472,7 +472,11 @@ class TestPerTypeGate:
             _validate(types_copy), "pipeline.prompts.review_rules: file not found:", "rfe"
         )
         assert ".claude/skills/nope.md" in hits[0].message
-        assert f"(relative to {REPO_ROOT})" in hits[0].message
+        # a typed file resolves through Descriptor.typed_path: a path outside the type's own
+        # directory resolves against the plugin root
+        assert f"(resolved to {type_registry.PLUGIN_ROOT / '.claude/skills/nope.md'})" in (
+            hits[0].message
+        )
 
     def test_missing_dimension_prompt(self, types_copy):
         _mutate(
@@ -1485,6 +1489,71 @@ class TestEpicFixture:
 # ── the design's "extra types" CI test ───────────────────────────────────────────
 
 
+def _third_type_with_own_files(root, name="docs"):
+    """``_third_type`` whose typed files live under ITS root (``types/<name>/...`` paths,
+    copies of the shipped rfe files), the layout a real drop-in ships."""
+    extra = _third_type(root, name)
+    data = _read_yaml(extra / name / "type.yaml")
+    for key, rel in list(data["pipeline"]["prompts"].items()):
+        data["pipeline"]["prompts"][key] = rel.replace("types/rfe/", f"types/{name}/")
+    for dim in data["pipeline"]["dimensions"]:
+        dim["prompt"] = dim["prompt"].replace("types/rfe/", f"types/{name}/")
+    _write_yaml(extra / name / "type.yaml", data)
+    shutil.copy(TYPES_ROOT / "rfe" / "template.md", extra / name / "template.md")
+    shutil.copytree(TYPES_ROOT / "rfe" / "prompts", extra / name / "prompts")
+    shutil.copytree(TYPES_ROOT / "rfe" / "dimensions", extra / name / "dimensions")
+    return extra
+
+
+class TestDropInTypedFiles:
+    """CodeRabbit on #200: gate 1 resolves typed files through Descriptor.typed_path — the
+    projection launch-vars and the dispatcher use — so a drop-in root's own files are the ones
+    checked and linted, and a missing one is reported against its root, never masked by a
+    repository file of the same relative path."""
+
+    def test_own_files_pass_gate_1_and_match_the_launch_block(self, tmp_path):
+        extra = _third_type_with_own_files(tmp_path / "extra")
+        report = _validate(TYPES_ROOT, extra_roots=[extra])
+        assert report.ok, report.lines()
+        desc = type_registry.load(root=TYPES_ROOT, extra_roots=[extra], env={}).get("docs")
+        block = dict(type_registry.launch_vars(desc, "split"))
+        assert block["SPLIT_RULES_PATH"] == str((extra / "docs/prompts/split-rules.md").resolve())
+        assert block["TEMPLATE_PATH"].startswith(str(extra.resolve()))
+
+    def test_own_split_rules_are_token_linted(self, tmp_path):
+        extra = _third_type_with_own_files(tmp_path / "extra")
+        own = extra / "docs" / "prompts" / "split-rules.md"
+        own.write_text(own.read_text(encoding="utf-8").replace("{TEMPLATE_PATH}", ""), "utf-8")
+        report = _validate(TYPES_ROOT, extra_roots=[extra])
+        _assert_finding(
+            report,
+            "pipeline.prompts.split_rules: types/docs/prompts/split-rules.md lacks the launcher "
+            "token {TEMPLATE_PATH}",
+            "docs",
+        )
+        assert not _find(report, "lacks the launcher token", "rfe")  # the shipped file is intact
+
+    def test_a_missing_own_file_is_reported_against_its_root(self, tmp_path):
+        extra = _third_type_with_own_files(tmp_path / "extra")
+        (extra / "docs" / "template.md").unlink()
+        (extra / "docs" / "dimensions" / "feasibility.md").unlink()
+        report = _validate(TYPES_ROOT, extra_roots=[extra])
+        hits = _assert_finding(report, "pipeline.prompts.template: file not found:", "docs")
+        assert hits[0].message == (
+            "pipeline.prompts.template: file not found: types/docs/template.md "
+            f"(resolved to {(extra / 'docs' / 'template.md').resolve()})"
+        )
+        _assert_finding(report, "pipeline.dimensions[0].prompt: file not found:", "docs")
+        # the repository copies exist and used to mask exactly this
+        assert (TYPES_ROOT / "rfe" / "template.md").is_file()
+        assert not _find(report, "not found", "rfe")
+
+    def test_shipped_descriptors_are_unchanged(self):
+        report = _validate(TYPES_ROOT)
+        assert report.ok, report.lines()
+        assert not [m for m in _messages(report) if "resolved to" in m]
+
+
 class TestExtraTypes:
     def test_third_type_is_discovered_and_passes_gate_1(self, tmp_path):
         extra = _third_type(tmp_path / "extra")
@@ -1675,10 +1744,11 @@ class TestStratInputs:
 
 
 class _FakeDesc:
-    """Minimal Descriptor stand-in: dotted get(), dirs(), and the id properties."""
+    """Minimal Descriptor stand-in: dotted get(), dirs(), typed_path() and the id properties."""
 
-    def __init__(self, name, data, dirs=None):
+    def __init__(self, name, data, dirs=None, path=None):
         self.name = name
+        self.path = Path(path) if path is not None else None
         self._data = data
         self._dirs = dirs or {
             "tasks": "artifacts/x-tasks",
@@ -1688,6 +1758,9 @@ class _FakeDesc:
 
     def get(self, dotted, default=None):
         return self._data.get(dotted, default)
+
+    def typed_path(self, rel):
+        return type_registry.Descriptor.typed_path(self, rel)
 
     def dirs(self, form="artifacts"):
         if form == "bare":
@@ -1822,6 +1895,7 @@ def test_gate1_tier3_tokens_and_no_skill_tree_reference(tmp_path):
                 "template": "types/x/prompts/template.md",
             },
         },
+        path=tmp_path / "types" / "x" / "type.yaml",
     )
     msgs = validate_types.typed_prompt_messages(desc, tmp_path)
     lacking = {re.search(r"\{[A-Z_]+\}", m).group(0) for m in msgs if "lacks the launcher" in m}

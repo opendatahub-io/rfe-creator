@@ -568,8 +568,11 @@ first two changed no verdict and the third removed exactly two false positives.
 
 1. **Gate 1 — lint time** (`python3 scripts/validate_types.py`, in `make lint` and CI): at least one
    descriptor is discovered (an empty root fails, never a vacuous pass); JSON Schema; `kind` is
-   `work-item`; every repo-relative reference exists (`pipeline.prompts.*`, `dimensions[].prompt`,
-   `eval.config`, `eval.dataset`); `score_fields` non-empty and the review schema accepts the
+   `work-item`; every referenced file exists — the typed files (`pipeline.prompts.*`,
+   `dimensions[].prompt`) resolved as `launch-vars` resolves them (under the descriptor's own
+   directory for `types/<name>/...`, else the plugin root), so a drop-in root's own files are the
+   ones checked and a missing one is never masked by a repository file of the same relative path;
+   `eval.config` and `eval.dataset` repo-relative; `score_fields` non-empty and the review schema accepts the
    `verify_phase` error stub; the eval fragment exists, validates against
    `_schema/eval-fragment.schema.json` and renders with the skeleton, and (CLI, `--no-eval-sync`
    to skip) the committed `eval.config` equals a fresh render; no executable code under a

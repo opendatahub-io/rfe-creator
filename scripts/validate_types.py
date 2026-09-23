@@ -307,23 +307,28 @@ def schema_messages(desc, schema):
 
 
 def path_messages(desc, repo_root):
-    """Every repo-relative reference gate 1 requires to exist (Q24)."""
+    """Every reference gate 1 requires to exist (Q24). A typed file (``pipeline.prompts.*``,
+    ``pipeline.dimensions[].prompt``) resolves through ``Descriptor.typed_path`` — the same
+    projection ``launch-vars`` and the dispatcher use, so a drop-in root's own files are checked
+    where they live and a missing one is never masked by a repository file of the same relative
+    path; every other reference is repo-relative."""
     repo_root = Path(repo_root)
     messages = []
 
-    def missing(dotted, rel, want_file):
+    def missing(dotted, rel, want_file, typed=False):
         if not isinstance(rel, str) or not rel:
             return  # shape problems belong to the JSON-Schema finding
-        target = repo_root / rel
+        target = Path(desc.typed_path(rel)) if typed else repo_root / rel
         ok = target.is_file() if want_file else target.exists()
         if not ok:
             kind = "file" if want_file else "path"
-            messages.append(f"{dotted}: {kind} not found: {rel} (relative to {repo_root})")
+            where = f"resolved to {target}" if typed else f"relative to {repo_root}"
+            messages.append(f"{dotted}: {kind} not found: {rel} ({where})")
 
     prompts = _opt(desc, "pipeline.prompts") or {}
     if isinstance(prompts, dict):
         for key, rel in prompts.items():
-            missing(f"pipeline.prompts.{key}", rel, want_file=True)
+            missing(f"pipeline.prompts.{key}", rel, want_file=True, typed=True)
 
     dimensions = _opt(desc, "pipeline.dimensions") or []
     if isinstance(dimensions, list):
@@ -349,7 +354,12 @@ def path_messages(desc, repo_root):
             messages.append(f"pipeline.dimensions name {dname!r} {why}")
         for i, dim in enumerate(dimensions):
             if isinstance(dim, dict):
-                missing(f"pipeline.dimensions[{i}].prompt", dim.get("prompt"), want_file=True)
+                missing(
+                    f"pipeline.dimensions[{i}].prompt",
+                    dim.get("prompt"),
+                    want_file=True,
+                    typed=True,
+                )
 
     missing("eval.config", _opt(desc, "eval.config"), want_file=True)
     missing("eval.dataset", _opt(desc, "eval.dataset"), want_file=False)
@@ -384,8 +394,8 @@ def typed_prompt_messages(desc, repo_root):
     file that pointed back into it would pin the collapse's own moving parts. A type that
     creates or splits items must name pipeline.prompts.template: launch-vars renders it as
     TEMPLATE_PATH into every create and split launch, and the schema leaves the key optional
-    (design Q1), so the stage list is what makes it required."""
-    repo_root = Path(repo_root)
+    (design Q1), so the stage list is what makes it required. Files resolve through
+    ``Descriptor.typed_path`` (a drop-in root's own split prompt is the one linted)."""
     messages = []
     prompts = _opt(desc, "pipeline.prompts") or {}
     stages = _opt(desc, "pipeline.stages") or list(type_registry.DEFAULT_STAGES)
@@ -406,7 +416,7 @@ def typed_prompt_messages(desc, repo_root):
             if isinstance(dim, dict) and isinstance(dim.get("prompt"), str):
                 files[f"pipeline.dimensions[{i}].prompt"] = dim["prompt"]
     for dotted, rel in files.items():
-        target = repo_root / rel
+        target = Path(desc.typed_path(rel))
         if not target.is_file():
             continue  # path_messages reports the absence
         text = target.read_text(encoding="utf-8")
