@@ -128,7 +128,7 @@ eval:
   config: eval-initiative.yaml
   dataset: eval/initiative-dataset/cases                # eval-initiative.yaml:36 dataset.path (§8.2 omits /cases)
   mlflow_experiment: initiative-speedrun-eval           # eval-initiative.yaml:33
-  timeout: 8100                                         # eval-initiative.yaml:9
+  timeout: 10800                                        # eval-initiative.yaml:12 — 3 h: 21 cases at opus pace ran ~107 min on 2026-09-22
   thresholds:                                           # eval-initiative.yaml:872-904, verbatim judge names — AUTHORITATIVE from PR-4 (design §4.5)
     files_exist: { min_pass_rate: 1.0 }
     frontmatter_valid: { min_pass_rate: 1.0 }

@@ -9,7 +9,7 @@ execution:
   mode: batch
   skill: rfe-speedrun
   arguments: --headless --dry-run --input batch.yaml --type rfe
-  timeout: 7200          # 2 hours — opus with 20 cases + splits needs ~60 min
+  timeout: 10800          # 3 hours — 26 rfe / 21 initiative cases at opus pace ran 105–110 min on 2026-09-22 with three evals sharing the runners; 2 h left no headroom
   max_budget_usd: 100.0  # Per-invocation cost cap
 
 # Runner — agent harness + runner-specific knobs

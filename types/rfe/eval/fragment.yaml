@@ -5,7 +5,7 @@
 schema_version: 1
 entity_long: RFE (Request for Enhancement)
 execution:
-  timeout_note: 2 hours — opus with 20 cases + splits needs ~60 min
+  timeout_note: 3 hours — 26 rfe / 21 initiative cases at opus pace ran 105–110 min on 2026-09-22 with three evals sharing the runners; 2 h left no headroom
 dataset:
   prompt: Concise problem statement (1-2 sentences)
   clarifying_context: |
