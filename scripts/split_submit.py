@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Resilient split-submission of child RFEs or Initiatives to Jira.
 
-Submits children produced by /rfe.split or /initiative-split to Jira with
+Submits children produced by /rfe-split (any registered type) to Jira with
 proper linking and parent closure. Designed to be idempotent and resumable —
 uses Jira comments as the durable store for content and progress tracking.
 

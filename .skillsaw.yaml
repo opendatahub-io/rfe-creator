@@ -4,7 +4,8 @@
 version: "0.10.1"
 
 rules:
-  # Skill names use dots (rfe.create, rfe.review) intentionally
+  # The compatibility shims keep the dotted legacy names (rfe.create, rfe.review, ...) and
+  # rfe-creator.update-deps its dot intentionally
   agentskill-name:
     enabled: false
 

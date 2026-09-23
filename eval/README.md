@@ -1,6 +1,6 @@
-# Evaluation — rfe.speedrun
+# Evaluation — rfe-speedrun
 
-Automated evaluation of the `rfe.speedrun` pipeline using the [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness).
+Automated evaluation of the `rfe-speedrun` pipeline using the [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness).
 
 ## Quick Start
 
@@ -38,11 +38,11 @@ Each run produces:
 
 ## How it works
 
-The evaluation runs the `rfe.speedrun` skill headlessly against 26 test cases: 20 derived from real RHAIRFE Jira issues plus 6 deliberately weak drafts (see [Weak-draft cases](#weak-draft-cases)). Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
+The evaluation runs the `rfe-speedrun` skill headlessly against 26 test cases: 20 derived from real RHAIRFE Jira issues plus 6 deliberately weak drafts (see [Weak-draft cases](#weak-draft-cases)). Each test case provides a problem statement (prompt + clarifying context), and the pipeline creates, reviews, auto-fixes, and (dry-run) submits RFEs.
 
 ### How it was generated
 
-`/eval-analyze --skill rfe.speedrun` recursively read the skill chain (rfe.speedrun -> rfe.create, rfe.auto-fix, rfe.review, rfe.split, rfe.submit, assess-rfe) and generated `eval.yaml` with dataset schema, output descriptions, and suggested judges. The configuration and judges were then iteratively refined through multiple eval runs across Opus and Sonnet.
+`/eval-analyze` recursively read the speedrun skill chain (speedrun -> create, auto-fix, review, split, submit, assess-rfe; today `rfe-speedrun` and the `rfe-*` skills) and generated the first `eval.yaml` with dataset schema, output descriptions, and suggested judges. The configuration and judges were then iteratively refined through multiple eval runs across Opus and Sonnet.
 
 ### Configuration
 
@@ -52,7 +52,6 @@ The evaluation runs the `rfe.speedrun` skill headlessly against 26 test cases: 2
   `types/rfe/eval/fragment.yaml` (the RFE-specific prose) and `types/rfe/type.yaml` (identity,
   directories, score fields and the authoritative thresholds). Change those and regenerate;
   `--check` (part of `make lint` and CI) fails with the diff when the committed file is stale.
-- **`eval.md`** — cached skill analysis (auto-generated, tracks SKILL.md hash for freshness).
 - **`types/rfe/eval/pairwise-judge.md`** — prompt for blind A/B comparison across runs.
 
 ### Dataset
@@ -117,9 +116,9 @@ During evaluation, PreToolUse hooks:
 
 ---
 
-# Evaluation — initiative-speedrun
+# Evaluation — rfe-speedrun --type initiative
 
-Automated evaluation of the `initiative-speedrun` pipeline using the [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness).
+Automated evaluation of the `rfe-speedrun --type initiative` pipeline using the [agent-eval-harness](https://github.com/opendatahub-io/agent-eval-harness).
 
 ## Quick Start
 
@@ -133,7 +132,7 @@ Automated evaluation of the `initiative-speedrun` pipeline using the [agent-eval
 
 ## How it works
 
-The evaluation runs the `initiative-speedrun` skill headlessly against 21 test cases: 16 derived from real RHOAIENG Jira initiatives (two of them, `case-007` and `case-013`, retargeted into weak drafts) and five deliberately weak drafts. Each test case provides an objective (prompt + clarifying context), and the pipeline creates, reviews (with assessment, feasibility, and strategic alignment), auto-fixes, and (dry-run) submits Initiatives.
+The evaluation runs the `rfe-speedrun` skill with `--type initiative` headlessly against 21 test cases: 16 derived from real RHOAIENG Jira initiatives (two of them, `case-007` and `case-013`, retargeted into weak drafts) and five deliberately weak drafts. Each test case provides an objective (prompt + clarifying context), and the pipeline creates, reviews (with assessment, feasibility, and strategic alignment), auto-fixes, and (dry-run) submits Initiatives.
 
 ### Configuration
 

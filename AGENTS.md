@@ -111,10 +111,10 @@ To create an API token: https://id.atlassian.com/manage-profile/security/api-tok
 
 Read operations support two modes:
 
-1. **Atlassian MCP server** (preferred when available) — used by `/rfe.review` and `/rfe.split` when fetching issues from Jira
+1. **Atlassian MCP server** (preferred when available) — used by `/rfe-review` and `/rfe-split` when fetching issues from Jira
 2. **REST API fallback** — if the MCP server is unavailable, skills fall back to `python3 scripts/fetch_issue.py` using the same `JIRA_SERVER`/`JIRA_USER`/`JIRA_TOKEN` env vars
 
-Skills that only work with local artifacts (`/rfe.create`) do not require Jira access.
+Skills that only work with local artifacts (`/rfe-create`) do not require Jira access.
 
 ## Jira Field Mappings
 
@@ -177,8 +177,8 @@ Files under `eval/dataset/` must be anonymized before commit. Never commit real 
 
 ## Architecture Context
 
-`/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.
+`/rfe-review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.
 
-Architecture context is used during `/rfe.review` (technical feasibility fork).
+Architecture context is used during `/rfe-review` (technical feasibility fork).
 
-Architecture context is NOT used during `/rfe.create` — RFEs describe business needs, not implementation.
+Architecture context is NOT used during `/rfe-create` — RFEs describe business needs, not implementation.

@@ -2,7 +2,7 @@
 """Prepare a single RFE for assessment by the assess-rfe plugin.
 
 Combines prep_single (cleanup) + copy of the task file into the assessment
-directory. This replaces the two-step process in rfe.review (prep_single + cp).
+directory. This replaces the two-step process in rfe-review (prep_single + cp).
 
 Usage:
     python3 scripts/prep_assess.py RHAIRFE-1234

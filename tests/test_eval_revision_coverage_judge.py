@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for the ``revision_coverage`` inline-check judge.
 
-The judge body lives inline in both ``eval.yaml`` (rfe.speedrun) and
-``eval-initiative.yaml`` (initiative-speedrun) and the two copies must remain
+The judge body lives inline in both ``eval.yaml`` (rfe-speedrun) and
+``eval-initiative.yaml`` (rfe-speedrun --type initiative) and the two copies must remain
 byte-identical; ``test_both_configs_identical`` fails the build if they drift.
 The behavioural tests exec the body exactly the way the harness does
 (``def _check(outputs, arguments): <indented body>``, see

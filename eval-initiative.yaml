@@ -64,7 +64,7 @@ inputs:
   tools:
     - match: |
         Questions asked to the user via AskUserQuestion — typically
-        clarifying questions during initiative-create (objective, problem,
+        clarifying questions during rfe-create --type initiative (objective, problem,
         scope, parent outcome).
       prompt: |
         Answer based on the test case context in input.yaml.

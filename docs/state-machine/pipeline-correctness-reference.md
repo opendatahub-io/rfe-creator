@@ -6,6 +6,9 @@ verification baseline. For the current dispatch architecture, see
 [plan-a-thin-dispatcher.md](../../design-proposals/plan-a-thin-dispatcher.md).
 
 Code location references point to source at time of writing and may have shifted.
+Skill citations name the generic per-stage bodies (`rfe-<stage>/SKILL.md`, one body for every
+work-item type since PR-5b/5c); the dotted `rfe.<stage>` names are compatibility shims of those
+bodies, and the per-type judgement the steps read lives under `types/<type>/`.
 
 ---
 
@@ -68,7 +71,7 @@ read/write. Score ranges (0-10, 0-2) are agent-enforced conventions, not schema-
 Note: `original_labels` is `null` (not empty list) when a Jira issue has no labels.
 This affects the L5 label-removal guard (`label in original_labels`). `priority`
 defaults differ by entry path: `fetch_issue.py:77-78` defaults to `"Major"` when
-the Jira issue has no priority; `/rfe.create` defaults to `"Normal"` for new RFEs.
+the Jira issue has no priority; `/rfe-create` defaults to `"Normal"` for new RFEs.
 `parent_key`
 links split children to parents; used by `collect_children.py`, `submit.py` Phase 2
 exclusion, and split parent detection. The `rfe_id` pattern constraint causes
@@ -79,11 +82,11 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | Value | Set By | Code Location |
 |---|---|---|
 | `null` (default) | Schema default / retry clearing | `artifact_utils.py:116` |
-| `"fetch_failed: task file not created"` | Review Step 1 | `rfe.review/SKILL.md` Step 1 |
-| `"assess_failed"` | Review Step 2 | `rfe.review/SKILL.md` Step 2 |
-| `"feasibility_failed"` | Review Step 2 | `rfe.review/SKILL.md` Step 2 |
-| `"review_failed"` | Review Step 3 | `rfe.review/SKILL.md` Step 3 |
-| `"split_failed: agent did not write split-status file"` | Split Step 1 | `rfe.split/SKILL.md` Step 1 |
+| `"fetch_failed: task file not created"` | Review Step 1 | `rfe-review/SKILL.md` Step 1 |
+| `"assess_failed"` | Review Step 2 | `rfe-review/SKILL.md` Step 2 |
+| `"feasibility_failed"` | Review Step 2 | `rfe-review/SKILL.md` Step 2 |
+| `"review_failed"` | Review Step 3 | `rfe-review/SKILL.md` Step 3 |
+| `"split_failed: agent did not write split-status file"` | Split Step 1 | `rfe-split/SKILL.md` Step 1 |
 | `"<phase base>_stalled"` (`fetch_stalled`, `assess_stalled`, `feasibility_stalled`, `alignment_stalled`, `review_stalled`: the stuck poll phase with the type's `pipeline.poll_prefix` stripped, so `assess_stalled` for `assess` and `initiative-assess` alike) | Wave stall guard escalation of a fetch / assess / review-class wave (`docs/wave-stall-guard.md`), on the registry error stub | `pipeline_state.py` `_escalate_stuck` via `verify_phase.write_error_stubs(outcome="stalled")` |
 | `"revise_stalled"` | Wave stall guard escalation of a REVISE-class wave: set on the real review (score, recommendation and `auto_revised` kept), or on the registry stub when that review cannot be updated | `pipeline_state.py` `_mark_revise_stalled` via `_mark_review_or_stub` (`artifact_utils.update_frontmatter`, falling back to `verify_phase.write_error_stubs(error="revise_stalled")`) |
 | `"split_not_attempted: wave stalled ..."` | Wave stall guard escalation of a SPLIT wave (non-retryable, like the submit.py form below) | `pipeline_state.py` `_mark_split_not_attempted` via `_mark_review_or_stub` |
@@ -92,11 +95,11 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `"split_refused: jira conflict"` | Submit Phase 1 | `submit.py:233` |
 | `"submit_failed: {msg}"` | Submit Phase 2 (also sets needs_attention=true) | `submit.py:597-605` |
 
-### 1.5 Review Orchestration Phases (rfe.review pipeline)
+### 1.5 Review Orchestration Phases (rfe-review pipeline)
 
 | Phase | Description | Code Location |
 |---|---|---|
-| `PARSE` | Parse arguments, persist config to `tmp/review-config.yaml` | `rfe.review/SKILL.md` Step 0 |
+| `PARSE` | Parse arguments, persist config to `tmp/review-config.yaml` | `rfe-review/SKILL.md` Step 0 |
 | `FETCH` | Launch fetch agents for remote IDs; write task/original/comments files | Step 1 |
 | `BOOTSTRAP` | Bootstrap assess-rfe plugin + fetch architecture context | Step 1.5 |
 | `ASSESS` | Launch assess + feasibility agents in parallel | Step 2 |
@@ -108,11 +111,11 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `REASSESS` | Preserve state, re-assess, re-review (max 2 cycles) | Step 4 |
 | `FINALIZE` | Rebuild index; headless -> return to caller; interactive -> summary | Step 5 |
 
-### 1.6 Auto-Fix Orchestration Phases (rfe.auto-fix pipeline)
+### 1.6 Auto-Fix Orchestration Phases (rfe-auto-fix pipeline)
 
 | Phase | Description | Code Location |
 |---|---|---|
-| `AF_PARSE` | Parse mode (JQL vs explicit IDs), persist config | `rfe.auto-fix/SKILL.md` Step 0 |
+| `AF_PARSE` | Parse mode (JQL vs explicit IDs), persist config | `rfe-auto-fix/SKILL.md` Step 0 |
 | `AF_SNAPSHOT` | Run `snapshot_fetch.py` (JQL mode only) | Step 0 |
 | `AF_BOOTSTRAP` | Bootstrap assess-rfe (with 1 retry on failure) | Step 1 |
 | `AF_RESUME` | Run `check_resume.py` to filter already-processed IDs (see 1.20) | Step 2 |
@@ -121,14 +124,14 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `AF_REPORTS` | Generate run report YAML + HTML report | Step 5 |
 | `AF_SUMMARY` | Final summary + optional announce-complete | Step 6 |
 
-### 1.7 Split Pipeline Phases (rfe.split pipeline)
+### 1.7 Split Pipeline Phases (rfe-split pipeline)
 
 | Phase | Description | Code Location |
 |---|---|---|
-| `SP_PARSE` | Parse arguments, verify task files exist, persist config | `rfe.split/SKILL.md` Step 0 |
+| `SP_PARSE` | Parse arguments, verify task files exist, persist config | `rfe-split/SKILL.md` Step 0 |
 | `SP_LAUNCH_AGENTS` | Launch split agents per ID (decompose into children) | Step 1 |
 | `SP_COLLECT` | Read split-status files (see 1.21); set `recommendation=revise` for `action=no-split` or zero-children (R8/R8a); run `collect_children.py` for `action=split` IDs. `collect_children.py` excludes Archived children (critical for self-correction). | Step 2 |
-| `SP_REVIEW_CHILDREN` | Invoke `/rfe.review --headless --caller split` on child IDs | Step 2 |
+| `SP_REVIEW_CHILDREN` | Invoke `/rfe-review --headless --caller split` on child IDs | Step 2 |
 | `SP_SELF_CORRECT` | Check `right_sized < 2`; re-split children scoring low (max 1 cycle via `set-default` counter) | Step 3 |
 | `SP_FINALIZE` | Rebuild index; headless -> return to auto-fix; interactive -> summary | Step 4 |
 
@@ -198,17 +201,17 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 
 | Phase | Description | Code Location |
 |---|---|---|
-| `SR_PARSE` | Determine mode (A: create+autofix+submit from `--input` file, B: autofix+submit from explicit IDs, C: single create+autofix+submit from free-text) | `rfe.speedrun/SKILL.md` Step 0 |
-| `SR_PHASE1_CREATE` | Invoke `/rfe.create --headless` (Modes A/C) | Step 1 |
-| `SR_PHASE2_AUTOFIX` | Invoke `/rfe.auto-fix --headless` with all IDs | Step 2 |
-| `SR_PHASE3_SUBMIT` | Invoke `/rfe.submit` with passing IDs | Step 3 |
+| `SR_PARSE` | Determine mode (A: create+autofix+submit from `--input` file, B: autofix+submit from explicit IDs, C: single create+autofix+submit from free-text) | `rfe-speedrun/SKILL.md` Step 0 |
+| `SR_PHASE1_CREATE` | Invoke `/rfe-create --headless` (Modes A/C) | Step 1 |
+| `SR_PHASE2_AUTOFIX` | Invoke `/rfe-auto-fix --headless` with all IDs | Step 2 |
+| `SR_PHASE3_SUBMIT` | Invoke `/rfe-submit` with passing IDs | Step 3 |
 | `SR_PHASE4_SUMMARY` | Present final summary | Step 4 |
 
 ### 1.14 Create Phases
 
 | Phase | Description | Code Location |
 |---|---|---|
-| `CR_PARSE` | Parse arguments (`--headless`, `--priority`, `--labels`) | `rfe.create/SKILL.md` Step 0 |
+| `CR_PARSE` | Parse arguments (`--headless`, `--priority`, `--labels`) | `rfe-create/SKILL.md` Step 0 |
 | `CR_RUBRIC` | Bootstrap assess-rfe, load rubric. Graceful fallback: if bootstrap or rubric export fails, proceeds without rubric (built-in question flow). No abort. | Step 1 |
 | `CR_QUESTIONS` | Ask 2-5 clarifying questions (skipped if headless) | Step 2 |
 | `CR_GENERATE` | Generate RFE content using `rfe-template.md` | Step 3 |
@@ -230,10 +233,10 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 | `ASSESS_BOOTSTRAP_DONE` | Bootstrap complete | `bootstrap-assess-rfe.sh:103` |
 | `ASSESS_BOOTSTRAP_FAILED` | Exit 2: no pin readable. Exit 1: a positive pin mismatch — HEAD readable, not the pin, and the fetch/checkout to it failed (git's stderr is printed) — or a checkout that landed elsewhere; or the required rubric / scorer agent missing after the checkout | `bootstrap-assess-rfe.sh:128,189-212,216-229,247-252` |
 | `ASSESS_PREP` | Clean stale files + copy task file to `/tmp/rfe-assess/single/` | `prep_assess.py` |
-| `ASSESS_AGENT_EXEC` | Agent reads rubric + data, writes result | `rfe.review/SKILL.md` Step 2 |
+| `ASSESS_AGENT_EXEC` | Agent reads rubric + data, writes result | `rfe-review/SKILL.md` Step 2 |
 | `ASSESS_POLL` | Adaptive polling (60/30/15s intervals) | `check_review_progress.py` |
-| `ASSESS_VERIFY` | Verify result files exist | `rfe.review/SKILL.md` Step 2 |
-| `ASSESS_FAILED` | Result file missing | `rfe.review/SKILL.md` Step 2 |
+| `ASSESS_VERIFY` | Verify result files exist | `rfe-review/SKILL.md` Step 2 |
+| `ASSESS_FAILED` | Result file missing | `rfe-review/SKILL.md` Step 2 |
 
 ### 1.16 Routing Logic: `collect_recommendations.py` Output Taxonomy
 
@@ -242,7 +245,7 @@ The three `rfe-creator-feasibility-*` labels are mutually exclusive: at most one
 | Output Category | Condition | Downstream Action |
 |---|---|---|
 | `SUBMIT=` | `recommendation=submit` | Included in submit set |
-| `SPLIT=` | `recommendation=split` | Passed to `/rfe.split` |
+| `SPLIT=` | `recommendation=split` | Passed to `/rfe-split` |
 | `REVISE=` | `recommendation=revise` | Reported but not re-routed (already revised) |
 | `REJECT=` | `recommendation` in `(reject, autorevise_reject)` | Skipped for submission |
 | `ERRORS=` | Review file missing, `error` field set, or unrecognized recommendation | Routed to retry logic |
@@ -360,7 +363,7 @@ These scripts exist but are not part of the normal pipeline flow:
 
 | # | From | To | Trigger | Guard | Action | Code Location |
 |---|---|---|---|---|---|---|
-| T1 | (none) | Draft | /rfe.create writes new RFE | Always for new RFEs | frontmatter.py set status=Draft | rfe.create/SKILL.md Step 4 |
+| T1 | (none) | Draft | /rfe-create writes new RFE | Always for new RFEs | frontmatter.py set status=Draft | rfe-create/SKILL.md Step 4 |
 | T1a | (none) | Draft | Split agent creates child RFE | Parent action=split | frontmatter.py set status=Draft + parent_key + size | split-agent.md Step 3 |
 | T2 | (none) | Ready | fetch_issue.py fetches from Jira | Remote ID fetched successfully | frontmatter.py set status=Ready | scripts/fetch_issue.py |
 | T3 | Draft | Submitted | submit.py creates issue in Jira | rec != reject/autorevise_reject, no parent_key | create_issue() + rename_to_jira_key() sets status=Submitted | submit.py:549-586, artifact_utils.py:753-757 |
@@ -378,20 +381,20 @@ These scripts exist but are not part of the normal pipeline flow:
 | R2 | (none) | revise | Review agent first pass | score < 7 OR has zero subscores, fixable | review-agent writes frontmatter | review-agent.md Step 4 |
 | R3 | (none) | split | Review agent first pass | right_sized=0 (or 1 w/independent segments), other criteria pass, NOT delivery-coupled | review-agent writes frontmatter | review-agent.md Step 4 |
 | R4 | (none) | reject | Review agent first pass | Fundamentally unfixable | review-agent writes frontmatter | review-agent.md Step 4 |
-| R5 | revise | submit | Reassess after revision | Revised content now passes (score >= 7, no zeros) | New review-agent run writes frontmatter | rfe.review SKILL.md Step 4c |
+| R5 | revise | submit | Reassess after revision | Revised content now passes (score >= 7, no zeros) | New review-agent run writes frontmatter | rfe-review SKILL.md Step 4c |
 | R6 | revise | autorevise_reject | filter_for_revision.py detects regression | `before_score is not None` AND `score < before_score` | update_frontmatter() sets recommendation only (no needs_attention) | filter_for_revision.py:49-55 |
-| R7 | revise | revise | Reassess, still failing | reassess_cycle < 2; score improved but still < 7 or has zeros | New review-agent run writes frontmatter | rfe.review SKILL.md Step 4c |
-| R8 | split | revise | Split orchestrator reads `action: no-split` from split-status.yaml | right_sized=1, delivery-coupled | frontmatter.py set recommendation=revise (orchestrator, not agent) | rfe.split/SKILL.md Step 2 |
-| R8a | split | revise | Split orchestrator: `action=split` but zero children found | `collect_children.py` returns empty for parent | frontmatter.py set recommendation=revise | rfe.split/SKILL.md Step 2 |
-| R9 | (none) | revise | Error initialization | Fetch/assess/review/split failure | frontmatter.py set recommendation=revise | rfe.review SKILL.md Steps 1-3 |
+| R7 | revise | revise | Reassess, still failing | reassess_cycle < 2; score improved but still < 7 or has zeros | New review-agent run writes frontmatter | rfe-review SKILL.md Step 4c |
+| R8 | split | revise | Split orchestrator reads `action: no-split` from split-status.yaml | right_sized=1, delivery-coupled | frontmatter.py set recommendation=revise (orchestrator, not agent) | rfe-split/SKILL.md Step 2 |
+| R8a | split | revise | Split orchestrator: `action=split` but zero children found | `collect_children.py` returns empty for parent | frontmatter.py set recommendation=revise | rfe-split/SKILL.md Step 2 |
+| R9 | (none) | revise | Error initialization | Fetch/assess/review/split failure | frontmatter.py set recommendation=revise | rfe-review SKILL.md Steps 1-3 |
 
 ### 2.3 auto_revised Flag Transitions
 
 | # | From | To | Trigger | Guard | Action | Code Location |
 |---|---|---|---|---|---|---|
 | A1 | false | true | Revise agent finishes (the flag is its completion marker, set after a no-change revision too) | Agent's last action, immediately after the Revision History write. First cycle: this write releases the barrier; reassess cycles: the flag is already `true` (A4 restore), so the barrier may release on the history write — A7 re-derives the end state | frontmatter.py set auto_revised=true | revise-agent.md Step 5 |
-| A2 | true | false | check_revised.py detects no actual change | Original and task file identical after strip | frontmatter.py set auto_revised=false; an unchanged task's leftover `-removed-context.yaml` (or legacy `.md`) companion is deleted (`STALE_COMPANIONS=<ids>`) — nothing was removed, and submit.py would otherwise post it (§1.19) | rfe.review SKILL.md Step 3.5, check_revised.py `batch_mode`, `remove_stale_companions` |
-| A3 | false | true | check_revised.py detects actual change | Files differ but flag was false | frontmatter.py set auto_revised=true | rfe.review SKILL.md Step 3.5, check_revised.py:42 |
+| A2 | true | false | check_revised.py detects no actual change | Original and task file identical after strip | frontmatter.py set auto_revised=false; an unchanged task's leftover `-removed-context.yaml` (or legacy `.md`) companion is deleted (`STALE_COMPANIONS=<ids>`) — nothing was removed, and submit.py would otherwise post it (§1.19) | rfe-review SKILL.md Step 3.5, check_revised.py `batch_mode`, `remove_stale_companions` |
+| A3 | false | true | check_revised.py detects actual change | Files differ but flag was false | frontmatter.py set auto_revised=true | rfe-review SKILL.md Step 3.5, check_revised.py:42 |
 | A4 | any | preserved | preserve_review_state.py save/restore | Reassess cycle boundary (max 2 cycles). State file: `artifacts/rfe-reviews/{ID}-review-state.json` (headless pipeline: `REASSESS_RESTORE` / `SPLIT_RESTORE` run `restore --keep-state`, and the COLLECT, `SPLIT_CORRECTION_CHECK` and REPORT-transition reconciles of A6 keep it too; `submit.py` re-applies and removes it at start-up as the last reader; the interactive skills' plain `restore` deletes it at once; `BATCH_START` sweeps any leftover for the batch's ids) | Saved to JSON, restored after re-review | preserve_review_state.py |
 | A5 | any | (unchanged) | check_revised.py file not found | Original or task file missing (FileNotFoundError) | Prints `FILE_MISSING=<path>`, exits 1. Orchestrator must handle: SKILL.md Step 3.5 runs check_revised only for IDs that went through revision, so missing files indicate an unexpected state. | check_revised.py:38-39 |
 | A6 | any | restored | COLLECT reconcile (`scripts/reconcile_reviews.py`, AISDLC-33) | A `{ID}-review-state.json` still exists at COLLECT, or at SPLIT_CORRECTION_CHECK for split children (the RESTORE phases keep it with `--keep-state`) | `preserve_review_state.py restore` re-applied idempotently — only raises the flag, fills `before_*`, prepends the saved history once — keeping the state file, which `submit.py --all` reconcile removes at start-up (production's last reader, after the agent process is torn down). Undoes a review-agent write that landed after REASSESS_RESTORE, COLLECT or REPORT | pipeline_state.py COLLECT decision |
@@ -404,7 +407,7 @@ These scripts exist but are not part of the normal pipeline flow:
 | N7 | false | true | COLLECT reconcile (`scripts/reconcile_reviews.py`, AISDLC-33) | Review still `recommendation: revise` with `pass: false` when the batch reaches COLLECT (no further revision can happen: reassess cap or revise filtered out) | `update_frontmatter()` sets `needs_attention=true`; fills `needs_attention_reason` only when empty ("Still failing after auto-revision (N reassess cycles): WHY scored 0/2." / "Failing and not auto-revised: …") | pipeline_state.py COLLECT decision |
 | N0 | false | true | Review agent flags issue | Feasibility indeterminate/infeasible, references non-existent components, or concerns rubric doesn't capture | frontmatter.py set needs_attention=true + needs_attention_reason | review-agent.md:45 |
 | N1 | false | true | Revise agent flags issue | Cannot fix autonomously | frontmatter.py set needs_attention=true + needs_attention_reason | revise-agent.md:42 |
-| N2 | false | true | Fetch failure | Task file not created | frontmatter.py set needs_attention=true | rfe.review SKILL.md Step 1 |
+| N2 | false | true | Fetch failure | Task file not created | frontmatter.py set needs_attention=true | rfe-review SKILL.md Step 1 |
 | N3 | false | true | Split refused (too many children) | exit code 2 | update_frontmatter() | submit.py:200-201 |
 | N4 | false | true | Split refused (Jira conflict) | exit code 3 | update_frontmatter() | submit.py:234-235 |
 | N5 | false | true | Submit failed | Jira API exception | update_frontmatter() (best-effort) | submit.py:599-600 |
@@ -414,11 +417,11 @@ These scripts exist but are not part of the normal pipeline flow:
 
 | # | From | To | Trigger | Guard | Action | Code Location |
 |---|---|---|---|---|---|---|
-| E1 | null | fetch_failed | Fetch agent fails | Task file missing | frontmatter.py set error=... | rfe.review SKILL.md Step 1 |
-| E2 | null | assess_failed | Assess agent fails | Result file missing | frontmatter.py set error=... | rfe.review SKILL.md Step 2 |
-| E3 | null | feasibility_failed | Feasibility agent fails | Feasibility file missing | frontmatter.py set error=... | rfe.review SKILL.md Step 2 |
-| E4 | null | review_failed | Review agent fails | Review file missing/no frontmatter | frontmatter.py set error=... | rfe.review SKILL.md Step 3 |
-| E5 | null | split_failed | Split agent fails | Status file missing | frontmatter.py set error=... | rfe.split SKILL.md Step 1 |
+| E1 | null | fetch_failed | Fetch agent fails | Task file missing | frontmatter.py set error=... | rfe-review SKILL.md Step 1 |
+| E2 | null | assess_failed | Assess agent fails | Result file missing | frontmatter.py set error=... | rfe-review SKILL.md Step 2 |
+| E3 | null | feasibility_failed | Feasibility agent fails | Feasibility file missing | frontmatter.py set error=... | rfe-review SKILL.md Step 2 |
+| E4 | null | review_failed | Review agent fails | Review file missing/no frontmatter | frontmatter.py set error=... | rfe-review SKILL.md Step 3 |
+| E5 | null | split_failed | Split agent fails | Status file missing | frontmatter.py set error=... | rfe-split SKILL.md Step 1 |
 
 Note: E1 (fetch_failed) provides a complete frontmatter template with all required
 fields (`score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false
@@ -467,15 +470,15 @@ PROCESSED→ABSENT transition — once an issue enters the snapshot, it stays.
 
 | # | Source | Destination | Trigger | Mechanism |
 |---|---|---|---|---|
-| H1 | Create | Review | User invokes `/rfe.review RFE-NNN` | Task file existence check via Glob |
-| H2 | Speedrun Phase 1 | Create | Mode A (always --headless), Mode C (--headless only if speedrun is headless) | Invoke /rfe.create [--headless] |
+| H1 | Create | Review | User invokes `/rfe-review RFE-NNN` | Task file existence check via Glob |
+| H2 | Speedrun Phase 1 | Create | Mode A (always --headless), Mode C (--headless only if speedrun is headless) | Invoke /rfe-create [--headless] |
 | H3 | Speedrun Phase 2 | Auto-Fix | IDs in `tmp/speedrun-all-ids.txt` | Explicit IDs passed as args |
-| H4 | Speedrun Phase 3 | Submit | `SUBMIT=` from `collect_recommendations.py` | Passing IDs passed to `/rfe.submit` |
-| H5 | Auto-Fix dispatch loop | Review agents | `launch_wave` directives for FETCH/ASSESS/REVIEW/REVISE | `pipeline_state.py next-action` + the `wait-for-wave` barrier — the auto-fix skill never invokes `/rfe.review` |
+| H4 | Speedrun Phase 3 | Submit | `SUBMIT=` from `collect_recommendations.py` | Passing IDs passed to `/rfe-submit` |
+| H5 | Auto-Fix dispatch loop | Review agents | `launch_wave` directives for FETCH/ASSESS/REVIEW/REVISE | `pipeline_state.py next-action` + the `wait-for-wave` barrier — the auto-fix skill never invokes `/rfe-review` |
 | H6 | — | — | removed (PR-5a) | The review skill's headless return to auto-fix read `tmp/autofix-config.yaml`, which nothing ever wrote; the dispatcher owns the batch loop in `tmp/pipeline-state.yaml` |
 | H7 | Auto-Fix dispatch loop | Split agents | `SPLIT=` ids from `collect_recommendations.py` | `launch_wave` for the SPLIT phase (`split-agent.md` prompt) |
-| H8 | Split Step 2 | Review | Child IDs | `/rfe.review --headless --caller split` |
-| H9 | Review (finalize) | Split | `caller=split` | Prose return protocol: "rfe.review step completed." + read tmp/split-config.yaml |
+| H8 | Split Step 2 | Review | Child IDs | `/rfe-review --headless --caller split` |
+| H9 | Review (finalize) | Split | `caller=split` | Prose return protocol: "rfe-review step completed." + read tmp/split-config.yaml |
 | H10 | — | — | removed (PR-5a) | The split skill's headless return to auto-fix read `tmp/autofix-config.yaml`; a headless split now announces completion and stops, as the initiative twin always did |
 | H11 | Review (assess) | Review (review-agent) | Assess result file | `{ASSESS_PATH}` parameter substitution |
 | H12 | Review (feasibility) | Review (review-agent) | Feasibility file | `{FEASIBILITY_PATH}` parameter substitution |
@@ -491,8 +494,8 @@ PROCESSED→ABSENT transition — once an issue enters the snapshot, it stays.
 
 | Cycle | Max | Counter | Persisted In | Check Point | Code Location |
 |---|---|---|---|---|---|
-| Reassess (review) | 2 | `reassess_cycle` | `tmp/review-config.yaml` | Before each cycle; >= 2 → stop | rfe.review SKILL.md Step 4 |
-| Self-correct (split) | 1 | `correction_cycle` | `tmp/split-config.yaml` | Before cycle; >= 1 → stop | rfe.split SKILL.md Step 3 |
+| Reassess (review) | 2 | `reassess_cycle` | `tmp/review-config.yaml` | Before each cycle; >= 2 → stop | rfe-review SKILL.md Step 4 |
+| Self-correct (split) | 1 | `correction_cycle` | `tmp/split-config.yaml` | Before cycle; >= 1 → stop | rfe-split SKILL.md Step 3 |
 | Retry (auto-fix) | 1 | `retry_cycle` | `tmp/pipeline-state.yaml`, `tmp/pipeline-retry-ids.txt` | ERROR_COLLECT: retryable ids → one retry pass, else REPORT | pipeline_state.py ERROR_COLLECT |
 | Batch loop (auto-fix) | ceil(N/batch_size) | `batch` / `total_batches` | `tmp/pipeline-state.yaml`, `tmp/pipeline-batch-N-ids.txt` | BATCH_DONE: batch < total_batches → BATCH_START | pipeline_state.py advance() |
 
@@ -514,12 +517,12 @@ stateDiagram-v2
     %% ════════════════════════════════════════════
     %% ENTRY POINTS
     %% ════════════════════════════════════════════
-    [*] --> Speedrun : /rfe.speedrun
-    [*] --> Create : /rfe.create
-    [*] --> AutoFix : /rfe.auto-fix
-    [*] --> Review : /rfe.review (interactive)
-    [*] --> Split : /rfe.split (interactive)
-    [*] --> SubmitSkill : /rfe.submit (direct)
+    [*] --> Speedrun : /rfe-speedrun
+    [*] --> Create : /rfe-create
+    [*] --> AutoFix : /rfe-auto-fix
+    [*] --> Review : /rfe-review (interactive)
+    [*] --> Split : /rfe-split (interactive)
+    [*] --> SubmitSkill : /rfe-submit (direct)
 
     %% ════════════════════════════════════════════
     %% SPEEDRUN (top-level orchestrator)
@@ -708,7 +711,7 @@ stateDiagram-v2
     %% TASK STATUS LIFECYCLE (orthogonal)
     %% ════════════════════════════════════════════
     state "Task Status" as TaskStatus {
-        [*] --> Draft : /rfe.create or\nsplit-agent child
+        [*] --> Draft : /rfe-create or\nsplit-agent child
         [*] --> Ready : fetch_issue.py
         Draft --> Submitted : submit.py create
         Ready --> Submitted : submit.py update
@@ -876,7 +879,7 @@ recommendation stays `split` through to `collect_recommendations.py`.
 ### 5.3 submit.py Ignores Positional ID Arguments
 
 `submit.py` has no concept of "selected IDs" and processes all local artifacts
-via `scan_task_files()`. The speedrun SKILL.md passes IDs to `/rfe.submit` but
+via `scan_task_files()`. The speedrun SKILL.md passes IDs to `/rfe-submit` but
 they are effectively ignored. Submit discovers everything through file scanning.
 
 ### 5.4 Feasibility Not Re-Checked During Reassessment
@@ -885,7 +888,7 @@ During reassess cycles, only the assess-agent is re-launched, not the feasibilit
 agent. The old feasibility file is reused. Intentional: feasibility depends on
 architecture context (unchanged between cycles) and RFE scope should not change
 during revision. If a revise agent removes an infeasible requirement, the stale
-assessment persists until a fresh `/rfe.review` invocation.
+assessment persists until a fresh `/rfe-review` invocation.
 
 ### 5.5 split_submit.py Partial Failure Recovery
 
@@ -919,7 +922,7 @@ can match orphans by marker on subsequent runs.  See
 
 ### 5.6 Speedrun `--headless` and Double-Announce
 
-Two known minor bugs: (1) Speedrun passes `--headless` to `/rfe.submit`, but
+Two known minor bugs: (1) Speedrun passes `--headless` to `/rfe-submit`, but
 this flag is not recognized by the submit skill. (2) Speedrun announces
 completion twice (once after submit, once in summary phase). Neither causes
 functional failure.
@@ -1043,7 +1046,7 @@ the seam between subsystems.
 
 | Boundary | Output Artifact | Producer | Consumer |
 |---|---|---|---|
-| Create -> Review | `artifacts/rfe-tasks/RFE-NNN.md` (status=Draft) | `rfe.create` SKILL.md | `rfe.review` SKILL.md Step 1 |
+| Create -> Review | `artifacts/rfe-tasks/RFE-NNN.md` (status=Draft) | `rfe-create` SKILL.md | `rfe-review` SKILL.md Step 1 |
 | Fetch -> Assess | `artifacts/rfe-tasks/{ID}.md`, `artifacts/rfe-originals/{ID}.md` | `fetch_issue.py` | `prep_assess.py` |
 | Assess -> Review Agent | `/tmp/rfe-assess/single/{ID}.result.md` | assess-rfe plugin | review-agent prompt |
 | Feasibility -> Review Agent | `artifacts/rfe-reviews/{ID}-feasibility.md` | feasibility-agent prompt | review-agent prompt |
@@ -1051,13 +1054,13 @@ the seam between subsystems.
 | Revise Agent -> Reassess | Modified task file + auto_revised flag | revise-agent prompt | `collect_recommendations.py --reassess` |
 | Revise Agent -> Submit | `artifacts/rfe-tasks/{ID}-removed-context.yaml` | revise-agent prompt | `submit.py:_render_jira_comment()` |
 | Review agents -> Auto-Fix | Review frontmatter | review-agent prompt (REVIEW wave) | `pipeline_state.py` COLLECT via `collect_recommendations.py` |
-| collect_recommendations -> Split | `SPLIT=` output line | `collect_recommendations.py` | `rfe.split` SKILL.md (interactive) / `pipeline_state.py` SPLIT phase (headless) |
+| collect_recommendations -> Split | `SPLIT=` output line | `collect_recommendations.py` | `rfe-split` SKILL.md (interactive) / `pipeline_state.py` SPLIT phase (headless) |
 | Split Agent -> Collect | Child task files (parent_key set), split-status.yaml | split-agent prompt | `collect_children.py` |
-| Split -> Review (children) | Child task files | `rfe.split` SKILL.md Step 2 | `rfe.review` SKILL.md |
-| Review -> Split (return) | Child review frontmatter | `rfe.review` SKILL.md Step 5 | `rfe.split` SKILL.md Step 3 |
-| Auto-Fix -> Submit | Review files + task files on disk | `rfe.auto-fix` SKILL.md Step 4 | `submit.py:scan_task_files()` |
+| Split -> Review (children) | Child task files | `rfe-split` SKILL.md Step 2 | `rfe-review` SKILL.md |
+| Review -> Split (return) | Child review frontmatter | `rfe-review` SKILL.md Step 5 | `rfe-split` SKILL.md Step 3 |
+| Auto-Fix -> Submit | Review files + task files on disk | `rfe-auto-fix` SKILL.md Step 4 | `submit.py:scan_task_files()` |
 | Submit -> Snapshot | Content hashes via update_snapshot_hashes() | `submit.py:580-595` | `snapshot_fetch.py:247` |
-| Snapshot -> Auto-Fix (next run) | diff result: NEW/CHANGED/UNCHANGED IDs | `snapshot_fetch.py:diff_snapshots()` | `rfe.auto-fix` SKILL.md Step 1 |
+| Snapshot -> Auto-Fix (next run) | diff result: NEW/CHANGED/UNCHANGED IDs | `snapshot_fetch.py:diff_snapshots()` | `rfe-auto-fix` SKILL.md Step 1 |
 | Fetch -> Submit (conflict check) | `artifacts/rfe-originals/{ID}.md` | `fetch_issue.py` | `submit.py:_check_conflict()` |
 | Submit -> Labels (Jira) | Label add/remove calls | `submit.py:add_labels()` | Jira API |
 | Labels (Jira) -> Snapshot Fetch (JQL) | rfe-creator-ignore, rfe-creator-autofix-rubric-pass | Jira labels | `snapshot_fetch.py` JQL filter |
@@ -1066,8 +1069,8 @@ the seam between subsystems.
 
 | Gap | Output | Expected Consumer | Status |
 |---|---|---|---|
-| G1 | `--labels` flag in /rfe.create | Create flow | Mentioned in arg parsing but never consumed downstream |
-| G2 | Ready status never set by /rfe.create | Pipeline assumes Ready for existing | /rfe.create sets Draft, not Ready; submit.py filters by exclusion (not Archived, not Submitted) rather than requiring Ready |
+| G1 | `--labels` flag in /rfe-create | Create flow | Mentioned in arg parsing but never consumed downstream |
+| G2 | Ready status never set by /rfe-create | Pipeline assumes Ready for existing | /rfe-create sets Draft, not Ready; submit.py filters by exclusion (not Archived, not Submitted) rather than requiring Ready |
 | G3 | `recommendation=split` after revise agent no-split | Auto-Fix dispatch loop (COLLECT) | When split-agent determines no-split, the recommendation changes to revise, but auto-fix's collect step already ran. The changed recommendation won't trigger a revision pass |
 | G4 | Speedrun `tmp/speedrun-all-ids.txt` does not include split children | Submit discovers them via `scan_task_files()` anyway | Cosmetic (submit works, summary may undercount) |
 | G5 | `submit.py` ignores positional ID arguments | Speedrun passes IDs that have no effect | Documentation inconsistency; submit processes all local task files |
@@ -1083,10 +1086,10 @@ Each skill uses distinct file prefixes to avoid collisions during nested calls.
 
 | Prefix | Skill | Key Files | Purpose |
 |---|---|---|---|
-| `speedrun-` | rfe.speedrun | `tmp/speedrun-config.yaml`, `tmp/speedrun-all-ids.txt` | Mode, created IDs |
-| `pipeline-` | rfe.auto-fix (via `pipeline_state.py`) | `tmp/pipeline-state.yaml`, `tmp/pipeline-all-ids.txt`, `tmp/pipeline-changed-ids.txt`, `tmp/pipeline-process-ids.txt`, `tmp/pipeline-active-ids.txt`, `tmp/pipeline-batch-N-ids.txt`, `tmp/pipeline-retry-ids.txt` | Dispatch-loop phase, batch and cycle counters, id sets |
-| `review-` / `rfe-poll-` | rfe.review | `tmp/review-config.yaml`, `tmp/review-all-ids.txt`, `tmp/review-reassess-ids.txt`, `tmp/rfe-poll-{fetch,assess,feasibility,review,revise,reassess-assess,reassess-review}.txt` | Caller info, ID tracking, poll state |
-| `split-` / `rfe-poll-` | rfe.split | `tmp/split-config.yaml`, `tmp/split-all-ids.txt`, `tmp/rfe-poll-split.txt` | Parent IDs, return path, poll state |
+| `speedrun-` | rfe-speedrun | `tmp/speedrun-config.yaml`, `tmp/speedrun-all-ids.txt` | Mode, created IDs |
+| `pipeline-` | rfe-auto-fix (via `pipeline_state.py`) | `tmp/pipeline-state.yaml`, `tmp/pipeline-all-ids.txt`, `tmp/pipeline-changed-ids.txt`, `tmp/pipeline-process-ids.txt`, `tmp/pipeline-active-ids.txt`, `tmp/pipeline-batch-N-ids.txt`, `tmp/pipeline-retry-ids.txt` | Dispatch-loop phase, batch and cycle counters, id sets |
+| `review-` / `rfe-poll-` | rfe-review | `tmp/review-config.yaml`, `tmp/review-all-ids.txt`, `tmp/review-reassess-ids.txt`, `tmp/rfe-poll-{fetch,assess,feasibility,review,revise,reassess-assess,reassess-review}.txt` | Caller info, ID tracking, poll state |
+| `split-` / `rfe-poll-` | rfe-split | `tmp/split-config.yaml`, `tmp/split-all-ids.txt`, `tmp/rfe-poll-split.txt` | Parent IDs, return path, poll state |
 
 The `--caller` protocol uses separate config namespaces: review writes to
 `tmp/review-config.yaml` (including `caller`) and split maintains its own. On
@@ -1094,5 +1097,5 @@ headless return, the finishing skill reads its own config first (to get the
 `caller` field), then the caller's config (`tmp/split-config.yaml`) to determine
 where to resume. Both reads are required. `split` is the only caller left: the
 auto-fix skill drives the dispatcher's `tmp/pipeline-state.yaml` and never
-invokes `/rfe.review` or `/rfe.split` (the `caller=autofix` return path and the
+invokes `/rfe-review` or `/rfe-split` (the `caller=autofix` return path and the
 `tmp/autofix-config.yaml` it read were removed in PR-5a).

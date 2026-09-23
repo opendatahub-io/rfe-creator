@@ -508,7 +508,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "description": "OPEN list of stage names validated (from PR-5) against registered generic skills; a type may ship fewer. Today: create, review, submit, split, auto-fix, speedrun; PR #133 adds dupes, merge."
+          "description": "OPEN list of stage names; gate 1 (validate_types.stage_skill_messages, PR-5c) requires the generic skill .claude/skills/rfe-<stage>/SKILL.md for each entry, and pipeline_state.py init requires create, review, split and auto-fix. A type may ship fewer. Today: create, review, submit, split, auto-fix, speedrun; PR #133 adds dupes, merge."
         },
         "context_sources": {
           "type": "array",
