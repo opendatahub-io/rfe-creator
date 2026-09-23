@@ -267,8 +267,8 @@ class TestPathsMatchPipelineRegistry:
 class TestCallersDeclareType:
     """A skill that forgets the flag silently loses the gate. Since PR-5b the callers are the
     generic bodies and the typed split prompt, rendered per type with the launch block: every
-    bootstrap call they render must carry --type <t>. The legacy initiative bodies are checked
-    too until PR-5c deletes them."""
+    bootstrap call they render must carry --type <t> (the legacy per-type bodies went in
+    PR-5c; the rfe.* names are shims that bootstrap nothing themselves)."""
 
     GENERIC_CALLERS = ("rfe-create", "rfe-review", "rfe-auto-fix", "rfe-speedrun")
 
@@ -313,35 +313,20 @@ class TestCallersDeclareType:
             assert "bootstrap-assess-rfe.sh" not in raw, rel
             assert "{BOOTSTRAP}" in raw, rel
 
-    def _bootstrap_lines(self, path):
-        with open(path) as f:
-            return [ln for ln in f if re.search(r"bootstrap-assess-rfe\.sh", ln)]
-
-    def _skill_files(self):
+    def test_no_skill_outside_the_generic_callers_bootstraps(self):
+        """The compat shims (rfe.*) and every other skill body hand-write no bootstrap call:
+        the launch block is the only site (PR-5c — the per-type callers are gone)."""
+        offenders = []
         for dirpath, _, filenames in os.walk(SKILLS_DIR):
             for name in filenames:
-                if name.endswith(".md"):
-                    yield os.path.join(dirpath, name)
-
-    def test_initiative_skills_pass_type_initiative(self):
-        missing = []
-        for path in self._skill_files():
-            if "initiative-" not in path:
-                continue
-            for line in self._bootstrap_lines(path):
-                if "--type initiative" not in line:
-                    missing.append(f"{os.path.relpath(path, REPO_ROOT)}: {line.strip()}")
-        detail = "\n".join(missing)
-        assert not missing, f"initiative skills invoking bootstrap without --type:\n{detail}"
-
-    def test_at_least_one_initiative_caller_exists(self):
-        """Guards the filter above from passing vacuously."""
-        found = [
-            path
-            for path in self._skill_files()
-            if "initiative-" in path and self._bootstrap_lines(path)
-        ]
-        assert len(found) >= 3
+                path = os.path.join(dirpath, name)
+                rel = os.path.relpath(path, REPO_ROOT)
+                if not name.endswith(".md") or rel.split("/")[2] in self.GENERIC_CALLERS:
+                    continue
+                with open(path) as f:
+                    if any(re.search(r"bootstrap-assess-rfe\.sh", ln) for ln in f):
+                        offenders.append(rel)
+        assert offenders == [".claude/skills/rfe-creator.update-deps/SKILL.md"], offenders
 
     def test_pipeline_setup_phase_is_type_aware(self):
         """The pipeline is where a missed gate becomes an unbounded wait-for-wave spin."""

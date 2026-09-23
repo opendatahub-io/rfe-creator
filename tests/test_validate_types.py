@@ -50,7 +50,7 @@ EPIC_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "types" / "epic" / "type.yaml"
 FIXTURES_TYPES_ROOT = EPIC_FIXTURE.parent.parent
 STRAT_INPUTS_FIXTURE = FIXTURES_TYPES_ROOT / "strategy-inputs.yaml"
 # A live repo file to stand in for an embedded (repo: self) rubric in D3 tests.
-SELF_RUBRIC_PATH = ".claude/skills/rfe.review/prompts/review-agent.md"
+SELF_RUBRIC_PATH = ".claude/skills/rfe-review/prompts/review-agent.md"
 SHIPPED = ("rfe", "initiative")
 OK_LINE = "OK: 2 type(s) valid: rfe, initiative\n"
 
@@ -460,6 +460,39 @@ class TestSchemaGate:
 
 
 class TestPerTypeGate:
+    def test_every_stage_needs_its_generic_skill(self, types_copy):
+        """PR-5c: `pipeline.stages` is an OPEN list validated against the generic skill tree —
+        an entry without `.claude/skills/rfe-<stage>/SKILL.md` is a gate-1 finding (the shipped
+        lists pass: one body per stage)."""
+        _mutate(types_copy, "rfe", lambda d: d["pipeline"]["stages"].append("decompose"))
+        report = _validate(types_copy)
+        hits = _assert_finding(
+            report, "pipeline.stages[6]: no generic skill for stage 'decompose'", "rfe"
+        )
+        assert ".claude/skills/rfe-decompose/SKILL.md not found" in hits[0].message
+        assert not _find(report, "no generic skill", "initiative")
+        assert not _find(
+            _validate(types_copy, repo_root=REPO_ROOT), "no generic skill", "initiative"
+        )
+
+    def test_stage_skill_gate_reads_the_plugin_tree_not_the_descriptor_root(self, types_copy):
+        """The generic bodies live under the plugin root even for a drop-in root: a copy of the
+        shipped descriptors under tmp validates against the checkout's skill tree."""
+        assert (
+            validate_types.stage_skill_messages(
+                type_registry.load(root=types_copy, extra_roots=[], env={}).get("rfe"), REPO_ROOT
+            )
+            == []
+        )
+        stages = ["create", "review", "submit", "split", "auto-fix", "speedrun"]
+        assert validate_types.stage_skill_messages(
+            type_registry.load(root=types_copy, extra_roots=[], env={}).get("rfe"), types_copy
+        ) == [
+            f"pipeline.stages[{i}]: no generic skill for stage {s!r}: "
+            f".claude/skills/rfe-{s}/SKILL.md not found (relative to {types_copy})"
+            for i, s in enumerate(stages)
+        ]
+
     def test_missing_prompt_file(self, types_copy):
         _mutate(
             types_copy,

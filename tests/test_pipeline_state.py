@@ -3153,7 +3153,7 @@ class TestInitAndTheRegistry:
         row = ps.PIPELINE_TYPES["memo"]
         assert row["tasks_dir"] == "artifacts/memo-tasks"
         assert row["reviews_dir"] == "artifacts/memo-reviews"
-        assert row["dispatch_skill"] == ps.GENERIC_DISPATCH_SKILL  # no legacy body to drive it
+        assert row["dispatch_skill"] == ps.DISPATCH_SKILL  # the one generic body (PR-5c)
         with redirect_stdout(io.StringIO()):
             ps.cmd_init(["--type", "memo"])
         state = ps._load_state()

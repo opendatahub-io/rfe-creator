@@ -14,12 +14,7 @@ import type_registry  # noqa: E402
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "scripts", "check_revised.py")
 GENERIC_REVIEW_SKELETON = ".claude/skills/rfe-review/prompts/review-agent.md"
-REVIEW_PROMPT_SURFACES = [
-    ".claude/skills/rfe.review/prompts/review-agent.md",  # legacy, until PR-5c
-    ".claude/skills/initiative-review/prompts/review-agent.md",  # legacy, until PR-5c
-    "rfe:generic",
-    "initiative:generic",
-]
+REVIEW_PROMPT_SURFACES = ["rfe:generic", "initiative:generic"]  # the legacy twins went in PR-5c
 
 
 def _set_commands(text):
@@ -37,8 +32,8 @@ def _set_commands(text):
 
 
 def _review_prompt(surface):
-    """(text, id_field) of a review-agent prompt surface: a legacy file, or the generic
-    skeleton rendered for a type with its launch block (`type_registry.py launch-vars`)."""
+    """(text, id_field) of a review-agent prompt surface: the generic skeleton rendered for a
+    type with its launch block (`type_registry.py launch-vars`)."""
     if surface.endswith(":generic"):
         t = surface.split(":")[0]
         desc = type_registry.load(extra_roots=[], env={}).get(t)
@@ -363,9 +358,8 @@ class TestReassessCyclePreservation:
     @pytest.mark.parametrize("surface", REVIEW_PROMPT_SURFACES)
     def test_review_agent_prompt_excludes_auto_revised(self, surface):
         """The review agent prompt must NOT include auto_revised in its frontmatter.py set
-        call — only the revise agent and FIXUP set it. Held on the legacy prompts (until PR-5c)
-        and on the generic review skeleton rendered per type (`{ID_FIELD}={ID}` renders to the
-        type's id field)."""
+        call — only the revise agent and FIXUP set it. Held on the generic review skeleton
+        rendered per type (`{ID_FIELD}={ID}` renders to the type's id field)."""
         text, id_field = _review_prompt(surface)
         review_sets = [c for c in _set_commands(text) if f"{id_field}={{ID}}" in c]
         assert review_sets, f"{surface}: no frontmatter.py set command carries {id_field}={{ID}}"
