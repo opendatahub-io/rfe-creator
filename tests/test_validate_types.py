@@ -1741,6 +1741,32 @@ def test_gate1_ignores_malformed_dimension_names(tmp_path):
     assert not any("declared twice" in m for m in msgs)
 
 
+def test_gate1_rejects_dimension_names_that_shadow_a_launch_var(tmp_path):
+    """CodeRabbit on #200: a dimension named rules / template / prompt ... renders a <NAME>_PATH
+    key the launch block already carries, and a-b / a_b normalise to one stem — either would put
+    two lines under one key in front of the agent. LAUNCH_KEYS is the shared list."""
+    desc = _FakeDesc(
+        "x",
+        {
+            "pipeline.dimensions": [
+                {"name": "rules"},
+                {"name": "template"},
+                {"name": "assess-x"},
+                {"name": "assess_x"},
+                {"name": "feasibility"},
+            ]
+        },
+    )
+    msgs = validate_types.path_messages(desc, tmp_path)
+    assert "pipeline.dimensions name 'rules' renders RULES_PATH, a launch-block key" in msgs
+    assert "pipeline.dimensions name 'template' renders TEMPLATE_PATH, a launch-block key" in msgs
+    assert "pipeline.dimensions name 'assess_x' normalises to ASSESS_X like 'assess-x'" in msgs
+    assert not [m for m in msgs if "'feasibility'" in m]
+    for reserved in ("sections", "prompt", "revise_rules", "split_rules", "create_guidance"):
+        assert type_registry.dimension_key_collisions([reserved]), reserved
+    assert type_registry.dimension_key_collisions(["feasibility", "alignment", "security"]) == []
+
+
 def _template_findings(desc, root):
     return [
         m

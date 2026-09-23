@@ -3057,6 +3057,39 @@ class TestHeadlessMarker:
         assert os.environ[ps.HEADLESS_MARKER_ENV] == "1"
 
 
+class TestLaunchVarCollisions:
+    """CodeRabbit on #200: a dimension whose <NAME>_PATH shadows a launch-block key, or two
+    dimensions that normalise to one stem, fail loudly instead of emitting two lines under one
+    key."""
+
+    def test_render_vars_refuses_a_conflicting_duplicate_key(self):
+        block = [("STAGE", "auto-fix"), ("RULES_PATH", "/abs/rules.md")]
+        with pytest.raises(ValueError, match="duplicate launch var.*RULES_PATH"):
+            ps._render_vars(block, {"RULES_PATH": "artifacts/x/{ID}-rules.md"}, "RFE-001")
+        with pytest.raises(ValueError, match="A_B_PATH"):
+            ps._render_vars(block + [("A_B_PATH", "1"), ("A_B_PATH", "2")], {}, "RFE-001")
+        out = ps._render_vars(block, {"ID": "{ID}"}, "RFE-001")
+        assert out == "STAGE=auto-fix\nRULES_PATH=/abs/rules.md\nID=RFE-001\n"
+        # a phase var repeating a launch line verbatim (the assess PROMPT_PATH) is emitted once
+        block = [("PROMPT_PATH", ".context/assess-rfe/x.md")]
+        out = ps._render_vars(block, {"PROMPT_PATH": ".context/assess-rfe/x.md"}, "RFE-001")
+        assert out.count("PROMPT_PATH=") == 1
+
+    def test_review_vars_refuse_a_shadowing_dimension(self, tmp_dir, monkeypatch, drop_in_root):
+        import type_registry
+
+        dims = [
+            {"name": "feasibility", "prompt": "types/rfe/dimensions/feasibility.md"},
+            {"name": "rules", "prompt": "types/rfe/dimensions/feasibility.md"},
+        ]
+        drop_in_root.add("memo", overrides={**_memo_overrides(), "pipeline.dimensions": dims})
+        reg = type_registry.load(extra_roots=[drop_in_root.path], env={})
+        monkeypatch.setattr(ps, "_TYPES", reg)
+        monkeypatch.setattr(ps, "PIPELINE_TYPES", ps._pipeline_types(reg))
+        with pytest.raises(ValueError, match="dimension 'rules' renders RULES_PATH"):
+            ps._build_phase_config("memo")
+
+
 class TestWritePollStub:
     """CodeRabbit on #200: the descriptor's skip_stub is serialized with a YAML dumper — a
     reason containing ': ' or a value such as 'yes' must round-trip, not break or retype the

@@ -1499,6 +1499,98 @@ CONTEXT_DIR = ".context/assess-rfe"
 # The generic create skill's pre-assigned id flag (PR-5 plan D15).
 ID_FLAG = "--id"
 DEFAULT_STAGES = ("create", "review", "submit", "split", "auto-fix", "speedrun")
+# The fixed keys of every launch block, in emission order (the per-dimension DIMENSION_<NAME>_*
+# keys follow the dimension list). launch_vars checks its output against this tuple so the two
+# cannot drift; gate 1 and the dispatcher refuse a dimension whose derived <NAME>_PATH key
+# (pipeline_state._review_vars) would shadow one of these.
+LAUNCH_KEYS = (
+    "STAGE",
+    "TYPE",
+    "TYPE_FLAG",
+    "ENTITY",
+    "ENTITY_PLURAL",
+    "ID_FIELD",
+    "ID_FLAG",
+    "LOCAL_PREFIX",
+    "KEY_PREFIX",
+    "ID_GRAMMAR",
+    "LOCAL_ID_EXAMPLE",
+    "KEY_EXAMPLE",
+    "TASK_SCHEMA",
+    "REVIEW_SCHEMA",
+    "TASKS_DIR",
+    "ORIGINALS_DIR",
+    "REVIEWS_DIR",
+    "INDEX_ENABLED",
+    "COMMENTS_COMPANION",
+    "COMMENTS_FIELD",
+    "STATE_PREFIX",
+    "POLL_PREFIX",
+    "POLL_FILE_PREFIX",
+    "ASSESS_STAGING",
+    "SCORER_AGENT",
+    "PROMPT_PATH",
+    "RUBRIC_EXPORT",
+    "BOOTSTRAP",
+    "CREATE_GUIDANCE_PATH",
+    "TEMPLATE_PATH",
+    "RULES_PATH",
+    "SECTIONS_PATH",
+    "REVISE_RULES_PATH",
+    "SPLIT_RULES_PATH",
+    "DIMENSIONS",
+    "DIMENSION_FILES",
+    "SCORE_FIELDS",
+    "SCORE_SET",
+    "BEFORE_SCORE_SET",
+    "SCORE_ZERO_SET",
+    "REVIEW_EXTRA_FIELDS",
+    "REVIEW_EXTRA_SET",
+    "EXTRA_RULES",
+    "SIZE_FIELD",
+    "SIZE_SET",
+    "SIZE_ENUM",
+    "BATCH_EXTRA_FIELDS",
+    "PARENT_FLAG",
+    "NEXT_ID_FLAGS",
+    "REPORT_PREFIX",
+    "RUN_REPORT",
+    "HTML_REPORT",
+    "RESPLIT_FIELD",
+    "RESPLIT_BELOW",
+    "LABEL_PREFIX",
+    "NEEDS_ATTENTION_LABEL",
+    "VERDICT_LABELS",
+    "QUERY_DEFAULT",
+    "CONTEXT_DIR",
+)
+# The phase-var keys the dispatcher adds beside the launch block (pipeline_state._review_vars,
+# _assess_vars): a dimension may not shadow these either.
+PHASE_VAR_KEYS = ("FIRST_PASS", "ID", "KEY", "ASSESS_PATH", "DATA_FILE", "RUN_DIR")
+
+
+def dimension_key(name):
+    """The launch-var stem of a dimension name: ``a-b`` and ``a_b`` both give ``A_B``."""
+    return str(name).upper().replace("-", "_")
+
+
+def dimension_key_collisions(names):
+    """Why a dimension list cannot render: ``(name, reason)`` for a name whose ``<KEY>_PATH``
+    is a fixed launch-block or phase-var key, and for a pair of names that normalise to the
+    same stem (their DIMENSION_<KEY>_* and <KEY>_PATH lines would shadow each other)."""
+    problems, seen = [], {}
+    for name in names:
+        if not isinstance(name, str):
+            continue
+        key = dimension_key(name)
+        if f"{key}_PATH" in LAUNCH_KEYS or f"{key}_PATH" in PHASE_VAR_KEYS:
+            problems.append((name, f"renders {key}_PATH, a launch-block key"))
+        if key in seen and seen[key] != name:
+            problems.append((name, f"normalises to {key} like {seen[key]!r}"))
+        seen.setdefault(key, name)
+    return problems
+
+
 # Interactive skills poll through a second prefix the descriptor does not carry (tmp/<type>-poll-).
 _POLL_FILE_PREFIX = "tmp/{type}-poll-"
 _ASSESS_STAGING = "tmp/rfe-assess/single"
@@ -1674,6 +1766,9 @@ def launch_vars(desc, stage):
             ("CONTEXT_DIR", CONTEXT_DIR),
         ]
     )
+    fixed = [key for key, _ in out if not key.startswith("DIMENSION_") or key in LAUNCH_KEYS]
+    if fixed != list(LAUNCH_KEYS):
+        raise RegistryError("launch_vars drifted from LAUNCH_KEYS; update the tuple with the block")
     for key, value in out:
         if not isinstance(value, str) or "\n" in value:
             raise RegistryError(f"{desc.name}: launch var {key} is not a single line: {value!r}")

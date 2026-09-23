@@ -269,9 +269,24 @@ _LAUNCH_BLOCKS = {}
 
 
 def _render_vars(launch_block, phase_vars, rfe_id):
-    """``KEY=value`` lines: the launch block, then the phase's values; ``{ID}`` substituted."""
+    """``KEY=value`` lines: the launch block, then the phase's values; ``{ID}`` substituted.
+    A key defined twice with two values (a dimension shadowing a launch-block line, two
+    dimensions that normalise to one stem) is an error, never two lines the agent has to pick
+    between; a phase var that repeats a launch-block line verbatim (the assess PROMPT_PATH) is
+    emitted once."""
+    seen = {}
+    for key, value in launch_block:
+        if key in seen:
+            raise ValueError(f"duplicate launch var(s) for {rfe_id}: {key}")
+        seen[key] = value
     lines = [f"{k}={v.replace('{ID}', rfe_id)}" for k, v in launch_block]
-    lines += [f"{k}={v.replace('{ID}', rfe_id)}" for k, v in phase_vars.items()]
+    for key, value in phase_vars.items():
+        if key in seen:
+            if seen[key] != value:
+                raise ValueError(f"duplicate launch var(s) for {rfe_id}: {key}")
+            continue
+        seen[key] = value
+        lines.append(f"{key}={value.replace('{ID}', rfe_id)}")
     return "\n".join(lines) + "\n"
 
 
@@ -372,10 +387,20 @@ def _build_phase_config(pipeline_type):
             "ASSESS_PATH": "tmp/rfe-assess/single/{ID}.result.md",
         }
         # One <NAME>_PATH per declared dimension — pipeline.dimensions[] only, so a type
-        # without a feasibility dimension gets no FEASIBILITY_PATH (D12).
+        # without a feasibility dimension gets no FEASIBILITY_PATH (D12). A key that a fixed
+        # launch-block line or another dimension already defines is refused, never shadowed
+        # (gate 1 reports the same collision; type_registry.LAUNCH_KEYS is the shared list).
+        collisions = type_registry.dimension_key_collisions(d["name"] for d in t["dimensions"])
+        if collisions:
+            raise ValueError(
+                f"{pipeline_type}: dimension "
+                + "; ".join(f"{name!r} {why}" for name, why in collisions)
+            )
         for dim in t["dimensions"]:
-            key = dim["name"].upper().replace("-", "_")
-            v[f"{key}_PATH"] = f"{t['reviews_dir']}/{{ID}}-{dim['name']}.md"
+            var = f"{type_registry.dimension_key(dim['name'])}_PATH"
+            if var in v:
+                raise ValueError(f"{pipeline_type}: dimension {dim['name']!r} renders {var} twice")
+            v[var] = f"{t['reviews_dir']}/{{ID}}-{dim['name']}.md"
         return v
 
     def _assess_parallel():

@@ -3168,6 +3168,22 @@ class TestLaunchVars:
             "alignment.strong, alignment.partial, alignment.weak"
         )
 
+    def test_launch_keys_are_the_fixed_keys_in_order(self):
+        """LAUNCH_KEYS is what gate 1 and the dispatcher check dimension names against, so it
+        must equal the block's fixed keys, in order, for every shipped type and stage."""
+        reg = _shipped()
+        for name in reg.names():
+            for stage in reg.get(name).get("pipeline.stages"):
+                keys = [k for k, _ in type_registry.launch_vars(reg.get(name), stage)]
+                fixed = [
+                    k
+                    for k in keys
+                    if not k.startswith("DIMENSION_") or k in type_registry.LAUNCH_KEYS
+                ]
+                assert fixed == list(type_registry.LAUNCH_KEYS), (name, stage)
+                assert len(keys) == len(set(keys))
+        assert type_registry.dimension_key("a-b") == type_registry.dimension_key("a_b") == "A_B"
+
     def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path):
         """A drop-in root carries its typed files wherever it lives: a `types/<name>/...` path
         resolves under the descriptor's directory; a path outside its own directory (here the

@@ -340,6 +340,13 @@ def path_messages(desc, repo_root):
             elif dname in seen_names:
                 messages.append(f"pipeline.dimensions name {dname!r} is declared twice")
             seen_names.add(dname)
+        # A name whose derived <NAME>_PATH is a fixed launch-block key (rules, template, ...),
+        # or two names that normalise to one stem (a-b / a_b), would shadow a launch line
+        # silently (type_registry.LAUNCH_KEYS is the shared list).
+        for dname, why in type_registry.dimension_key_collisions(
+            d.get("name") for d in dimensions if isinstance(d, dict)
+        ):
+            messages.append(f"pipeline.dimensions name {dname!r} {why}")
         for i, dim in enumerate(dimensions):
             if isinstance(dim, dict):
                 missing(f"pipeline.dimensions[{i}].prompt", dim.get("prompt"), want_file=True)
