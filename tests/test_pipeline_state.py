@@ -3057,6 +3057,34 @@ class TestHeadlessMarker:
         assert os.environ[ps.HEADLESS_MARKER_ENV] == "1"
 
 
+class TestWritePollStub:
+    """CodeRabbit on #200: the descriptor's skip_stub is serialized with a YAML dumper — a
+    reason containing ': ' or a value such as 'yes' must round-trip, not break or retype the
+    frontmatter the review agent reads."""
+
+    def test_descriptor_values_round_trip(self, tmp_dir):
+        import yaml
+
+        stub = {
+            "result": "not_assessed",
+            "reason": "skipped: no RHAISTRAT parent (see #12)",
+            "confirmed": "yes",
+            "note": "[not] a list",
+        }
+        ps._write_poll_stub("initiative-alignment", "INIT-001", stub)
+        text = open("artifacts/initiative-reviews/INIT-001-alignment.md").read()
+        assert text.startswith("---\n") and text.endswith("---\n")
+        assert yaml.safe_load(text.split("---")[1]) == stub
+        assert "confirmed: 'yes'" in text  # the string stays a string
+
+    def test_shipped_stub_is_byte_identical_to_the_old_lines(self, tmp_dir):
+        row = ps.PIPELINE_TYPES["initiative"]
+        stub = next(d["skip_stub"] for d in row["dimensions"] if d["name"] == "alignment")
+        ps._write_poll_stub("initiative-alignment", "INIT-002")  # descriptor fallback
+        text = open("artifacts/initiative-reviews/INIT-002-alignment.md").read()
+        assert text == "---\n" + "".join(f"{k}: {v}\n" for k, v in stub.items()) + "---\n"
+
+
 class TestInitAndTheRegistry:
     """D12: PIPELINE_TYPES is a projection of the registry. A registered drop-in descriptor
     (RFE_CREATOR_EXTRA_TYPES) that carries the phase-table facts gets a phase table and `init

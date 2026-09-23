@@ -339,7 +339,9 @@ def _write_poll_stub(poll_phase, rfe_id, skip_stub=None):
             None,
         )
     stub = skip_stub or {"result": "not_assessed", "reason": "skipped by pipeline"}
-    body = "".join(f"{k}: {v}\n" for k, v in stub.items())
+    # A YAML dumper, not f"{k}: {v}" lines: a descriptor reason may contain ": " or a value
+    # such as "yes" that bare interpolation would render as broken or retyped YAML.
+    body = yaml.safe_dump(dict(stub), sort_keys=False, default_flow_style=False, width=1000)
     with open(path, "w") as f:
         f.write(f"---\n{body}---\n")
 

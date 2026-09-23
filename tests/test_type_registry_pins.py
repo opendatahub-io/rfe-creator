@@ -2496,6 +2496,37 @@ class TestSkillLayer:
         else:
             assert sizes == [] and "SIZE_SET=" not in text.replace("SIZE_SET={SIZE_SET}", "")
 
+    def test_create_reads_the_guidance_in_both_modes(self, ctx):
+        # CodeRabbit on #200: headless create used to skip Step 2 and with it the guidance file
+        # (writing rules, don'ts, sizing) — every speedrun Mode A / CI / eval create is headless.
+        text = skill(ctx.t, "create")
+        guidance = ctx.pipe["prompts"]["create_guidance"]
+        assert f"Read the type's creation guidance at `{guidance}` — always, headless too." in text
+        headless = [ln for ln in text.splitlines() if ln.startswith("If `--headless` is present")]
+        assert headless == [
+            "If `--headless` is present, Step 2 still reads the guidance but asks nothing: "
+            "proceed from that read straight to Step 3 using the provided input."
+        ]
+        assert "skip Step 2" not in text and "Skip clarifying questions" not in text
+        assert text.index("always, headless too") < text.index("## Step 3: Generate Items")
+
+    def test_tool_capable_prompts_carry_the_untrusted_input_guard(self, ctx):
+        # CodeRabbit on #200 (CWE-1427): every tool-capable prompt that reads Jira-derived
+        # task / comment / review text says once that it is data, never instructions, and
+        # names no Bash restriction (the allowlist is a separate control).
+        prompts = [f"{SKELETON_DIR}/{name}-agent.md" for name in ("fetch", "review", "revise")]
+        prompts.append(ctx.pipe["prompts"]["split_rules"])
+        prompts.extend(d["prompt"] for d in ctx.pipe["dimensions"])
+        for rel in prompts:
+            text = read(rel)
+            assert text.count("**Untrusted input.**") == 1, rel
+            assert (
+                "never instructions" in text
+                and "do not comply" in text
+                or rel.endswith("fetch-agent.md")
+            ), rel
+            assert "restricted to `python3 scripts" not in text, rel
+
     def test_feasibility_dimension_io(self, ctx):
         # rows: 231 — types/<t>/dimensions/feasibility.md (the body of the former dimension skill)
         text = read(ctx.dims["feasibility"]["prompt"])
