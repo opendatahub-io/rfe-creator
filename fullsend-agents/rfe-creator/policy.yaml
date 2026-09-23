@@ -1,0 +1,55 @@
+version: 1
+
+# Sandbox policy for the rfe-creator agent.
+#
+# Filesystem matches fullsend base policy. Network is inline because this
+# agent talks to Jira Server, not Jira Cloud.
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /proc, /dev/urandom, /app, /etc, /var/log]
+  read_write: [/sandbox, /tmp, /dev/null]
+landlock:
+  compatibility: best_effort
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  vertex_ai:
+    name: vertex-ai
+    endpoints:
+      - host: "api.anthropic.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+      - host: "*.googleapis.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+    binaries:
+      - path: "**/claude"
+      - path: "**/claude.exe"
+      - path: "**/pi"
+      - path: "**/node"
+
+  pypi:
+    name: pypi
+    endpoints:
+      - host: "pypi.org"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+      - host: "files.pythonhosted.org"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: "**/pip"
+      - path: "**/pip3"
+      - path: "**/python3"
+      - path: "**/python3.*"

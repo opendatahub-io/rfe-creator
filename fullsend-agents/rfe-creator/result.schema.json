@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rfe-creator-result.schema.json",
+  "title": "RFE Creator Agent Result",
+  "description": "Structured output from the rfe-creator agent, validated by the harness before the post-script runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "pipeline", "summary"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["completed", "failed", "skipped"]
+    },
+    "pipeline": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which pipeline ran (e.g. rfe-create, rfe-speedrun, none)."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rfes_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rfes_reviewed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rfes_submitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rfes_split": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "initiatives_created": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "initiatives_reviewed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "initiatives_submitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "initiatives_split": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dry_run": {
+      "type": "boolean"
+    }
+  }
+}

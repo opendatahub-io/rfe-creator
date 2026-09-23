@@ -1,0 +1,5 @@
+---
+name: jira
+type: jira
+credentials:
+  JIRA_TOKEN: "${JIRA_TOKEN}"
