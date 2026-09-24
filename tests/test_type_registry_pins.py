@@ -2602,11 +2602,12 @@ class TestSkillLayer:
         else:
             assert sizes == [] and "SIZE_SET=" not in text.replace("SIZE_SET={SIZE_SET}", "")
 
-    def test_create_reads_the_guidance_in_both_modes(self, ctx):
+    def test_create_reads_the_guidance_in_both_modes(self, ctx, monkeypatch):
         # CodeRabbit on #200: headless create used to skip Step 2 and with it the guidance file
         # (writing rules, don'ts, sizing) — every speedrun Mode A / CI / eval create is headless.
+        monkeypatch.chdir(REPO_ROOT)  # the guidance path renders relative from the checkout
         text = skill(ctx.t, "create")
-        guidance = dict(launch(ctx.t, "create"))["CREATE_GUIDANCE_PATH"]  # relative: checkout cwd
+        guidance = dict(launch(ctx.t, "create"))["CREATE_GUIDANCE_PATH"]
         assert guidance == ctx.pipe["prompts"]["create_guidance"]
         assert f"Read the type's creation guidance at `{guidance}` — always, headless too." in text
         headless = [ln for ln in text.splitlines() if ln.startswith("If `--headless` is present")]
