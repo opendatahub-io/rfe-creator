@@ -3191,10 +3191,11 @@ class TestLaunchVars:
 
     def test_launch_path_is_relative_only_for_the_file_the_cwd_carries(self, tmp_path, monkeypatch):
         """The subagent's path frame is the cwd: a typed file renders relative when the cwd
-        carries that very file at that path (the checkout; a `types` link the bootstrap made;
-        a byte-identical copy) and absolute otherwise (a working directory without it, a
-        same-named file with other content — even of the same size — a directory in the way).
-        The decision is per file: a partially vendored types/ tree renders a mixed block."""
+        carries that very file at that path (the checkout; a `types` link the bootstrap made)
+        and absolute otherwise (a working directory without it, a same-named file with other
+        content, a byte-identical copy — never trusted, it could be swapped before the read
+        (CWE-367) — a directory in the way, a link to some other file). The decision is per
+        file: a partially vendored types/ tree renders a mixed block."""
         desc = _shipped().get("rfe")
         rel = desc.get("pipeline.prompts.review_rules")
         absolute = desc.typed_path(rel)
@@ -3207,14 +3208,19 @@ class TestLaunchVars:
         target.parent.mkdir(parents=True)
         target.write_text("other rules\n", encoding="utf-8")
         assert desc.launch_path(rel) == absolute  # a different file at rel
-        data = Path(absolute).read_bytes()
-        target.write_bytes(data[:-1] + (b"\n" if data[-1:] != b"\n" else b" "))
-        assert desc.launch_path(rel) == absolute  # same size, one byte differs
-        target.write_bytes(data)
-        assert desc.launch_path(rel) == rel  # a byte-identical copy
+        target.write_bytes(Path(absolute).read_bytes())
+        assert desc.launch_path(rel) == absolute  # a byte-identical copy is not the file
         target.unlink()
         target.mkdir()
         assert desc.launch_path(rel) == absolute  # a directory is not the file
+        target.rmdir()
+        other = tmp_path / "other.md"
+        other.write_bytes(Path(absolute).read_bytes())
+        target.symlink_to(other)
+        assert desc.launch_path(rel) == absolute  # a link to some other file is not it
+        target.unlink()
+        target.symlink_to(absolute)
+        assert desc.launch_path(rel) == rel  # a link to the plugin's file is
         shutil.rmtree(tmp_path / "types")
         (tmp_path / "types").symlink_to(REPO_ROOT / "types")
         assert desc.launch_path(rel) == rel  # the directory link the bootstrap makes

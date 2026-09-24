@@ -150,19 +150,16 @@ DEFAULT_ROOT = PLUGIN_ROOT / "types"
 
 
 def _same_file_at(rel, absolute):
-    """True when the working directory carries the file at ``absolute`` under ``rel``: the same
-    file (the checkout is the cwd; a run directory that links the checkout in) or a
-    byte-identical copy of it. A missing path, a directory, a same-named file with other
-    content or any OS error is False — the caller then falls back to the absolute path."""
+    """True when ``rel`` under the working directory IS the file at ``absolute`` — the same
+    resolved path: the checkout is the cwd, or a ``types`` link into the plugin (the one the
+    bootstrap makes) sits in it. A copy is never it, byte-identical or not: a writer who can
+    place a copy in the working directory could swap it after this check and before the
+    subagent reads it (CWE-367), and the plugin's own file is what the prompt must be. A
+    missing path, a directory or any OS error is False — the caller then falls back to the
+    absolute path."""
     candidate, target = Path(rel), Path(absolute)
     try:
-        if not candidate.is_file():
-            return False
-        if candidate.resolve() == target:
-            return True
-        if candidate.stat().st_size != target.stat().st_size:
-            return False
-        return candidate.read_bytes() == target.read_bytes()
+        return candidate.is_file() and candidate.resolve() == target
     except OSError:
         return False
 
@@ -351,10 +348,11 @@ class Descriptor:
 
         ``rel`` as written when the working directory carries that very file at that path —
         the checkout is the cwd (production), or ``types/`` is linked into the cwd (the
-        bootstrap does that for the eval's run directory and a marketplace project), or a
-        byte-identical copy sits there — and the absolute ``typed_path`` only when it does
-        not (a drop-in root outside the checkout; a working directory the bootstrap has not
-        prepared). The decision is per file: a partially vendored ``types/`` tree renders a
+        bootstrap does that for the eval's run directory and a marketplace project) — and the
+        absolute ``typed_path`` when it does not: a drop-in root outside the checkout, a
+        working directory the bootstrap has not prepared, or a copy of the file in the working
+        directory (never trusted, however identical: it could be swapped before the subagent
+        reads it). The decision is per file: a partially vendored ``types/`` tree renders a
         mixed block.
 
         Relative is the default on purpose: a subagent whose first instruction names a file
