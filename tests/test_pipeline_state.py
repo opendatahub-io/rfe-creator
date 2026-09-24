@@ -46,6 +46,14 @@ def _isolate_headless_marker():
         os.environ[ps.HEADLESS_MARKER_ENV] = before
 
 
+@pytest.fixture(autouse=True)
+def _fresh_launch_block_cache(monkeypatch):
+    """_launch_block caches the rendered auto-fix block per type, and the rendering depends on
+    the cwd (Descriptor.launch_path): a block first rendered from a tmp_dir must not be served
+    to a later test — or a later test file — that runs from the checkout."""
+    monkeypatch.setattr(ps, "_LAUNCH_BLOCKS", {})
+
+
 def write_ids(path, ids):
     os.makedirs(os.path.dirname(path) or "tmp", exist_ok=True)
     with open(path, "w") as f:

@@ -1507,9 +1507,9 @@ def _third_type_with_own_files(root, name="docs"):
 
 class TestDropInTypedFiles:
     """CodeRabbit on #200: gate 1 resolves typed files through Descriptor.typed_path — the
-    projection launch-vars and the dispatcher use — so a drop-in root's own files are the ones
-    checked and linted, and a missing one is reported against its root, never masked by a
-    repository file of the same relative path."""
+    absolute form Descriptor.launch_path falls back to off the checkout — so a drop-in root's
+    own files are the ones checked and linted, and a missing one is reported against its root,
+    never masked by a repository file of the same relative path."""
 
     def test_own_files_pass_gate_1_and_match_the_launch_block(self, tmp_path):
         extra = _third_type_with_own_files(tmp_path / "extra")

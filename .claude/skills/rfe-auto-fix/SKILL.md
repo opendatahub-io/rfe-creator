@@ -131,7 +131,7 @@ Any other exit code is an error.
 
 ### Example `launch_wave` output
 
-The values are the resolved type's (here `rfe`); the launch block lines are elided to `…`, and a typed prompt file is an absolute path (its plugin root elided to `<root>`), so it resolves from any working directory:
+The values are the resolved type's (here `rfe`); the launch block lines are elided to `…`. A typed prompt file is the descriptor's relative path while the working directory carries it (the checkout, or the `types/` link the bootstrap makes in any other working directory) and an absolute path only when it does not (a drop-in outside the checkout):
 
 ```yaml
 action: launch_wave
@@ -146,7 +146,7 @@ agents:
       DATA_FILE=tmp/rfe-assess/single/RHAIRFE-1234.md
       RUN_DIR=tmp/rfe-assess/single
       PROMPT_PATH=.context/assess-rfe/skills/assess-rfe/scripts/agent_prompt.md
-  - prompt_file: <root>/types/rfe/dimensions/feasibility.md
+  - prompt_file: types/rfe/dimensions/feasibility.md
     vars: |
       …
       ID=RHAIRFE-1234

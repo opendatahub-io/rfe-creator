@@ -148,6 +148,22 @@ import yaml
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ROOT = PLUGIN_ROOT / "types"
 
+
+def _same_file_at(rel, absolute):
+    """True when ``rel`` under the working directory IS the file at ``absolute`` — the same
+    resolved path: the checkout is the cwd, or a ``types`` link into the plugin (the one the
+    bootstrap makes) sits in it. A copy is never it, byte-identical or not: a writer who can
+    place a copy in the working directory could swap it after this check and before the
+    subagent reads it (CWE-367), and the plugin's own file is what the prompt must be. A
+    missing path, a directory or any OS error is False — the caller then falls back to the
+    absolute path."""
+    candidate, target = Path(rel), Path(absolute)
+    try:
+        return candidate.is_file() and candidate.resolve() == target
+    except OSError:
+        return False
+
+
 DESCRIPTOR_FILENAME = "type.yaml"
 EXTRA_ROOTS_ENV = "RFE_CREATOR_EXTRA_TYPES"
 # Design §3.5 / PR1-05: roots the env seam may add in a headless/CI run (os.pathsep-separated).
@@ -318,16 +334,38 @@ class Descriptor:
         ``pipeline.dimensions[].prompt``). A path under this type's own directory
         (``types/<name>/...``) resolves against the descriptor's directory — a drop-in root
         carries its typed files wherever it lives — and any other plugin-relative path against
-        the plugin root. Launch blocks carry these absolute values: subagents read the files
-        from an arbitrary working directory (a marketplace install runs the skills from the
-        project, not the checkout), where a relative path would not resolve. An empty value
-        (an absent optional file) stays empty."""
+        the plugin root. This is the existence check's view (gate 1); what a launch block hands
+        a subagent is ``launch_path``. An empty value (an absent optional file) stays empty."""
         if not rel:
             return ""
         own = f"types/{self.name}/"
         if self.path is not None and rel.startswith(own):
             return str((self.path.parent / rel[len(own) :]).resolve())
         return str((PLUGIN_ROOT / rel).resolve())
+
+    def launch_path(self, rel):
+        """The path a launch block hands a subagent for the typed file ``rel`` names.
+
+        ``rel`` as written when the working directory carries that very file at that path —
+        the checkout is the cwd (production), or ``types/`` is linked into the cwd (the
+        bootstrap does that for the eval's run directory and a marketplace project) — and the
+        absolute ``typed_path`` when it does not: a drop-in root outside the checkout, a
+        working directory the bootstrap has not prepared, or a copy of the file in the working
+        directory (never trusted, however identical: it could be swapped before the subagent
+        reads it). The decision is per file: a partially vendored ``types/`` tree renders a
+        mixed block.
+
+        Relative is the default on purpose: a subagent whose first instruction names a file
+        under one absolute root infers that root for every relative path that follows
+        (``artifacts/...``, ``.context/...``) and reads them from the wrong tree — in the
+        2026-09-23 evals 27 of 31 rfe feasibility agents did, and one recovered through
+        ``cat`` so the transcript check lost its evidence. Keeping every path the subagent
+        sees in one frame, the cwd, removes the inference; the absolute form is the fallback
+        for a layout where no relative path resolves. Empty stays empty."""
+        if not rel:
+            return ""
+        absolute = self.typed_path(rel)
+        return rel if _same_file_at(rel, absolute) else absolute
 
     # -- generic access -------------------------------------------------------------------
 
@@ -1624,10 +1662,15 @@ def launch_vars(desc, stage):
     ``stage`` must be one of the type's ``pipeline.stages``.
 
     Typed-file paths (the template, the guidance, the rules, the sections, the split prompt,
-    every dimension prompt) are ABSOLUTE (``Descriptor.typed_path``) so the files resolve from
-    any working directory; workspace paths (``artifacts/...``, ``tmp/...``, the rubric under
-    ``.context/``) and every command (``BOOTSTRAP``, ``python3 scripts/...``) stay relative —
-    the headless allowlist matches command text literally, and the workspace is the cwd.
+    every dimension prompt) render through ``Descriptor.launch_path``: the descriptor's own
+    relative value whenever the working directory carries that file (the checkout is the cwd,
+    or the bootstrap linked ``types/`` in), absolute only when it does not (a drop-in root
+    outside the checkout, an unprepared working directory) — a subagent must see every path
+    in one frame, or it infers the absolute root for the relative ones. Workspace paths
+    (``artifacts/...``, ``tmp/...``, the
+    rubric under ``.context/``) and every command (``BOOTSTRAP``, ``python3 scripts/...``) are
+    always relative — the headless allowlist matches command text literally, and the workspace
+    is the cwd.
     """
     stages = list(desc.get("pipeline.stages", None) or DEFAULT_STAGES)
     if stage not in stages:
@@ -1695,19 +1738,19 @@ def launch_vars(desc, stage):
         ("PROMPT_PATH", f"{CONTEXT_DIR}/{rubric['path']}"),
         ("RUBRIC_EXPORT", rubric.get("export") or "none"),
         ("BOOTSTRAP", f"bash scripts/bootstrap-assess-rfe.sh --type {desc.name}"),
-        ("CREATE_GUIDANCE_PATH", desc.typed_path(prompts.get("create_guidance", ""))),
-        ("TEMPLATE_PATH", desc.typed_path(prompts.get("template", ""))),
-        ("RULES_PATH", desc.typed_path(prompts.get("review_rules", ""))),
-        ("SECTIONS_PATH", desc.typed_path(prompts.get("review_sections", ""))),
-        ("REVISE_RULES_PATH", desc.typed_path(prompts.get("revise_rules", ""))),
-        ("SPLIT_RULES_PATH", desc.typed_path(prompts.get("split_rules", ""))),
+        ("CREATE_GUIDANCE_PATH", desc.launch_path(prompts.get("create_guidance", ""))),
+        ("TEMPLATE_PATH", desc.launch_path(prompts.get("template", ""))),
+        ("RULES_PATH", desc.launch_path(prompts.get("review_rules", ""))),
+        ("SECTIONS_PATH", desc.launch_path(prompts.get("review_sections", ""))),
+        ("REVISE_RULES_PATH", desc.launch_path(prompts.get("revise_rules", ""))),
+        ("SPLIT_RULES_PATH", desc.launch_path(prompts.get("split_rules", ""))),
         ("DIMENSIONS", ",".join(d["name"] for d in dims)),
     ]
     for dim in dims:
         key = dim["name"].upper().replace("-", "_")
         out.extend(
             [
-                (f"DIMENSION_{key}_PROMPT", desc.typed_path(dim["prompt"])),
+                (f"DIMENSION_{key}_PROMPT", desc.launch_path(dim["prompt"])),
                 (f"DIMENSION_{key}_FILE", f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"),
                 (f"DIMENSION_{key}_BLOCKING", _flag(dim.get("blocking", True))),
                 (f"DIMENSION_{key}_CONDITION", _dimension_condition(dim)),

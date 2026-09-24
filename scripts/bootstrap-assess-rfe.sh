@@ -94,6 +94,24 @@ if [ -n "${RFE_SKIP_BOOTSTRAP:-}" ]; then
   exit 0
 fi
 
+# The launch block hands subagents the typed files (types/<name>/...) as paths
+# relative to the working directory (Descriptor.launch_path): one path frame, so
+# no agent infers another root for artifacts/ from an absolute prompt path. When
+# the working directory is not the plugin checkout — the eval harness links only
+# scripts/, .claude/, .context/ and skills/ into its run directory; a marketplace
+# install runs the skills from the project — link the checkout's types/ in so
+# those relative paths resolve there too. A checkout cwd (production) is a
+# no-op, and an existing entry is never replaced.
+PLUGIN_ROOT="$(cd -P "$SCRIPT_DIR/.." 2>/dev/null && pwd -P)" || PLUGIN_ROOT=""
+if [ -n "$PLUGIN_ROOT" ] && [ "$PLUGIN_ROOT" != "$(pwd -P)" ] && [ -d "$PLUGIN_ROOT/types" ] \
+   && [ ! -e types ] && [ ! -L types ]; then
+  if ln -s "$PLUGIN_ROOT/types" types 2>/dev/null; then
+    echo "types/ -> $PLUGIN_ROOT/types (typed files reachable from the working directory)"
+  else
+    echo "WARN: could not link $PLUGIN_ROOT/types as types/ - typed files are read by absolute path" >&2
+  fi
+fi
+
 CONTEXT_DIR=".context/assess-rfe"
 
 # One field of the descriptor's `rubric:` block, without the registry (no PyYAML
