@@ -71,6 +71,8 @@ Write your assessment to `artifacts/rfe-reviews/{ID}-feasibility.md` where `{ID}
 
 **Named components that don't exist in the platform**: If the RFE references a specific component or project not in the architecture inventory, assess the feasibility of the underlying need — the named component is the author's proposed implementation, not a prerequisite. Note the missing component as a strategy consideration, not a blocker.
 
+**vLLM-Omni is not vLLM.** The architecture inventory has no `vllm-omni` component doc (only overlays mention it), so do not resolve "vLLM-Omni" to the nearest vLLM component. Read `.claude/skills/rfe.create/upstream-project-boundaries.md` and check three things: (1) each capability the RFE names is attributed to the repo that owns it; (2) any capability the RFE presents as new does not already exist at HEAD; (3) every PR or issue reference carries repo, state, author, and date. A wrong attribution is a strategy consideration written as `Repo mismatch: <capability> lives in <repo> (<file>), RFE says <other>`. A bare PR number is `Unverifiable citation: #NNNN has no repo`. A route that already exists is `Already exists at <repo> @ <sha>: reclassify as PRODUCTIZE`. These are not blockers. They must reach `/strat.refine` so the strategy does not repeat them.
+
 ### Strategy Considerations
 
 Architectural questions, hidden complexities, cross-team coordination, scope risks — anything engineering needs to address during `/strat.refine`. These are NOT reasons to block the RFE. List them so they carry forward into strategy refinement.

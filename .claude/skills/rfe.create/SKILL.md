@@ -49,6 +49,8 @@ If the rubric is loaded, adapt your questions to cover any rubric criteria the P
 
 Do NOT ask about implementation approach, architecture, technology choices, or API design. Those belong in the strategy phase.
 
+**Paired upstream projects.** If the input mentions vLLM together with speech, TTS, audio or image or video generation, realtime, duplex, or "omni", read `${CLAUDE_SKILL_DIR}/upstream-project-boundaries.md` and ask which repository owns the need: `vllm-project/vllm` or `vllm-project/vllm-omni`. This is a WHAT question (which product the customer is asking about), not a HOW question. In `--headless` mode there is no one to ask: resolve it from the boundaries file, and if the file does not settle it, name the more likely repo and mark it `NEEDS VERIFICATION` in the RFE text.
+
 ## Step 3: Generate RFEs
 
 Read the template from `${CLAUDE_SKILL_DIR}/rfe-template.md`. Internalize the **Size Guide** — you will use it to determine each RFE's t-shirt size.
@@ -62,6 +64,7 @@ Key rules:
 - **Priority uses Jira values.** Choose from: Blocker, Critical, Major, Normal, Minor. Default to Normal unless the PM's input clearly indicates urgency.
 - **Acceptance criteria from the user's perspective.** "User can do X" not "System implements Y." No implementation details in acceptance criteria.
 - **Platform vocabulary is allowed in describing the problem domain** — terms like KServe, ModelMesh, RHOAI, Operator are fine for describing what area the RFE touches. But do not prescribe that specific technologies must be used in the solution.
+- **Name the upstream repository precisely.** vLLM (`vllm-project/vllm`) and vLLM-Omni (`vllm-project/vllm-omni`) are different projects with different maintainers and PR numbering. Follow `${CLAUDE_SKILL_DIR}/upstream-project-boundaries.md`: name the owning repo in the Summary, open with a dated Current State block when the capability may already exist, and never cite a PR or issue number without repo, state, author, and date.
 
 ## Step 4: Write Artifacts
 
@@ -112,5 +115,6 @@ Tell the PM they can:
 - Do NOT include sections about technical approach, dependencies, affected components, or implementation phases. Those belong in strategy refinement.
 - Do NOT use High/Medium/Low for priority. Use the actual Jira values: Blocker, Critical, Major, Normal, Minor.
 - Do NOT generate a PRD or any other intermediate document. Go directly from the PM's input to RFEs.
+- Do NOT write "vLLM" or "upstream vLLM" for a capability that lives in vLLM-Omni, or the reverse. Do NOT describe an endpoint that already exists at HEAD as new. See `${CLAUDE_SKILL_DIR}/upstream-project-boundaries.md`.
 
 $ARGUMENTS

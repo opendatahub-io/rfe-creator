@@ -175,6 +175,10 @@ When `tmp/pipeline-state.yaml` exists and the phase is not DONE:
 
 Files under `eval/dataset/` must be anonymized before commit. Never commit real customer names, individual names, email addresses, or other personally identifiable information (PII). Replace them with fictional equivalents (e.g., "Acme Corp", "Example Industries"). This applies to test inputs, annotations, and any reference files.
 
+## Upstream Project Boundaries
+
+Some Red Hat AI components map to more than one upstream repository with similar names (vLLM vs. vLLM-Omni is the running case). `.claude/skills/rfe.create/upstream-project-boundaries.md` lists the pairs, which repo owns which capability, how to verify from code, and the citation format for PRs and issues. `/rfe.create`, the revise agent, and `/rfe-feasibility-review` all read it. A mirror lives in `strat-creator`; change both together.
+
 ## Architecture Context
 
 `/rfe.review` automatically fetches architecture context from [opendatahub-io/architecture-context](https://github.com/opendatahub-io/architecture-context) into `.context/architecture-context/` and detects the latest RHOAI version. No manual setup needed.

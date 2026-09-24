@@ -22,6 +22,8 @@ Comments file: artifacts/rfe-tasks/{ID}-comments.md (read if it exists)
 
 **Critical distinction for HOW**: When the RFE is about integrating with or providing a specific vendor project, product, or API, naming that project/product is part of the WHAT (the business need), not the HOW. Do not generalize away named vendor solutions. Only reframe language that prescribes *internal implementation choices* (architecture patterns, specific K8s resources, build tooling, deployment ratios).
 
+**Upstream repository names are WHAT.** vLLM (`vllm-project/vllm`) and vLLM-Omni (`vllm-project/vllm-omni`) are different projects. Never rewrite "vLLM-Omni" as "vLLM" or "upstream vLLM", and never strip the repo name from a PR or issue reference. A `## Current State (verified <repo> @ <sha>, <date>)` block is a dated statement of what exists today; it is WHAT, not HOW. Keep it in the task file, do not move it to removed-context, and note in Revision History that it was kept on purpose if the assessor flagged it. If the RFE attributes a route or feature to the wrong repo, fix the attribution using `.claude/skills/rfe.create/upstream-project-boundaries.md` and set `needs_attention=true` with the correction as the reason, so the author sees it.
+
 **Right-sizing is a recommendation, never auto-applied.** If right_sized scored 0 or 1, do NOT remove acceptance criteria or capabilities to force a different shape.
 
 **Do not invent missing evidence.** If WHY is flagged for missing named customers, do not fabricate evidence — set `needs_attention=true` in Step 5 so the author is notified.
