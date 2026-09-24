@@ -1528,16 +1528,17 @@ class TestPipelineTypes:
         assert p["review_prompts"] == pipeline_state.REVIEW_PROMPTS == SKELETON_DIR
         for name in ("fetch", "assess", "review", "revise"):
             assert (REPO_ROOT / f"{SKELETON_DIR}/{name}-agent.md").is_file()
-        # Typed prompt files are projected ABSOLUTE (Descriptor.typed_path): the orchestrator
-        # Reads them from an arbitrary working directory.
+        # Typed prompt files are projected through Descriptor.launch_path: the descriptor's
+        # relative value from the checkout (this session's cwd carries the files), absolute
+        # only where the cwd does not — the subagent must see one path frame.
         pin(
             "pipeline.prompts.split_rules",
             "pipeline_state.py:99,:111",
-            ctx.desc.typed_path(prompts["split_rules"]),
+            ctx.desc.launch_path(prompts["split_rules"]),
             p["split_prompt"],
         )
-        assert Path(p["split_prompt"]).is_absolute()
-        assert p["split_prompt"].endswith(prompts["split_rules"])
+        assert p["split_prompt"] == prompts["split_rules"]
+        assert (REPO_ROOT / p["split_prompt"]).is_file()
         pin(
             "dirs.originals",
             "pipeline_state._save_originals",
@@ -1550,7 +1551,7 @@ class TestPipelineTypes:
             [
                 {
                     "name": d["name"],
-                    "prompt": ctx.desc.typed_path(d["prompt"]),
+                    "prompt": ctx.desc.launch_path(d["prompt"]),
                     "blocking": d.get("blocking", True),
                     "condition": d.get("condition"),
                     "skip_stub": d.get("skip_stub"),
@@ -1560,7 +1561,7 @@ class TestPipelineTypes:
             p["dimensions"],
         )
         for d in p["dimensions"]:
-            assert Path(d["prompt"]).is_absolute() and Path(d["prompt"]).is_file()
+            assert not Path(d["prompt"]).is_absolute() and (REPO_ROOT / d["prompt"]).is_file()
         pin(
             "pipeline.scorer_agent",
             "pipeline_state.py:100,:112",
@@ -1576,13 +1577,13 @@ class TestPipelineTypes:
         pin(
             "dimensions[feasibility].prompt",
             "pipeline_state.py:102,:114",
-            ctx.desc.typed_path(ctx.dims["feasibility"]["prompt"]),
+            ctx.desc.launch_path(ctx.dims["feasibility"]["prompt"]),
             p["feasibility_skill"],
         )
         pin(
             "dimensions[alignment].prompt or None",
             "pipeline_state.py:103,:115",
-            ctx.desc.typed_path(ctx.dims["alignment"]["prompt"])
+            ctx.desc.launch_path(ctx.dims["alignment"]["prompt"])
             if "alignment" in ctx.dims
             else None,
             p["alignment_skill"],
@@ -1624,7 +1625,7 @@ class TestPipelineTypes:
         review_dir = SKELETON_DIR
         parallel = [
             {
-                "prompt": ctx.desc.typed_path(d["prompt"]),
+                "prompt": ctx.desc.launch_path(d["prompt"]),
                 "poll_phase": f"{ctx.pp}{d['name']}",
                 "vars": {"ID": "{ID}"},
                 **(
@@ -1678,7 +1679,9 @@ class TestPipelineTypes:
         for phase in ("REVIEW", "REASSESS_REVIEW", "SPLIT_REVIEW", "SPLIT_RE_REVIEW"):
             # The Tier-2 skeleton is the prompt; review_rules reaches the agent as RULES_PATH.
             assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/review-agent.md"
-            assert dict(launch(ctx.t))["RULES_PATH"] == ctx.desc.typed_path(prompts["review_rules"])
+            assert dict(launch(ctx.t))["RULES_PATH"] == ctx.desc.launch_path(
+                prompts["review_rules"]
+            )
             # One <NAME>_PATH per declared dimension and no other: pipeline.dimensions[] is the
             # only source (a type without a feasibility dimension gets no FEASIBILITY_PATH).
             pin(
@@ -1694,13 +1697,13 @@ class TestPipelineTypes:
             assert cfg[phase]["vars"]["ASSESS_PATH"] == f"{ASSESS_STAGING}/{{ID}}.result.md"
         for phase in ("REVISE", "REASSESS_REVISE", "SPLIT_REVISE"):
             assert cfg[phase]["prompt"] == f"{SKELETON_DIR}/revise-agent.md"
-            assert dict(launch(ctx.t))["REVISE_RULES_PATH"] == ctx.desc.typed_path(
+            assert dict(launch(ctx.t))["REVISE_RULES_PATH"] == ctx.desc.launch_path(
                 prompts["revise_rules"]
             )
         pin(
             "pipeline.prompts.split_rules",
             "pipeline_state SPLIT.prompt",
-            ctx.desc.typed_path(prompts["split_rules"]),
+            ctx.desc.launch_path(prompts["split_rules"]),
             cfg["SPLIT"]["prompt"],
         )
         pin(
@@ -2152,32 +2155,34 @@ class TestSkillLayer:
             )
             assert "RHAISTRAT" not in rendered
 
-    def test_launch_block_typed_paths_are_absolute_and_the_rest_relative(self, ctx):
-        # A marketplace install runs the skills from the project, not the checkout: the typed
-        # files a subagent Reads render absolute (from the descriptor's own directory), while
-        # workspace paths, the rubric under .context/ and every command stay relative — the
-        # headless allowlist matches command text literally.
-        block = dict(launch(ctx.t, "split"))
-        typed_keys = {
-            "TEMPLATE_PATH": "template",
-            "CREATE_GUIDANCE_PATH": "create_guidance",
-            "RULES_PATH": "review_rules",
-            "SECTIONS_PATH": "review_sections",
-            "REVISE_RULES_PATH": "revise_rules",
-            "SPLIT_RULES_PATH": "split_rules",
-        }
-        for key, field in typed_keys.items():
-            value, rel = block[key], ctx.pipe["prompts"][field]
-            assert Path(value).is_absolute() and value.endswith(rel), (key, value)
-            assert Path(value).is_file() and Path(value) == (REPO_ROOT / rel).resolve()
+    TYPED_KEYS = {
+        "TEMPLATE_PATH": "template",
+        "CREATE_GUIDANCE_PATH": "create_guidance",
+        "RULES_PATH": "review_rules",
+        "SECTIONS_PATH": "review_sections",
+        "REVISE_RULES_PATH": "revise_rules",
+        "SPLIT_RULES_PATH": "split_rules",
+    }
+
+    def _typed_rels(self, ctx):
+        rels = {key: ctx.pipe["prompts"][field] for key, field in self.TYPED_KEYS.items()}
         for d in ctx.pipe["dimensions"]:
-            value = block[f"DIMENSION_{d['name'].upper()}_PROMPT"]
-            assert Path(value).is_absolute() and value.endswith(d["prompt"])
-            assert Path(value) == (REPO_ROOT / d["prompt"]).resolve()
-        absolute = {k for k, v in block.items() if v.startswith("/")}
-        assert absolute == set(typed_keys) | {
-            f"DIMENSION_{d['name'].upper()}_PROMPT" for d in ctx.pipe["dimensions"]
-        }
+            rels[f"DIMENSION_{d['name'].upper()}_PROMPT"] = d["prompt"]
+        return rels
+
+    def test_launch_block_is_all_relative_from_the_checkout(self, ctx):
+        # The subagent must see one path frame. From the checkout — production's cwd, and the
+        # eval's run directory links it in — every typed file renders as the descriptor's own
+        # relative value, next to the relative workspace paths, the rubric under .context/ and
+        # every command (the headless allowlist matches command text literally). Nothing in
+        # the block is absolute: the one absolute path (89758c4 rendered the dimension prompt
+        # so) made 27 of 31 feasibility agents in the 2026-09-23 evals infer that root for
+        # artifacts/ and read from the wrong tree.
+        block = dict(launch(ctx.t, "split"))
+        for key, rel in self._typed_rels(ctx).items():
+            assert block[key] == rel, (key, block[key])
+            assert (REPO_ROOT / rel).is_file()
+        assert [k for k, v in block.items() if v.startswith("/")] == []
         assert block["PROMPT_PATH"].startswith(".context/")
         assert block["BOOTSTRAP"].startswith("bash scripts/")
         for key in ("TASKS_DIR", "ORIGINALS_DIR", "REVIEWS_DIR"):
@@ -2186,6 +2191,32 @@ class TestSkillLayer:
         for stage in ctx.pipe["stages"]:
             raw = read(GENERIC_SKILL.format(stage=stage)).split("---", 2)[2]
             assert f"types/{ctx.t}/" not in raw.split("### Example `launch_wave` output", 1)[0]
+
+    def test_launch_block_typed_paths_fall_back_to_absolute_off_the_checkout(
+        self, ctx, tmp_path, monkeypatch
+    ):
+        # A marketplace install runs the skills from the project while the plugin lives under
+        # ~/.claude/plugins/cache/...: no relative typed path resolves there, so exactly the
+        # typed files render absolute (Descriptor.typed_path) and everything else stays
+        # relative. A same-named file with other content under the cwd is not the typed file;
+        # a byte-identical copy of it is.
+        rels = self._typed_rels(ctx)
+        monkeypatch.chdir(tmp_path)
+        block = dict(launch(ctx.t, "split"))
+        for key, rel in rels.items():
+            assert block[key] == ctx.desc.typed_path(rel) == str((REPO_ROOT / rel).resolve())
+            assert Path(block[key]).is_file(), key
+        assert {k for k, v in block.items() if v.startswith("/")} == set(rels)
+        assert block["PROMPT_PATH"].startswith(".context/")
+        assert block["BOOTSTRAP"].startswith("bash scripts/")
+        for key in ("TASKS_DIR", "ORIGINALS_DIR", "REVIEWS_DIR"):
+            assert block[key].startswith("artifacts/")
+        rel = rels["RULES_PATH"]
+        (tmp_path / rel).parent.mkdir(parents=True)
+        (tmp_path / rel).write_text("not the rules\n", encoding="utf-8")
+        assert dict(launch(ctx.t, "split"))["RULES_PATH"] == ctx.desc.typed_path(rel)
+        (tmp_path / rel).write_bytes((REPO_ROOT / rel).read_bytes())
+        assert dict(launch(ctx.t, "split"))["RULES_PATH"] == rel
 
     def test_scorer_literal_sites(self, ctx):
         # rows: 191 — rendered review body launches the scorer twice; the assess skeleton
@@ -2228,10 +2259,11 @@ class TestSkillLayer:
             line.split("=", 1) for line in scorer["vars"].strip().splitlines() if "=" in line
         )
         assert shown == rendered, (shown, rendered)
-        # the example elides the plugin root of the absolute typed prompt path to <root>
-        assert companion["prompt_file"].startswith("<root>/")
-        assert Path(cfg["parallel"][0]["prompt"]).is_absolute()
-        assert cfg["parallel"][0]["prompt"].endswith(companion["prompt_file"][len("<root>") :])
+        # the example shows the typed prompt as the table renders it from the checkout: the
+        # descriptor's relative path, in the same frame as every other path in the block
+        assert companion["prompt_file"] == cfg["parallel"][0]["prompt"]
+        assert not Path(companion["prompt_file"]).is_absolute()
+        assert (REPO_ROOT / companion["prompt_file"]).is_file()
         assert "ID=RHAIRFE-1234" in companion["vars"].splitlines()
 
     def test_bootstrap_script_text(self, ctx):

@@ -3115,10 +3115,13 @@ class TestLaunchVars:
             assert pairs["DIMENSIONS"] == ",".join(d["name"] for d in pipe["dimensions"])
             for dim in pipe["dimensions"]:
                 key = dim["name"].upper()
-                # typed files render absolute, resolved from the descriptor's own directory
-                assert pairs[f"DIMENSION_{key}_PROMPT"] == str(
+                # typed files resolve from the descriptor's own directory (typed_path) and
+                # render relative from the checkout, which is this session's cwd (launch_path)
+                assert desc.typed_path(dim["prompt"]) == str(
                     (desc.path.parent / dim["prompt"].split(f"types/{name}/", 1)[1]).resolve()
                 )
+                assert pairs[f"DIMENSION_{key}_PROMPT"] == dim["prompt"]
+                assert desc.launch_path(dim["prompt"]) == dim["prompt"]
                 assert (
                     pairs[f"DIMENSION_{key}_FILE"] == f"{dirs['reviews']}/{{ID}}-{dim['name']}.md"
                 )
@@ -3130,8 +3133,9 @@ class TestLaunchVars:
                 ("REVISE_RULES_PATH", "revise_rules"),
                 ("SPLIT_RULES_PATH", "split_rules"),
             ):
-                assert pairs[var] == desc.typed_path(pipe["prompts"][field])
-                assert pairs[var].startswith("/") and pairs[var].endswith(pipe["prompts"][field])
+                assert pairs[var] == desc.launch_path(pipe["prompts"][field])
+                assert pairs[var] == pipe["prompts"][field]
+                assert desc.typed_path(pipe["prompts"][field]).startswith("/")
             assert pairs["RESPLIT_FIELD"] == pipe["resplit"]["score_field"]
             assert pairs["RESPLIT_BELOW"] == str(pipe["resplit"]["below"])
             assert pairs["NEXT_ID_FLAGS"] == (
@@ -3184,10 +3188,37 @@ class TestLaunchVars:
                 assert len(keys) == len(set(keys))
         assert type_registry.dimension_key("a-b") == type_registry.dimension_key("a_b") == "A_B"
 
+    def test_launch_path_is_relative_only_for_the_file_the_cwd_carries(self, tmp_path, monkeypatch):
+        """The subagent's path frame is the cwd: a typed file renders relative when the cwd
+        carries that very file at that path (the checkout, a linked run directory, a
+        byte-identical copy) and absolute otherwise (a marketplace install's project, a
+        same-named file with other content, a directory in the way)."""
+        desc = _shipped().get("rfe")
+        rel = desc.get("pipeline.prompts.review_rules")
+        absolute = desc.typed_path(rel)
+        assert Path(absolute).is_absolute() and Path(absolute).is_file()
+        assert desc.launch_path(rel) == rel  # the checkout is the cwd
+        monkeypatch.chdir(tmp_path)
+        assert desc.launch_path(rel) == absolute  # nothing at rel here
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True)
+        target.write_text("other rules\n", encoding="utf-8")
+        assert desc.launch_path(rel) == absolute  # a different file at rel
+        target.write_bytes(Path(absolute).read_bytes())
+        assert desc.launch_path(rel) == rel  # a byte-identical copy
+        target.unlink()
+        target.symlink_to(absolute)
+        assert desc.launch_path(rel) == rel  # a link (the eval harness's layout)
+        target.unlink()
+        target.mkdir()
+        assert desc.launch_path(rel) == absolute  # a directory is not the file
+        assert desc.launch_path("") == ""
+
     def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path):
         """A drop-in root carries its typed files wherever it lives: a `types/<name>/...` path
-        resolves under the descriptor's directory; a path outside its own directory (here the
-        shipped rfe dimension prompt) resolves under the plugin root."""
+        resolves under the descriptor's directory (and, unreachable from the checkout cwd,
+        renders absolute); a path outside its own directory (here the shipped rfe dimension
+        prompt) resolves under the plugin root — and renders relative, the cwd carries it."""
         from conftest import write_drop_in
 
         root = tmp_path / "extra"
@@ -3208,11 +3239,14 @@ class TestLaunchVars:
         assert pairs["RULES_PATH"] == str((root / "memo" / "prompts" / "review-rules.md").resolve())
         assert Path(pairs["TEMPLATE_PATH"]).is_file() and Path(pairs["RULES_PATH"]).is_file()
         # kept from the rfe copy: types/rfe/... is not memo's own directory -> the plugin root
-        shipped = pairs["DIMENSION_FEASIBILITY_PROMPT"]
-        assert shipped == str(
-            (type_registry.PLUGIN_ROOT / "types/rfe/dimensions/feasibility.md").resolve()
+        # is where it resolves, and the checkout cwd carries it -> the block hands it relative
+        shipped_rel = desc.get("pipeline.dimensions")[0]["prompt"]
+        assert shipped_rel.startswith("types/rfe/")
+        assert pairs["DIMENSION_FEASIBILITY_PROMPT"] == shipped_rel
+        assert desc.typed_path(shipped_rel) == str(
+            (type_registry.PLUGIN_ROOT / shipped_rel).resolve()
         )
-        assert desc.typed_path("") == ""
+        assert desc.typed_path("") == desc.launch_path("") == ""
 
     def test_deterministic_and_stage_scoped(self):
         reg = _shipped()

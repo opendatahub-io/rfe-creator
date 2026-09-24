@@ -50,9 +50,13 @@ Since PR-5b the skills are generic: `/rfe-create`, `/rfe-review`, `/rfe-split`, 
 `/rfe-auto-fix` and `/rfe-speedrun` take `--type <name>` (or resolve it, design §5) and read every typed
 literal from `python3 scripts/type_registry.py launch-vars <name> <stage>` — ids, dirs, schemas, the
 scorer agent, the rubric path, the dimensions, the score-field stubs, the re-split threshold. The
-typed-file paths in that block are absolute (a `types/<name>/...` path resolves from the descriptor's
-own directory, so a drop-in root carries its files wherever it lives) because subagents read them from
-an arbitrary working directory; commands and workspace paths stay relative. What a type
+typed-file paths in that block are the descriptor's own relative values while the working directory
+carries those files (the checkout is the cwd, or the run directory links it in) and absolute only when
+it does not — a marketplace install running the skills from the project, or a drop-in root outside the
+checkout (a `types/<name>/...` path then resolves from the descriptor's own directory, so the root
+carries its files wherever it lives). One frame on purpose: a subagent whose first instruction names a
+file under an absolute root infers that root for every relative path after it. Commands and workspace
+paths are always relative. What a type
 author writes is the judgement: `types/<name>/template.md`, `prompts/create-guidance.md`,
 `prompts/review-rules.md`, `prompts/review-sections.md`, `prompts/revise-rules.md` (the Tier-2 slots the
 shared review/revise skeletons read), `prompts/split-rules.md` (Tier 3 — the whole split prompt, with
