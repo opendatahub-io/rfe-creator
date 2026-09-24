@@ -213,8 +213,9 @@ def _pipeline_type_row(desc):
     """One PIPELINE_TYPES row: the eight descriptor projections plus the two constants."""
     dirs = desc.dirs()
     # Typed prompt files render through Descriptor.launch_path: relative while the working
-    # directory carries them (the checkout, or a run directory linking it in), absolute only
-    # when it does not — the subagent must see one path frame. Skeleton prompts stay relative.
+    # directory carries them (the checkout, or the types/ link the bootstrap makes), absolute
+    # only when it does not — the subagent must see one path frame. Skeleton prompts stay
+    # relative.
     dims = [
         {
             "name": d["name"],

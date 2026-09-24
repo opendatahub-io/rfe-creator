@@ -350,10 +350,12 @@ class Descriptor:
         """The path a launch block hands a subagent for the typed file ``rel`` names.
 
         ``rel`` as written when the working directory carries that very file at that path —
-        the checkout is the cwd (production), or the run directory links the checkout in (the
-        eval), or a byte-identical copy sits there — and the absolute ``typed_path`` only when
-        it does not (a marketplace install runs the skills from the project while the plugin
-        lives under ``~/.claude/plugins/cache/...``; a drop-in root outside the checkout).
+        the checkout is the cwd (production), or ``types/`` is linked into the cwd (the
+        bootstrap does that for the eval's run directory and a marketplace project), or a
+        byte-identical copy sits there — and the absolute ``typed_path`` only when it does
+        not (a drop-in root outside the checkout; a working directory the bootstrap has not
+        prepared). The decision is per file: a partially vendored ``types/`` tree renders a
+        mixed block.
 
         Relative is the default on purpose: a subagent whose first instruction names a file
         under one absolute root infers that root for every relative path that follows
@@ -361,7 +363,7 @@ class Descriptor:
         2026-09-23 evals 27 of 31 rfe feasibility agents did, and one recovered through
         ``cat`` so the transcript check lost its evidence. Keeping every path the subagent
         sees in one frame, the cwd, removes the inference; the absolute form is the fallback
-        for the one layout where no relative path resolves. Empty stays empty."""
+        for a layout where no relative path resolves. Empty stays empty."""
         if not rel:
             return ""
         absolute = self.typed_path(rel)
@@ -1664,9 +1666,10 @@ def launch_vars(desc, stage):
     Typed-file paths (the template, the guidance, the rules, the sections, the split prompt,
     every dimension prompt) render through ``Descriptor.launch_path``: the descriptor's own
     relative value whenever the working directory carries that file (the checkout is the cwd,
-    or links it in), absolute only when it does not (a marketplace install, a drop-in root
-    outside the checkout) — a subagent must see every path in one frame, or it infers the
-    absolute root for the relative ones. Workspace paths (``artifacts/...``, ``tmp/...``, the
+    or the bootstrap linked ``types/`` in), absolute only when it does not (a drop-in root
+    outside the checkout, an unprepared working directory) — a subagent must see every path
+    in one frame, or it infers the absolute root for the relative ones. Workspace paths
+    (``artifacts/...``, ``tmp/...``, the
     rubric under ``.context/``) and every command (``BOOTSTRAP``, ``python3 scripts/...``) are
     always relative — the headless allowlist matches command text literally, and the workspace
     is the cwd.

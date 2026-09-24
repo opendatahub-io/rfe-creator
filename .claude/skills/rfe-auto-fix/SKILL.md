@@ -131,7 +131,7 @@ Any other exit code is an error.
 
 ### Example `launch_wave` output
 
-The values are the resolved type's (here `rfe`); the launch block lines are elided to `…`. A typed prompt file is the descriptor's relative path while the working directory carries it (the checkout, or a run directory linking it in) and an absolute path only when it does not (a marketplace install, a drop-in outside the checkout):
+The values are the resolved type's (here `rfe`); the launch block lines are elided to `…`. A typed prompt file is the descriptor's relative path while the working directory carries it (the checkout, or the `types/` link the bootstrap makes in any other working directory) and an absolute path only when it does not (a drop-in outside the checkout):
 
 ```yaml
 action: launch_wave

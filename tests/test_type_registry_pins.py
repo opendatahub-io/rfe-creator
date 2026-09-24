@@ -1519,26 +1519,32 @@ class TestReviewPdfConfig:
 class TestPipelineTypes:
     # rows: 108-124
 
-    def test_pipeline_types(self, ctx):
+    def test_pipeline_types(self, ctx, monkeypatch):
         # PR-5b: the table is a projection of the descriptor (eight keys) plus two constants
         # (D7): the type-invariant skeleton directory and, until PR-5c's shims, the legacy
         # driving body as the compaction-recovery target.
         p = pipeline_state.PIPELINE_TYPES[ctx.t]
         prompts = ctx.pipe["prompts"]
+        # The table is projected once, at import, in the process cwd; the launch_path pins
+        # below compare against the same cwd, and the relativity pins re-project the row from
+        # the checkout so the file's verdict does not depend on where pytest was started.
+        monkeypatch.chdir(REPO_ROOT)
+        from_checkout = pipeline_state._pipeline_type_row(ctx.desc)
+        monkeypatch.undo()
         assert p["review_prompts"] == pipeline_state.REVIEW_PROMPTS == SKELETON_DIR
         for name in ("fetch", "assess", "review", "revise"):
             assert (REPO_ROOT / f"{SKELETON_DIR}/{name}-agent.md").is_file()
         # Typed prompt files are projected through Descriptor.launch_path: the descriptor's
-        # relative value from the checkout (this session's cwd carries the files), absolute
-        # only where the cwd does not — the subagent must see one path frame.
+        # relative value from the checkout (the cwd carries the files), absolute only where
+        # the cwd does not — the subagent must see one path frame.
         pin(
             "pipeline.prompts.split_rules",
             "pipeline_state.py:99,:111",
             ctx.desc.launch_path(prompts["split_rules"]),
             p["split_prompt"],
         )
-        assert p["split_prompt"] == prompts["split_rules"]
-        assert (REPO_ROOT / p["split_prompt"]).is_file()
+        assert from_checkout["split_prompt"] == prompts["split_rules"]
+        assert (REPO_ROOT / prompts["split_rules"]).is_file()
         pin(
             "dirs.originals",
             "pipeline_state._save_originals",
@@ -1560,8 +1566,8 @@ class TestPipelineTypes:
             ],
             p["dimensions"],
         )
-        for d in p["dimensions"]:
-            assert not Path(d["prompt"]).is_absolute() and (REPO_ROOT / d["prompt"]).is_file()
+        for d, declared in zip(from_checkout["dimensions"], ctx.pipe["dimensions"]):
+            assert d["prompt"] == declared["prompt"] and (REPO_ROOT / d["prompt"]).is_file()
         pin(
             "pipeline.scorer_agent",
             "pipeline_state.py:100,:112",
@@ -2170,19 +2176,27 @@ class TestSkillLayer:
             rels[f"DIMENSION_{d['name'].upper()}_PROMPT"] = d["prompt"]
         return rels
 
-    def test_launch_block_is_all_relative_from_the_checkout(self, ctx):
-        # The subagent must see one path frame. From the checkout — production's cwd, and the
-        # eval's run directory links it in — every typed file renders as the descriptor's own
-        # relative value, next to the relative workspace paths, the rubric under .context/ and
-        # every command (the headless allowlist matches command text literally). Nothing in
-        # the block is absolute: the one absolute path (89758c4 rendered the dimension prompt
-        # so) made 27 of 31 feasibility agents in the 2026-09-23 evals infer that root for
+    def test_launch_block_is_all_relative_from_the_checkout(self, ctx, monkeypatch):
+        # The subagent must see one path frame. From the checkout — production's cwd; the
+        # bootstrap links types/ into any other working directory (the eval's run directory,
+        # a marketplace project) — every typed file renders as the descriptor's own relative
+        # value, next to the relative workspace paths, the rubric under .context/ and every
+        # command (the headless allowlist matches command text literally). Nothing in the
+        # block is absolute: the one absolute path (89758c4 rendered the dimension prompt so)
+        # made 27 of 31 feasibility agents in the 2026-09-23 evals infer that root for
         # artifacts/ and read from the wrong tree.
+        monkeypatch.chdir(REPO_ROOT)
         block = dict(launch(ctx.t, "split"))
         for key, rel in self._typed_rels(ctx).items():
             assert block[key] == rel, (key, block[key])
             assert (REPO_ROOT / rel).is_file()
         assert [k for k, v in block.items() if v.startswith("/")] == []
+        # the orchestrator's cached auto-fix block is the same rendering (fresh cache: an
+        # earlier test may have filled it from another cwd)
+        monkeypatch.setattr(pipeline_state, "_LAUNCH_BLOCKS", {})
+        assert dict(pipeline_state._launch_block({"type": ctx.t})) == dict(
+            launch(ctx.t, "auto-fix")
+        )
         assert block["PROMPT_PATH"].startswith(".context/")
         assert block["BOOTSTRAP"].startswith("bash scripts/")
         for key in ("TASKS_DIR", "ORIGINALS_DIR", "REVIEWS_DIR"):
@@ -2195,11 +2209,12 @@ class TestSkillLayer:
     def test_launch_block_typed_paths_fall_back_to_absolute_off_the_checkout(
         self, ctx, tmp_path, monkeypatch
     ):
-        # A marketplace install runs the skills from the project while the plugin lives under
-        # ~/.claude/plugins/cache/...: no relative typed path resolves there, so exactly the
-        # typed files render absolute (Descriptor.typed_path) and everything else stays
-        # relative. A same-named file with other content under the cwd is not the typed file;
-        # a byte-identical copy of it is.
+        # A working directory that carries none of the typed files (the eval harness's run
+        # directory before the bootstrap links types/ in; a marketplace project): no relative
+        # typed path resolves there, so exactly the typed files render absolute
+        # (Descriptor.typed_path) — in the launch block and in the phase table alike — and
+        # everything else stays relative. Once types/ is linked in (what the bootstrap does)
+        # the same block is the relative one.
         rels = self._typed_rels(ctx)
         monkeypatch.chdir(tmp_path)
         block = dict(launch(ctx.t, "split"))
@@ -2211,12 +2226,19 @@ class TestSkillLayer:
         assert block["BOOTSTRAP"].startswith("bash scripts/")
         for key in ("TASKS_DIR", "ORIGINALS_DIR", "REVIEWS_DIR"):
             assert block[key].startswith("artifacts/")
-        rel = rels["RULES_PATH"]
-        (tmp_path / rel).parent.mkdir(parents=True)
-        (tmp_path / rel).write_text("not the rules\n", encoding="utf-8")
-        assert dict(launch(ctx.t, "split"))["RULES_PATH"] == ctx.desc.typed_path(rel)
-        (tmp_path / rel).write_bytes((REPO_ROOT / rel).read_bytes())
-        assert dict(launch(ctx.t, "split"))["RULES_PATH"] == rel
+        row = pipeline_state._pipeline_type_row(ctx.desc)
+        assert row["split_prompt"] == ctx.desc.typed_path(ctx.pipe["prompts"]["split_rules"])
+        assert Path(row["split_prompt"]).is_absolute()
+        for d, declared in zip(row["dimensions"], ctx.pipe["dimensions"]):
+            assert d["prompt"] == ctx.desc.typed_path(declared["prompt"])
+            assert Path(d["prompt"]).is_absolute()
+        (tmp_path / "types").symlink_to(REPO_ROOT / "types")
+        assert {k: dict(launch(ctx.t, "split"))[k] for k in rels} == rels
+        row = pipeline_state._pipeline_type_row(ctx.desc)
+        assert row["split_prompt"] == ctx.pipe["prompts"]["split_rules"]
+        assert [d["prompt"] for d in row["dimensions"]] == [
+            d["prompt"] for d in ctx.pipe["dimensions"]
+        ]
 
     def test_scorer_literal_sites(self, ctx):
         # rows: 191 — rendered review body launches the scorer twice; the assess skeleton
@@ -2241,11 +2263,12 @@ class TestSkillLayer:
         for rel in ctx.pipe["prompts"].values():
             assert stale not in read(rel)
 
-    def test_auto_fix_example_wave_matches_the_phase_table(self, ctx):
+    def test_auto_fix_example_wave_matches_the_phase_table(self, ctx, monkeypatch):
         # PR-5a/5b: the illustrative launch_wave block in the generic auto-fix skill is derived
         # from the ASSESS entry of the rfe phase table (the launch block lines are elided).
         if ctx.t != "rfe":
             return
+        monkeypatch.chdir(REPO_ROOT)
         text = read(GENERIC_SKILL.format(stage="auto-fix"))
         block = text.split("### Example `launch_wave` output", 1)[1].split("```yaml", 1)[1]
         example = yaml.safe_load(block.split("```", 1)[0])
@@ -2260,10 +2283,13 @@ class TestSkillLayer:
         )
         assert shown == rendered, (shown, rendered)
         # the example shows the typed prompt as the table renders it from the checkout: the
-        # descriptor's relative path, in the same frame as every other path in the block
-        assert companion["prompt_file"] == cfg["parallel"][0]["prompt"]
-        assert not Path(companion["prompt_file"]).is_absolute()
-        assert (REPO_ROOT / companion["prompt_file"]).is_file()
+        # descriptor's relative path, in the same frame as every other path in the block (the
+        # import-time table may have been projected from another cwd, hence the re-projection)
+        feasibility = ctx.dims["feasibility"]["prompt"]
+        assert companion["prompt_file"] == feasibility == ctx.desc.launch_path(feasibility)
+        assert pipeline_state._pipeline_type_row(ctx.desc)["dimensions"][0]["prompt"] == feasibility
+        assert cfg["parallel"][0]["prompt"].endswith(feasibility)
+        assert (REPO_ROOT / feasibility).is_file()
         assert "ID=RHAIRFE-1234" in companion["vars"].splitlines()
 
     def test_bootstrap_script_text(self, ctx):
@@ -2580,8 +2606,8 @@ class TestSkillLayer:
         # CodeRabbit on #200: headless create used to skip Step 2 and with it the guidance file
         # (writing rules, don'ts, sizing) — every speedrun Mode A / CI / eval create is headless.
         text = skill(ctx.t, "create")
-        guidance = dict(launch(ctx.t, "create"))["CREATE_GUIDANCE_PATH"]  # absolute
-        assert guidance.endswith(ctx.pipe["prompts"]["create_guidance"])
+        guidance = dict(launch(ctx.t, "create"))["CREATE_GUIDANCE_PATH"]  # relative: checkout cwd
+        assert guidance == ctx.pipe["prompts"]["create_guidance"]
         assert f"Read the type's creation guidance at `{guidance}` — always, headless too." in text
         headless = [ln for ln in text.splitlines() if ln.startswith("If `--headless` is present")]
         assert headless == [

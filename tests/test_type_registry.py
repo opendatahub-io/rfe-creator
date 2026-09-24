@@ -3091,7 +3091,8 @@ class TestLaunchVars:
     dispatcher render agent launches from: a projection of the descriptor, deterministic,
     single-line values, refused for a stage the type does not ship."""
 
-    def test_projection_for_both_shipped_types(self):
+    def test_projection_for_both_shipped_types(self, monkeypatch):
+        monkeypatch.chdir(REPO_ROOT)  # typed files render relative from the checkout
         reg = _shipped()
         for name in reg.names():
             desc = reg.get(name)
@@ -3190,13 +3191,15 @@ class TestLaunchVars:
 
     def test_launch_path_is_relative_only_for_the_file_the_cwd_carries(self, tmp_path, monkeypatch):
         """The subagent's path frame is the cwd: a typed file renders relative when the cwd
-        carries that very file at that path (the checkout, a linked run directory, a
-        byte-identical copy) and absolute otherwise (a marketplace install's project, a
-        same-named file with other content, a directory in the way)."""
+        carries that very file at that path (the checkout; a `types` link the bootstrap made;
+        a byte-identical copy) and absolute otherwise (a working directory without it, a
+        same-named file with other content — even of the same size — a directory in the way).
+        The decision is per file: a partially vendored types/ tree renders a mixed block."""
         desc = _shipped().get("rfe")
         rel = desc.get("pipeline.prompts.review_rules")
         absolute = desc.typed_path(rel)
         assert Path(absolute).is_absolute() and Path(absolute).is_file()
+        monkeypatch.chdir(REPO_ROOT)
         assert desc.launch_path(rel) == rel  # the checkout is the cwd
         monkeypatch.chdir(tmp_path)
         assert desc.launch_path(rel) == absolute  # nothing at rel here
@@ -3204,22 +3207,27 @@ class TestLaunchVars:
         target.parent.mkdir(parents=True)
         target.write_text("other rules\n", encoding="utf-8")
         assert desc.launch_path(rel) == absolute  # a different file at rel
-        target.write_bytes(Path(absolute).read_bytes())
+        data = Path(absolute).read_bytes()
+        target.write_bytes(data[:-1] + (b"\n" if data[-1:] != b"\n" else b" "))
+        assert desc.launch_path(rel) == absolute  # same size, one byte differs
+        target.write_bytes(data)
         assert desc.launch_path(rel) == rel  # a byte-identical copy
-        target.unlink()
-        target.symlink_to(absolute)
-        assert desc.launch_path(rel) == rel  # a link (the eval harness's layout)
         target.unlink()
         target.mkdir()
         assert desc.launch_path(rel) == absolute  # a directory is not the file
+        shutil.rmtree(tmp_path / "types")
+        (tmp_path / "types").symlink_to(REPO_ROOT / "types")
+        assert desc.launch_path(rel) == rel  # the directory link the bootstrap makes
         assert desc.launch_path("") == ""
 
-    def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path):
+    def test_typed_paths_resolve_from_the_descriptor_dir_for_a_drop_in(self, tmp_path, monkeypatch):
         """A drop-in root carries its typed files wherever it lives: a `types/<name>/...` path
         resolves under the descriptor's directory (and, unreachable from the checkout cwd,
         renders absolute); a path outside its own directory (here the shipped rfe dimension
         prompt) resolves under the plugin root — and renders relative, the cwd carries it."""
         from conftest import write_drop_in
+
+        monkeypatch.chdir(REPO_ROOT)
 
         root = tmp_path / "extra"
         write_drop_in(
