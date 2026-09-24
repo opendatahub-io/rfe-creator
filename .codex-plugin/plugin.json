@@ -1,6 +1,6 @@
 {
   "name": "rfe-creator",
   "version": "0.1.0",
-  "description": "Skills for creating, reviewing, and submitting RFEs to the RHAIRFE Jira project. Provides an automated pipeline from initial creation through review, splitting, and submission, plus strategy refinement skills.",
+  "description": "Skills for creating, reviewing, splitting and submitting work items: RFEs to the RHAIRFE Jira project and Initiatives to RHOAIENG, through one generic pipeline (/rfe-create, /rfe-review, /rfe-split, /rfe-submit, /rfe-auto-fix, /rfe-speedrun; --type initiative for Initiatives). The legacy dotted names (/rfe.create and friends) remain as compatibility aliases.",
   "skills": "./.claude/skills/"
 }

@@ -90,7 +90,7 @@ The same skills run the pipeline for Initiatives targeting the RHOAIENG Jira pro
 
 ### Strategy Pipeline
 
-The strategy skills have moved to a dedicated repo: [ederign/strat-creator](https://github.com/ederign/strat-creator).
+The strategy skills live in a dedicated repo: [opendatahub-io/strat-creator](https://github.com/opendatahub-io/strat-creator). This plugin no longer ships copies of its reviewer skills.
 
 ## Pipeline Steps
 
