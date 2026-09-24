@@ -181,7 +181,7 @@ class TestCheckId:
 
 
 class TestCreatePhase:
-    """The create phase is the Phase 1 barrier in /rfe.speedrun.
+    """The create phase is the Phase 1 barrier in /rfe-speedrun.
 
     Create agents write the task file first and set frontmatter in a later tool
     call, so this phase deliberately checks more than existence — releasing the
@@ -928,8 +928,10 @@ class TestInitiativePhases:
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", ".claude", "skills")
 
 
-def _skill_text(name):
-    with open(os.path.join(SKILLS_DIR, name, "SKILL.md")) as f:
+def _legacy_text(t, stage):
+    """A legacy per-type body, frozen when PR-5c deleted it (fixture README maps the files)."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", "legacy-prompts", t, f"{stage}.md")
+    with open(path) as f:
         return f.read()
 
 
@@ -965,24 +967,11 @@ class TestSkillBarrierUsage:
                             unknown.append(f"{path}: {phase}")
         assert not unknown, f"unknown poll phases: {unknown}"
 
-    def test_initiative_review_polls_as_much_as_rfe_review(self):
-        """initiative-review is a fork of rfe.review — it must not lose barriers."""
-        rfe = _skill_text("rfe.review")
-        init = _skill_text("initiative-review")
-        assert len(_phases_used(init)) >= len(_phases_used(rfe))
-        assert init.count("NEXT_POLL") >= rfe.count("NEXT_POLL")
-
-    def test_initiative_split_polls_as_much_as_rfe_split(self):
-        """Same guard for the split pair."""
-        rfe = _skill_text("rfe.split")
-        init = _skill_text("initiative-split")
-        assert len(_phases_used(init)) >= len(_phases_used(rfe))
-        assert init.count("NEXT_POLL") >= rfe.count("NEXT_POLL")
-
     # PR-5b: the generic bodies poll through `--phase {POLL_PREFIX}<phase>`. Rendered per type
     # with the launch block (`type_registry.py launch-vars`) they must name PHASE_CHECKS keys
     # only — the guard above, restated on the surface a type actually runs through — and poll
-    # at least as much as the legacy bodies they replace (kept until PR-5c).
+    # at least as much as the legacy bodies they replaced (deleted in PR-5c; frozen under
+    # tests/fixtures/legacy-prompts/<type>/<stage>.md).
 
     @staticmethod
     def _rendered(t, stage):
@@ -1015,10 +1004,9 @@ class TestSkillBarrierUsage:
 
     @pytest.mark.parametrize("t", REG.names())
     def test_generic_bodies_poll_as_much_as_the_legacy_bodies(self, t):
-        legacy = {"rfe": "rfe.", "initiative": "initiative-"}[t]
         blocking = [d for d in REG.get(t).get("pipeline.dimensions") if d.get("blocking", True)]
         for stage in ("review", "split"):
-            new, old = self._rendered(t, stage), _skill_text(f"{legacy}{stage}")
+            new, old = self._rendered(t, stage), _legacy_text(t, stage)
             barriers = len(_phases_used_rendered(new)) + len(blocking) * len(
                 self._dimension_polls(new)
             )

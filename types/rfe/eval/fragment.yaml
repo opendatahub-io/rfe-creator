@@ -13,7 +13,7 @@ dataset:
       customer segments, justification, scope, success criteria
 inputs:
   questions_context: |
-    clarifying questions during rfe.create (customer segment,
+    clarifying questions during rfe-create (customer segment,
     business impact, problem definition, distinctness, success metrics).
   questions_answer: |
     Use the 'clarifying_context' field for customer segments,

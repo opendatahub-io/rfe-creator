@@ -56,7 +56,7 @@ def type_defaults(desc):
 
 
 # The rfe defaults come from the rfe descriptor (design work-item-types-unified.md §10 item 2);
-# other types pass --prefix/--dir explicitly (initiative-create/SKILL.md:50) or declare
+# other types pass --prefix/--dir explicitly (the NEXT_ID_FLAGS launch var) or declare
 # themselves through the batch mapping form.
 DEFAULT_PREFIX, DEFAULT_DIR = type_defaults(_RFE)
 

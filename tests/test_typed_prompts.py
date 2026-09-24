@@ -1,8 +1,11 @@
 """Golden fidelity of the PR-5b collapse (design §4.2 tiers, plan PR-5b).
 
-Every sentence of today's per-type prompt files survives in the generic surface: the prompt
+Every sentence of the legacy per-type prompt files survives in the generic surface: the prompt
 skeleton rendered with the type's launch block (``type_registry.py launch-vars``) plus the
-typed files under ``types/<t>/``. Sentences are compared after a mechanical normalisation
+typed files under ``types/<t>/``. PR-5c deleted the legacy files; the corpus is frozen under
+``tests/fixtures/legacy-prompts/<type>/`` (its README maps each fixture to the file it was) and
+is never edited — a later prose change to the generic surface is recorded in ALLOWED, not by
+rewriting the fixture. Sentences are compared after a mechanical normalisation
 (code fences, headings, table rows, backtick spans, ``{PLACEHOLDERS}`` and path-like tokens
 are dropped; emphasis and case are folded) so that the comparison is about judgement prose,
 not about the literal paths the tokens now carry. The few sentences that were deliberately
@@ -22,12 +25,9 @@ import type_registry  # noqa: E402
 
 REG = type_registry.load(extra_roots=[], env={})
 SKELETONS = ".claude/skills/rfe-review/prompts"
-LEGACY_DIR = {"rfe": "rfe.", "initiative": "initiative-"}
-LEGACY_DIM = {
-    ("rfe", "feasibility"): ".claude/skills/rfe-feasibility-review/SKILL.md",
-    ("initiative", "feasibility"): ".claude/skills/initiative-feasibility-review/SKILL.md",
-    ("initiative", "alignment"): ".claude/skills/strategic-alignment-review/SKILL.md",
-}
+# The frozen legacy corpus: tests/fixtures/legacy-prompts/<type>/{<stage>.md, prompts/*.md,
+# dimensions/<name>.md, template.md} — one fixture per deleted legacy file (see its README).
+LEGACY = "tests/fixtures/legacy-prompts"
 MIN_SENTENCE = 12
 
 
@@ -151,35 +151,27 @@ def _allow(t, rel, *entries):
     ALLOWED.setdefault((t, rel), []).extend(entries)
 
 
-_allow("rfe", ".claude/skills/rfe.review/prompts/revise-agent.md", *_REWRITTEN_REVISE_RFE)
-_allow(
-    "initiative",
-    ".claude/skills/initiative-review/prompts/revise-agent.md",
-    *_REWRITTEN_REVISE_INIT,
-)
-for _t, _prefix in (("rfe", "rfe."), ("initiative", "initiative-")):
-    _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_STEP_COMPLETED)
-    _allow(_t, f".claude/skills/{_prefix}split/SKILL.md", *_STEP_COMPLETED)
-    _allow(
-        _t, f".claude/skills/{_prefix}review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW
-    )
-    _allow(_t, f".claude/skills/{_prefix}review/SKILL.md", *_DIMENSION_GENERIC_BODY)
-_allow("initiative", ".claude/skills/initiative-review/SKILL.md", *_DIMENSION_GENERIC_BODY_INIT)
+_allow("rfe", f"{LEGACY}/rfe/prompts/revise-agent.md", *_REWRITTEN_REVISE_RFE)
+_allow("initiative", f"{LEGACY}/initiative/prompts/revise-agent.md", *_REWRITTEN_REVISE_INIT)
+for _t in ("rfe", "initiative"):
+    _allow(_t, f"{LEGACY}/{_t}/review.md", *_STEP_COMPLETED)
+    _allow(_t, f"{LEGACY}/{_t}/split.md", *_STEP_COMPLETED)
+    _allow(_t, f"{LEGACY}/{_t}/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW)
+    _allow(_t, f"{LEGACY}/{_t}/review.md", *_DIMENSION_GENERIC_BODY)
+_allow("initiative", f"{LEGACY}/initiative/review.md", *_DIMENSION_GENERIC_BODY_INIT)
 # CodeRabbit on #200: the acceptance-criteria size ranges were overlapping (5 -> M or L, 8 -> L or
 # XL) in the legacy body and template alike; the typed guidance and template use exclusive ranges
 # (S 1-2, M 3-4, L 5-7, XL 8+).
 _allow(
     "rfe",
-    ".claude/skills/rfe.create/SKILL.md",
+    f"{LEGACY}/rfe/create.md",
     "assign a size using the size guide: s (1-2), m (3-5), l (5-8), xl (8+)",
 )
-_allow("rfe", ".claude/skills/rfe.review/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW_RFE)
+_allow("rfe", f"{LEGACY}/rfe/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIEW_RFE)
 # The revise skeleton's step list keeps the rfe wording ("Read the task file to see what needs
 # changing"); the initiative's "Read the initiative: <path>" is the same read, the path now the
 # skeleton's `Task file:` header line.
-_allow(
-    "initiative", ".claude/skills/initiative-review/prompts/revise-agent.md", "read the initiative"
-)
+_allow("initiative", f"{LEGACY}/initiative/prompts/revise-agent.md", "read the initiative")
 
 # (type, legacy file) -> substrings of normalised script invocations the collapse rewrote, why.
 ALLOWED_COMMANDS = {}
@@ -192,18 +184,18 @@ def _allow_command(t, rel, *entries):
 # NEXT_ID_FLAGS renders `--prefix <local prefix> --dir <tasks dir>` for every type; the rfe
 # bodies relied on next_rfe_id.py's defaults, which are those same values.
 for _rel in (
-    ".claude/skills/rfe.split/prompts/split-agent.md",
-    ".claude/skills/rfe.create/SKILL.md",
-    ".claude/skills/rfe.speedrun/SKILL.md",
+    f"{LEGACY}/rfe/prompts/split-agent.md",
+    f"{LEGACY}/rfe/create.md",
+    f"{LEGACY}/rfe/speedrun.md",
 ):
     _allow_command("rfe", _rel, "python3 scripts/next_rfe_id.py")
 # PROMPT_PATH is a launch-block line: the PR-5a lookup of pipeline.rubric.path is subsumed.
 _allow_command(
     "rfe",
-    ".claude/skills/rfe.review/SKILL.md",
+    f"{LEGACY}/rfe/review.md",
     "python3 scripts/type_registry.py get rfe pipeline.rubric.path",
 )
-_allow("initiative", ".claude/skills/initiative-split/SKILL.md", *_RESPLIT_INIT)
+_allow("initiative", f"{LEGACY}/initiative/split.md", *_RESPLIT_INIT)
 
 
 def sections(text, headings):
@@ -235,7 +227,7 @@ def _cases():
         pairs = type_registry.launch_vars(desc, "review")
         prompts = desc.get("pipeline.prompts")
         dims = {d["name"]: d["prompt"] for d in desc.get("pipeline.dimensions")}
-        legacy = f".claude/skills/{LEGACY_DIR[t]}"
+        legacy = f"{LEGACY}/{t}"
         typed = {k: read(v) for k, v in prompts.items()}
         generic = {
             stage: render(read(f".claude/skills/rfe-{stage}/SKILL.md"), pairs)
@@ -247,19 +239,19 @@ def _cases():
         }
         full = [
             (
-                f"{legacy}review/prompts/review-agent.md",
+                f"{legacy}/prompts/review-agent.md",
                 skeleton["review"] + typed["review_rules"] + typed["review_sections"],
             ),
-            (f"{legacy}review/prompts/revise-agent.md", skeleton["revise"] + typed["revise_rules"]),
-            (f"{legacy}review/prompts/fetch-agent.md", skeleton["fetch"]),
-            (f"{legacy}review/prompts/assess-agent.md", skeleton["assess"]),
-            (f"{legacy}split/prompts/split-agent.md", render(typed["split_rules"], pairs)),
+            (f"{legacy}/prompts/revise-agent.md", skeleton["revise"] + typed["revise_rules"]),
+            (f"{legacy}/prompts/fetch-agent.md", skeleton["fetch"]),
+            (f"{legacy}/prompts/assess-agent.md", skeleton["assess"]),
+            (f"{legacy}/prompts/split-agent.md", render(typed["split_rules"], pairs)),
         ]
         for name, prompt in dims.items():
-            full.append((LEGACY_DIM[(t, name)], read(prompt)))
+            full.append((f"{legacy}/dimensions/{name}.md", read(prompt)))
         for rel, corpus in full:
             yield pytest.param(t, rel, read(rel), corpus, "full", id=f"{t}:{rel.split('/')[-1]}")
-        create_rel = f"{legacy}create/SKILL.md"
+        create_rel = f"{legacy}/create.md"
         yield pytest.param(
             t,
             create_rel,
@@ -269,7 +261,7 @@ def _cases():
             id=f"{t}:create-guidance",
         )
         for stage in ("create", "review", "split", "submit", "auto-fix", "speedrun"):
-            rel = f"{legacy}{stage}/SKILL.md"
+            rel = f"{legacy}/{stage}.md"
             corpus = generic[stage]
             if stage == "create":
                 corpus += typed["create_guidance"] + typed["template"]

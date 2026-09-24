@@ -65,7 +65,9 @@ shared review/revise skeletons read), `prompts/split-rules.md` (Tier 3 — the w
 the launcher tokens for its mechanical lines) and `dimensions/<dimension>.md` (whole files, launched
 directly). `pipeline.prompts.*` and `pipeline.dimensions[].prompt` point at them; gate 1 checks they
 exist, that `split-rules.md` carries its tokens, that `template.md` is named when the type creates or
-splits, and that no typed file names a skill directory. The headless dispatcher launches the
+splits, that no typed file names a skill directory, and that every `pipeline.stages` entry has its
+generic body (`.claude/skills/rfe-<stage>/SKILL.md` — a type cannot declare a stage no body drives,
+and a drop-in root ships no bodies). The headless dispatcher launches the
 `create`, `review`, `split` and `auto-fix` stages through the registry, so `pipeline.stages` must
 list them: `pipeline_state.py init` refuses a type that omits one before any state is written.
 Author the eval prose in `types/<name>/eval/fragment.yaml` (schema

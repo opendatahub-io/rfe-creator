@@ -8,64 +8,61 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 
 ```
 # RFE Pipeline
-/rfe.create     # Write a new RFE from a problem statement
-/rfe.review     # Review, improve, and auto-revise RFEs
-/rfe.split      # Split an oversized RFE into right-sized pieces
-/rfe.submit     # Submit new or update existing RFEs in Jira
-/rfe.speedrun   # Full pipeline end-to-end with minimal interaction
-/rfe.auto-fix   # Batch review+revise+split pipeline (non-interactive)
+/rfe-create     # Write a new RFE from a problem statement
+/rfe-review     # Review, improve, and auto-revise RFEs
+/rfe-split      # Split an oversized RFE into right-sized pieces
+/rfe-submit     # Submit new or update existing RFEs in Jira
+/rfe-speedrun   # Full pipeline end-to-end with minimal interaction
+/rfe-auto-fix   # Batch review+revise+split pipeline (non-interactive)
 
 # Improve an existing Jira RFE
-/rfe.review RHAIRFE-1234      # Fetch, review, and auto-revise
-/rfe.split RHAIRFE-1234       # Fetch and split an oversized RFE
-/rfe.speedrun RHAIRFE-1234    # Fetch, review, revise, and update in one step
+/rfe-review RHAIRFE-1234      # Fetch, review, and auto-revise
+/rfe-split RHAIRFE-1234       # Fetch and split an oversized RFE
+/rfe-speedrun RHAIRFE-1234    # Fetch, review, revise, and update in one step
 
 # Batch operations
-/rfe.speedrun --input batch.yaml --headless --dry-run              # Batch create + review from YAML
-/rfe.speedrun --input batch.yaml --headless --announce-complete    # Print completion marker for CI
-/rfe.auto-fix --jql "project = RHAIRFE AND ..."         # Batch review from JQL query
-/rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678                 # Batch review explicit IDs
+/rfe-speedrun --input batch.yaml --headless --dry-run              # Batch create + review from YAML
+/rfe-speedrun --input batch.yaml --headless --announce-complete    # Print completion marker for CI
+/rfe-auto-fix --jql "project = RHAIRFE AND ..."         # Batch review from JQL query
+/rfe-auto-fix RHAIRFE-1234 RHAIRFE-5678                 # Batch review explicit IDs
 
-# Initiative Pipeline
-/initiative-create     # Write a new Initiative from an engineering objective
-/initiative-review     # Review, improve, and auto-revise Initiatives
-/initiative-split      # Split an oversized Initiative into right-sized pieces
-/initiative-submit     # Submit new or update existing Initiatives in Jira
-/initiative-speedrun   # Full pipeline end-to-end with minimal interaction
-/initiative-auto-fix   # Batch review+revise+split pipeline (non-interactive)
+# Initiatives (RHOAIENG): the same skills with --type initiative
+/rfe-create --type initiative                                       # Write a new Initiative from an engineering objective
+/rfe-speedrun --type initiative RHOAIENG-12345                      # Fetch, review, revise, and update an Initiative
+/rfe-auto-fix --type initiative --jql "project = RHOAIENG AND ..."  # Batch review Initiatives from JQL query
 
 # Maintenance
 /rfe-creator.update-deps   # Force update vendored dependencies
 ```
 
-The initiative skills mirror the RFE skills. Use `RHOAIENG-*` keys for existing Jira initiatives and `INIT-*` IDs for new ones.
+Every skill takes `--type <type>` (`rfe` or `initiative`); without it the type is resolved from the ids you pass (`RHAIRFE-*` / `RFE-*` are RFEs, `RHOAIENG-*` / `INIT-*` are Initiatives) and defaults to `rfe`. The dotted names of the original RFE skills (`/rfe.create`, `/rfe.review`, `/rfe.split`, `/rfe.submit`, `/rfe.speedrun`, `/rfe.auto-fix`) remain as compatibility aliases that run the same bodies.
 
 ## Pipeline
 
 ### New RFEs
 
 ```
-/rfe.create → /rfe.review → /rfe.submit
+/rfe-create → /rfe-review → /rfe-submit
 ```
 
-`/rfe.review` auto-revises issues it finds (up to 2 cycles). You can also edit artifacts manually between steps.
+`/rfe-review` auto-revises issues it finds (up to 2 cycles). You can also edit artifacts manually between steps.
 
-`/rfe.speedrun` runs the full pipeline with reasonable defaults and minimal interaction.
+`/rfe-speedrun` runs the full pipeline with reasonable defaults and minimal interaction.
 
 ### Existing Jira RFEs
 
 ```
-/rfe.review RHAIRFE-1234 → /rfe.submit
+/rfe-review RHAIRFE-1234 → /rfe-submit
 ```
 
-Or in one step: `/rfe.speedrun RHAIRFE-1234`
+Or in one step: `/rfe-speedrun RHAIRFE-1234`
 
 ### Batch Operations
 
 Create and review multiple RFEs from a YAML file:
 
 ```
-/rfe.speedrun --headless --dry-run --input batch.yaml
+/rfe-speedrun --headless --dry-run --input batch.yaml
 ```
 
 YAML format:
@@ -81,15 +78,15 @@ YAML format:
 Review a batch of existing Jira RFEs:
 
 ```
-/rfe.auto-fix --jql "project = RHAIRFE AND status = New" --limit 20
-/rfe.auto-fix RHAIRFE-1234 RHAIRFE-5678 RHAIRFE-9012
+/rfe-auto-fix --jql "project = RHAIRFE AND status = New" --limit 20
+/rfe-auto-fix RHAIRFE-1234 RHAIRFE-5678 RHAIRFE-9012
 ```
 
 Auto-fix processes in batches (default 5), handles review, revision, splitting, retry, and report generation.
 
 ### Initiatives
 
-The same pipeline pattern applies to Initiatives targeting the RHOAIENG Jira project. Replace `/rfe.*` with `/initiative.*` — e.g., `/initiative-speedrun`, `/initiative-auto-fix RHOAIENG-12345`. Initiative review includes strategic alignment assessment (against RHAISTRAT Outcomes) in addition to rubric scoring and technical feasibility.
+The same skills run the pipeline for Initiatives targeting the RHOAIENG Jira project: pass `--type initiative` — e.g., `/rfe-speedrun --type initiative`, `/rfe-auto-fix --type initiative RHOAIENG-12345` (an `RHOAIENG-*` or `INIT-*` id resolves the type on its own). Use `RHOAIENG-*` keys for existing Jira initiatives and `INIT-*` IDs for new ones. Initiative review includes strategic alignment assessment (against RHAISTRAT Outcomes) in addition to rubric scoring and technical feasibility. Each type's judgement — template, clarifying questions, review rules, split rules and review dimensions — lives under `types/<type>/`; the skill bodies are shared.
 
 ### Strategy Pipeline
 
@@ -104,22 +101,22 @@ The strategy skills have moved to a dedicated repo: [ederign/strat-creator](http
 5. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira.
 6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--announce-complete` for completion signaling, `--dry-run` to skip Jira writes, and `--batch-size N`.
 
-All pipeline steps apply identically to Initiatives (`/initiative.*` skills). Initiative review additionally runs a strategic alignment check against the parent RHAISTRAT Outcome when one is linked.
+All pipeline steps apply identically to Initiatives (`--type initiative`). Initiative review additionally runs a strategic alignment check against the parent RHAISTRAT Outcome when one is linked.
 
 ## Editing Between Steps
 
 All artifacts are written to `artifacts/`. You can edit any file between steps:
 
-- Edit an RFE in `artifacts/rfe-tasks/RFE-001.md`, then re-run `/rfe.review`
-- Edit an Initiative in `artifacts/initiatives/INIT-001.md`, then re-run `/initiative-review`
-- Re-run `/rfe.create` or `/initiative-create` to start over from scratch
+- Edit an RFE in `artifacts/rfe-tasks/RFE-001.md`, then re-run `/rfe-review`
+- Edit an Initiative in `artifacts/initiatives/INIT-001.md`, then re-run `/rfe-review --type initiative`
+- Re-run `/rfe-create` (or `/rfe-create --type initiative`) to start over from scratch
 
 ## assess-rfe Integration
 
 Skills automatically bootstrap the [assess-rfe](https://github.com/opendatahub-io/assess-rfe) plugin from GitHub on first use:
 
 - **During creation**: The rubric is exported to `artifacts/rfe-rubric.md` and used to guide clarifying questions.
-- **During review**: `/rfe.review` invokes assess-rfe for rubric scoring.
+- **During review**: `/rfe-review` invokes assess-rfe for rubric scoring.
 - **Without network access**: The skills still work — creation uses built-in questions, review runs only the technical feasibility check.
 
 Run `/rfe-creator.update-deps` to force-refresh to the latest version.
@@ -168,13 +165,13 @@ See [AGENTS.md](AGENTS.md) for architecture details and conventions.
 All orchestrator skills support `--headless` for non-interactive use in CI pipelines. Combined with `--dry-run`, you can validate the full pipeline without Jira writes:
 
 ```bash
-claude -p "/rfe.speedrun --headless --dry-run --input batch.yaml"
+claude -p "/rfe-speedrun --headless --dry-run --input batch.yaml"
 ```
 
 Add `--announce-complete` to print a `FULL RUN COMPLETE` marker when the pipeline finishes — useful for CI harnesses that need a reliable completion signal:
 
 ```bash
-claude -p "/rfe.speedrun --headless --announce-complete --input batch.yaml"
+claude -p "/rfe-speedrun --headless --announce-complete --input batch.yaml"
 ```
 
 Flag persistence: parsed arguments are written to `tmp/*.yaml` config files so they survive context compression during long batch runs.

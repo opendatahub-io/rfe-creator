@@ -207,7 +207,7 @@ def check_id(phase, rfe_id, since=None):
         # Every not-yet-good state is "pending", never "error". The --wait loop
         # exits on pending == 0 and never consults the error count, so an
         # "error" here would release the barrier on the very file it rejected.
-        # Timing out into the relaunch path in rfe.speedrun is the recovery.
+        # Timing out into the relaunch path in rfe-speedrun is the recovery.
         try:
             data, _ = read_frontmatter(path)
         except Exception:

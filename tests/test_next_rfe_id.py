@@ -138,8 +138,9 @@ class TestFromBatch:
         assert result.stderr == ""
 
     def test_initiative_flags_with_a_legacy_list_do_not_conflict(self, tmp_path):
-        # The initiative-speedrun invocation: --prefix INIT --dir artifacts/initiatives with a
-        # list-form file. The legacy default is not a signal, so nothing to disagree with.
+        # The `rfe-speedrun --type initiative` invocation (NEXT_ID_FLAGS renders --prefix INIT
+        # --dir artifacts/initiatives) with a list-form file. The legacy default is not a
+        # signal, so nothing to disagree with.
         batch = tmp_path / "batch.yaml"
         batch.write_text("- prompt: a\n  parent_key: RHAISTRAT-1\n")
         result = _run(

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Pipeline state machine for the thin dispatcher.
 
-Phase tracking, config, and transition logic for rfe.auto-fix and
-initiative-auto-fix.
+Phase tracking, config, and transition logic for rfe-auto-fix (every registered
+type; the legacy rfe.auto-fix name is a compat shim of it).
 
 Usage:
     python3 scripts/pipeline_state.py init [--type rfe|initiative] [--batch-size N]
@@ -177,15 +177,10 @@ PHASES = [
 # agents through the launch block (type_registry.launch_vars), the split prompt and the
 # dimension files are the typed files themselves (prompt_file).
 REVIEW_PROMPTS = ".claude/skills/rfe-review/prompts"
-# The post-compaction recovery target names the body DRIVING the run. Until PR-5c turns the
-# legacy bodies into shims, the production job is driven by rfe.auto-fix and an initiative run
-# by initiative-auto-fix, so the target stays per type here; a type without a legacy body is
-# driven by the generic rfe-auto-fix. Collapses to one constant with the shims (D7).
-_LEGACY_DISPATCH_SKILL = {
-    "rfe": ".claude/skills/rfe.auto-fix/SKILL.md",
-    "initiative": ".claude/skills/initiative-auto-fix/SKILL.md",
-}
-GENERIC_DISPATCH_SKILL = ".claude/skills/rfe-auto-fix/SKILL.md"
+# The post-compaction recovery target names the body DRIVING the run: since PR-5c the one
+# generic auto-fix body for every type — the legacy `rfe.auto-fix` name is a shim that reads
+# this file and follows it from Step 0 (plan D7).
+DISPATCH_SKILL = ".claude/skills/rfe-auto-fix/SKILL.md"
 # A descriptor must carry these to get a phase table (a drop-in root may register a partial
 # one; it is then refused at `init`, before any state is written — D12).
 _PHASE_TABLE_FACTS = (
@@ -238,7 +233,7 @@ def _pipeline_type_row(desc):
         "tasks_dir": dirs["tasks"],
         "reviews_dir": dirs["reviews"],
         "originals_dir": dirs["originals"],
-        "dispatch_skill": _LEGACY_DISPATCH_SKILL.get(desc.name, GENERIC_DISPATCH_SKILL),
+        "dispatch_skill": DISPATCH_SKILL,
         "poll_prefix": desc.get("pipeline.poll_prefix"),
     }
 

@@ -22,7 +22,7 @@ identity:
     state_map:
       approved: Approved                                # submit.py:987 (shared); emulator RHOAIENG workflow tests/conftest.py:114-121
       close_superseded: { transition: Closed, resolution: Obsolete }   # split_submit.py:820 (target status name .lower()=="closed"), :837 resolution (shared)
-  local_prefix: "INIT-"                                 # submit.py:98; generate_run_report.py:56; generate_review_pdf.py:65; next_rfe_id.py --prefix INIT (initiative-create/SKILL.md:50)
+  local_prefix: "INIT-"                                 # submit.py:98; generate_run_report.py:56; generate_review_pdf.py:65; next_rfe_id.py --prefix INIT (the NEXT_ID_FLAGS launch var of rfe-create / rfe-speedrun)
   local_id_pattern: '^INIT-\d+$'                        # artifact_utils.py:199 (initiative-task.local_id), :237 (initiative-review.local_id); rename guard :1058 re.fullmatch(r"INIT-\d+"). ONE backslash (the design's YAML doubled it)
   id_field: initiative_id                               # submit.py:97; artifact_utils.py:191,:229; verify_phase.py:57; generate_run_report.py:53; check_conflicts.py:46
 
@@ -32,7 +32,7 @@ dirs:                                                   # artifacts/ form (Q13);
   reviews: artifacts/initiative-reviews                 # pipeline_state.py:117; verify_phase.py:56; submit.py:101 (bare); reassess_save.py:21
 index: { enabled: false }                               # submit.py:126 has_index; split_submit.py:145 do_rebuild_index; no initiative index file exists
 companions:
-  comments: false                                       # initiative-review/prompts/fetch-agent.md:10 fetches without comments and writes only task + original (:35-37); fetch_issue.py --fetch-all gates the comments companion (and the comment request) on this flag (PR-2c). Means "the fetch step produces one" — rename_initiative_to_jira_key (artifact_utils.py:1079-1080) still maps -comments.md and a test pins it
+  comments: false                                       # the fetch skeleton (rfe-review/prompts/fetch-agent.md) fetches without comments for this type and writes only task + original; fetch_issue.py --fetch-all gates the comments companion (and the comment request) on this flag (PR-2c). Means "the fetch step produces one" — rename_initiative_to_jira_key (artifact_utils.py:1079-1080) still maps -comments.md and a test pins it
   removed_context: true                                 # artifact_utils.py:727-731 (type-agnostic); :831-833 find_removed_context_yaml initiative branch; error_collect.py:216
 
 conventions:
@@ -72,10 +72,10 @@ schema:
     extra_fields:
       alignment: { type: string, required: false, enum: [strong, partial, weak, not_assessed], default: not_assessed }   # artifact_utils.py:306-313 (default is the STRING not_assessed, not null)
     extra_rules:
-      - { when: { field: alignment, equals: weak }, then: needs_attention }   # Q22: prompt rule only — initiative-review/prompts/review-agent.md:60; eval-initiative.yaml:277-278 judge; no script consumer, unpinned
+      - { when: { field: alignment, equals: weak }, then: needs_attention }   # Q22: prompt rule only — types/initiative/prompts/review-rules.md (alignment weak -> needs_attention); eval-initiative.yaml:277-278 judge; no script consumer, unpinned
 
 pipeline:
-  stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); the legacy initiative-* tree stays until PR-5c
+  stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); gate 1 requires one per entry (validate_types.stage_skill_messages, PR-5c); the initiative-* tree was deleted in PR-5c
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
     - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "initiative"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
@@ -83,7 +83,7 @@ pipeline:
   state_prefix: "initiative-"                           # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies
   scorer_agent: initiative-scorer                       # pipeline_state.PIPELINE_TYPES scorer_type (subagent_type of every assess wave) and the SCORER_AGENT launch var read by .claude/skills/rfe-review/prompts/assess-agent.md
   prompts:                                            # PR-5b: the typed judgement files under types/<t>/ (design §4.2 tiers, §8.1 layout); rendered into every launch by `type_registry.py launch-vars` (RULES_PATH, SECTIONS_PATH, REVISE_RULES_PATH, SPLIT_RULES_PATH, TEMPLATE_PATH, CREATE_GUIDANCE_PATH); gate 1 checks each exists
-    template: types/initiative/template.md                 # Tier 3 — the create template (from .claude/skills/initiative-create/initiative-template.md); D16
+    template: types/initiative/template.md                 # Tier 3 — the create template (was initiative-create/initiative-template.md; frozen at tests/fixtures/legacy-prompts/initiative/template.md); D16
     create_guidance: types/initiative/prompts/create-guidance.md   # Tier 3 — questions, writing rules and don'ts of the generic rfe-create body
     review_rules: types/initiative/prompts/review-rules.md         # Tier 2 slot of .claude/skills/rfe-review/prompts/review-agent.md
     review_sections: types/initiative/prompts/review-sections.md   # Tier 2 slot — the typed body headings
@@ -95,7 +95,7 @@ pipeline:
       blocking: true                                    # Q17: ASSESS wave waits on it (pipeline_state.py:1193-1195 --also-phase); no script reads a blocking flag — unpinned
     - name: alignment                                   # poll phase "initiative-alignment" (check_review_progress.py:34; pipeline_state.py:206)
       prompt: types/initiative/dimensions/alignment.md      # pipeline_state.py:115 alignment_skill (truthiness is the only switch, :202)
-      blocking: false                                   # Q17: initiative-review/SKILL.md:124 "Alignment is informational, not blocking"; :129 — unpinned
+      blocking: false                                   # Q17: the generic rfe-review body renders a non-blocking dimension as "informational, not blocking" — unpinned
       condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208)
       skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
   rubric:
@@ -103,7 +103,7 @@ pipeline:
     ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # same commit as rfe (one shared checkout; validate_types cross rule 6): the assess-rfe PR #10 merge that brought skills/assess-initiative onto main. bootstrap-assess-rfe.sh checks it out and verifies it unless ASSESS_RFE_REF overrides. Quoted: a digits-only ref would parse as a number
     path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
     export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
-  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). initiative-split/SKILL.md:115 re-splits on recommendation=split
+  resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). the RESPLIT_FIELD/RESPLIT_BELOW launch vars of rfe-split/SKILL.md Step 3 (D6: the one re-split trigger is this threshold; the legacy initiative body re-split on recommendation=split)
 
 batch: { extra_fields: [parent_key] }                   # validate_batch_input.py:43 INITIATIVE_KNOWN_FIELDS - RFE_KNOWN_FIELDS
 snapshot:

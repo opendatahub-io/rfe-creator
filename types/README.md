@@ -108,7 +108,7 @@ itself is fine — `resolve()` follows the link).
 | `cleanup_partial_split.py` | inline dir branch | pending |
 | `compare_review_outputs.py` | `_TYPE_CONFIG` | pending |
 | `jira_utils.py` | `strip_metadata` prefix regex | pending |
-| `pipeline_state.py` | `init --type` choices = the registered types that carry the phase-table facts (unknown → argparse exit 2 with the registered list); `PIPELINE_TYPES` projected from the descriptor — `pipeline.scorer_agent`, `.context/assess-rfe/` + `pipeline.rubric.path`, `pipeline.dimensions[]` (prompt, blocking, condition, skip_stub), `dirs.{tasks,reviews,originals}`, `pipeline.poll_prefix`, `pipeline.prompts.split_rules`; the review prompt directory is the type-invariant skeleton dir and `dispatch_skill` names the legacy driving body until PR-5c (D7); every agent launch carries `type_registry.launch_vars` | PR-3a (choices); PR-5b (table) |
+| `pipeline_state.py` | `init --type` choices = the registered types that carry the phase-table facts (unknown → argparse exit 2 with the registered list); `PIPELINE_TYPES` projected from the descriptor — `pipeline.scorer_agent`, `.context/assess-rfe/` + `pipeline.rubric.path`, `pipeline.dimensions[]` (prompt, blocking, condition, skip_stub), `dirs.{tasks,reviews,originals}`, `pipeline.poll_prefix`, `pipeline.prompts.split_rules`; the review prompt directory is the type-invariant skeleton dir and `dispatch_skill` the one generic auto-fix body (D7, PR-5c); every agent launch carries `type_registry.launch_vars` | PR-3a (choices); PR-5b (table) |
 
 ## Adding a type
 
@@ -575,7 +575,8 @@ first two changed no verdict and the third removed exactly two false positives.
 
 1. **Gate 1 — lint time** (`python3 scripts/validate_types.py`, in `make lint` and CI): at least one
    descriptor is discovered (an empty root fails, never a vacuous pass); JSON Schema; `kind` is
-   `work-item`; every referenced file exists — the typed files (`pipeline.prompts.*`,
+   `work-item`; every `pipeline.stages` entry has its generic skill (`.claude/skills/rfe-<stage>/SKILL.md`,
+   under the plugin root — a drop-in root ships judgement, never a body); every referenced file exists — the typed files (`pipeline.prompts.*`,
    `dimensions[].prompt`) resolved through `Descriptor.typed_path` — the absolute form
    `launch-vars` falls back to when the working directory does not carry the file (under the
    descriptor's own directory for `types/<name>/...`, else the plugin root) — so the check does

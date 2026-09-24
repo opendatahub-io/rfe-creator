@@ -386,6 +386,32 @@ TIER3_REQUIRED_TOKENS = {
     ),
 }
 _SKILL_TREE_PREFIX = ".claude/skills/"
+# The generic skill of a stage (design §4.4): one body per stage, rendered per type by its
+# launch block. `pipeline.stages` is an OPEN list (schema) validated against this tree.
+GENERIC_SKILL = ".claude/skills/rfe-{stage}/SKILL.md"
+
+
+def stage_skill_messages(desc, repo_root):
+    """Every ``pipeline.stages`` entry names a registered generic skill: ``.claude/skills/
+    rfe-<stage>/SKILL.md`` exists under the plugin tree (PR-5c — the gate the schema's
+    ``stages`` description promised). Repo-relative like every non-typed reference: a drop-in
+    root ships judgement files (typed prompts, dimensions, a template), never a body, so a
+    stage no generic body drives cannot run for any type."""
+    stages = _opt(desc, "pipeline.stages")
+    if not isinstance(stages, list):
+        return []  # shape problems belong to the JSON-Schema finding
+    repo_root = Path(repo_root)
+    messages = []
+    for i, stage in enumerate(stages):
+        if not isinstance(stage, str) or not stage:
+            continue
+        rel = GENERIC_SKILL.format(stage=stage)
+        if not (repo_root / rel).is_file():
+            messages.append(
+                f"pipeline.stages[{i}]: no generic skill for stage {stage!r}: {rel} not found "
+                f"(relative to {repo_root})"
+            )
+    return messages
 
 
 def typed_prompt_messages(desc, repo_root):
@@ -634,6 +660,7 @@ def per_type_findings(
         messages.extend(schema_messages(desc, schema))
     messages.extend(kind_messages(desc))
     messages.extend(path_messages(desc, repo_root))
+    messages.extend(stage_skill_messages(desc, repo_root))
     messages.extend(typed_prompt_messages(desc, repo_root))
     messages.extend(score_fields_messages(desc))
     messages.extend(local_id_pattern_messages(desc))

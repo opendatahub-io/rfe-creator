@@ -13,7 +13,7 @@ dataset:
       constraints, team context, scope, timeline, success criteria
 inputs:
   questions_context: |
-    clarifying questions during initiative-create (objective, problem,
+    clarifying questions during rfe-create --type initiative (objective, problem,
     scope, parent outcome).
   questions_answer: |
     Use the 'clarifying_context' field for scope, constraints,

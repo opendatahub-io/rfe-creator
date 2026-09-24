@@ -292,16 +292,8 @@ SKILL_STAMPS = {
     (".claude/skills/rfe-review/prompts/fetch-agent.md", ("type", "tracker_ref")),
     (".claude/skills/rfe-review/SKILL.md", ("type",)),  # orchestrator error stubs
     (".claude/skills/rfe-split/SKILL.md", ("type",)),  # orchestrator error stub
-    (".claude/skills/rfe.create/SKILL.md", ("type",)),
-    (".claude/skills/rfe.split/prompts/split-agent.md", ("type",)),
-    (".claude/skills/rfe.review/prompts/fetch-agent.md", ("type", "tracker_ref")),
-    (".claude/skills/rfe.review/SKILL.md", ("type",)),  # orchestrator error stubs
-    (".claude/skills/rfe.split/SKILL.md", ("type",)),  # orchestrator error stub
-    (".claude/skills/initiative-create/SKILL.md", ("type",)),
-    (".claude/skills/initiative-split/prompts/split-agent.md", ("type",)),
-    (".claude/skills/initiative-review/prompts/fetch-agent.md", ("type", "tracker_ref")),
-    (".claude/skills/initiative-review/SKILL.md", ("type",)),
-    (".claude/skills/initiative-split/SKILL.md", ("type",)),
+    # PR-5c: the legacy rfe.* bodies are shims (they stamp nothing) and the initiative-* tree
+    # is gone; the six generic bodies above are the whole stamping surface.
 }
 _STAMP_FIELD = re.compile(r"(?<![\w.\-])(type|tracker_ref)=")
 
@@ -992,28 +984,28 @@ class TestDocs:
             assert os.path.exists(os.path.join(REPO_ROOT, rel)), rel
 
     def test_readme_command_list_unchanged(self):
-        """PR1-31: the README command lists are part of the byte-stable surface."""
+        """PR1-31: the README command lists are part of the byte-stable surface. PR-5c (plan
+        D11) is the one change: the six generic `rfe-*` names, one `--type initiative` line
+        per pipeline, no legacy `rfe.*` / `initiative-*` name."""
         quick_start = _read("README.md").split("## Quick Start", 1)[1].split("```", 2)[1]
         commands = re.findall(r"^/[\w.-]+", quick_start, re.MULTILINE)
         assert commands == [
-            "/rfe.create",
-            "/rfe.review",
-            "/rfe.split",
-            "/rfe.submit",
-            "/rfe.speedrun",
-            "/rfe.auto-fix",
-            "/rfe.review",
-            "/rfe.split",
-            "/rfe.speedrun",
-            "/rfe.speedrun",
-            "/rfe.speedrun",
-            "/rfe.auto-fix",
-            "/rfe.auto-fix",
-            "/initiative-create",
-            "/initiative-review",
-            "/initiative-split",
-            "/initiative-submit",
-            "/initiative-speedrun",
-            "/initiative-auto-fix",
+            "/rfe-create",
+            "/rfe-review",
+            "/rfe-split",
+            "/rfe-submit",
+            "/rfe-speedrun",
+            "/rfe-auto-fix",
+            "/rfe-review",
+            "/rfe-split",
+            "/rfe-speedrun",
+            "/rfe-speedrun",
+            "/rfe-speedrun",
+            "/rfe-auto-fix",
+            "/rfe-auto-fix",
+            "/rfe-create",
+            "/rfe-speedrun",
+            "/rfe-auto-fix",
             "/rfe-creator.update-deps",
         ]
+        assert not re.search(r"^/(rfe\.|initiative-)", quick_start, re.MULTILINE)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a batch YAML input file before /rfe.speedrun or /initiative-speedrun processes it.
+"""Validate a batch YAML input file before /rfe-speedrun (any registered type) processes it.
 
 Catches malformed entries (missing prompt, bad priority, wrong types,
 duplicate prompts, unknown fields) before the expensive multi-agent
@@ -75,7 +75,7 @@ _TYPES = type_registry.load()
 LEGACY_DEFAULT_TYPE = type_registry.LEGACY_DEFAULT_TYPE
 
 # Keep in sync with the batch YAML format documented in
-# .claude/skills/rfe.speedrun/SKILL.md (Mode A). Since the skill runs this
+# .claude/skills/rfe-speedrun/SKILL.md (Mode A). Since the skill runs this
 # validator with --strict, a field missing here becomes a blocking warning
 # for anyone who adds a new batch field without updating both places.
 # The base set is shared by every type; each type adds its descriptor's batch.extra_fields.

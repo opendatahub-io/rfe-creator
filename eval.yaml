@@ -63,7 +63,7 @@ inputs:
   tools:
     - match: |
         Questions asked to the user via AskUserQuestion — typically
-        clarifying questions during rfe.create (customer segment,
+        clarifying questions during rfe-create (customer segment,
         business impact, problem definition, distinctness, success metrics).
       prompt: |
         Answer based on the test case context in input.yaml.

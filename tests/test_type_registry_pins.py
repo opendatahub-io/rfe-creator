@@ -81,11 +81,10 @@ REG = type_registry.load(extra_roots=[], env={})
 TYPES = REG.names()
 
 # ── constants the descriptors deliberately do not carry (UNMAPPED in the matrix) ─────────────
-# Legacy skill-directory naming prefix: 'rfe.' vs 'initiative-'. PR-5b landed the generic
-# rfe-* bodies beside them (design §4.4); the legacy trees are deleted in PR-5c. Until then the
-# pins below hold on the GENERIC surface rendered per type (skill()/prompt() below), and
-# dispatch_skill still names the legacy driving body (plan D7).
-SKILL_PREFIX = {"rfe": "rfe.", "initiative": "initiative-"}
+# PR-5b landed one generic rfe-* body per stage (design §4.4); PR-5c deleted the legacy per-type
+# trees (initiative-*) and turned the rfe.* names into compat shims of the generic bodies. The
+# pins below hold on the GENERIC surface rendered per type (skill()/prompt() below).
+COMPAT_SHIM = ".claude/skills/rfe.{stage}/SKILL.md"
 GENERIC_SKILL = ".claude/skills/rfe-{stage}/SKILL.md"
 SKELETON_DIR = ".claude/skills/rfe-review/prompts"
 GENERIC_SPEEDRUN = "rfe-speedrun"
@@ -425,7 +424,6 @@ def _ctx(t):
         score_fields=desc.score_fields,
         task_schema=f"{t}-task",
         review_schema=f"{t}-review",
-        sk=SKILL_PREFIX[t],
         sample_ids=(f"{desc.local_prefix}001", f"{desc.write_prefix}1234"),
     )
 
@@ -462,11 +460,6 @@ def skill(t, stage, sub="SKILL.md"):
     if sub == "SKILL.md":
         return render(read(GENERIC_SKILL.format(stage=stage)), t, stage)
     return render(read(f"{SKELETON_DIR}/{sub.split('/')[-1]}"), t, stage)
-
-
-def legacy_skill(t, stage, sub="SKILL.md"):
-    """The legacy per-type body (deleted in PR-5c)."""
-    return read(f".claude/skills/{SKILL_PREFIX[t]}{stage}/{sub}")
 
 
 def typed(t, key):
@@ -1521,8 +1514,8 @@ class TestPipelineTypes:
 
     def test_pipeline_types(self, ctx, monkeypatch):
         # PR-5b: the table is a projection of the descriptor (eight keys) plus two constants
-        # (D7): the type-invariant skeleton directory and, until PR-5c's shims, the legacy
-        # driving body as the compaction-recovery target.
+        # (D7): the type-invariant skeleton directory and the one generic auto-fix body as the
+        # compaction-recovery target (PR-5c; the legacy rfe.auto-fix name is a shim of it).
         p = pipeline_state.PIPELINE_TYPES[ctx.t]
         prompts = ctx.pipe["prompts"]
         # The table is projected once, at import, in the process cwd; the launch_path pins
@@ -1597,13 +1590,13 @@ class TestPipelineTypes:
         pin("dirs.tasks", "pipeline_state.py:104,:116", ctx.dirs["tasks"], p["tasks_dir"])
         pin("dirs.reviews", "pipeline_state.py:105,:117", ctx.dirs["reviews"], p["reviews_dir"])
         pin(
-            "(UNMAPPED, until PR-5c) legacy driving body",
-            "pipeline_state._LEGACY_DISPATCH_SKILL",
-            f".claude/skills/{ctx.sk}auto-fix/SKILL.md",
+            "(UNMAPPED) the one generic driving body (PR-5c, plan D7)",
+            "pipeline_state.DISPATCH_SKILL",
+            GENERIC_SKILL.format(stage="auto-fix"),
             p["dispatch_skill"],
         )
+        assert p["dispatch_skill"] == pipeline_state.DISPATCH_SKILL
         assert (REPO_ROOT / p["dispatch_skill"]).is_file()
-        assert (REPO_ROOT / pipeline_state.GENERIC_DISPATCH_SKILL).is_file()
         pin("pipeline.poll_prefix", "pipeline_state.py:107,:119", ctx.pp, p["poll_prefix"])
 
     def test_setup_commands_from_context_sources(self, ctx):
@@ -2080,14 +2073,31 @@ class TestArtifactHelpers:
 class TestSkillLayer:
     # rows: 189-195, 216-222, 224-232 — since PR-5b one generic body per stage, rendered per type
     # with the launch block (design §4.1-4.4): the pins assert registry-rendered tokens on that
-    # surface, never twin-divergent text. The legacy trees stay until PR-5c.
+    # surface, never twin-divergent text. PR-5c deleted the legacy trees; the rfe.* names are
+    # ~10-line compat shims that read the generic body and follow it from Step 0.
 
     def test_stage_skills_and_prompt_files_exist(self, ctx):
         # rows: 189, 190 — .claude/skills/rfe-*; prompts.* / dimensions[].prompt / template
         assert ctx.pipe["stages"] == ["create", "review", "submit", "split", "auto-fix", "speedrun"]
         for stage in ctx.pipe["stages"]:
             assert (REPO_ROOT / GENERIC_SKILL.format(stage=stage)).is_file(), stage
-            assert (REPO_ROOT / f".claude/skills/{ctx.sk}{stage}/SKILL.md").is_file(), stage
+            assert not (REPO_ROOT / f".claude/skills/initiative-{stage}").exists(), stage
+            shim = read(COMPAT_SHIM.format(stage=stage))
+            assert f"name: rfe.{stage}\n" in shim, stage
+            assert f"Read `{GENERIC_SKILL.format(stage=stage)}`" in shim, stage
+            assert "follow it from Step 0 with the same arguments" in shim, stage
+            # Claude Code substitutes every occurrence of the token in the invoked skill's
+            # text: the shim binds it exactly once (a second, quoted spelling would render as
+            # the arguments themselves and map nothing).
+            assert shim.count("$ARGUMENTS") == 1, stage
+            assert "dollar-sign ARGUMENTS" in shim, stage
+            assert len(shim.splitlines()) <= 10, stage
+            frontmatter = lambda text: dict(  # noqa: E731
+                ln.split(": ", 1) for ln in text.split("---", 2)[1].strip().splitlines()
+            )
+            generic_fm = frontmatter(read(GENERIC_SKILL.format(stage=stage)))
+            assert frontmatter(shim)["allowed-tools"] == generic_fm["allowed-tools"], stage
+            assert "Compatibility alias" in frontmatter(shim)["description"], stage
         for key, path in ctx.pipe["prompts"].items():
             assert path.startswith(f"types/{ctx.t}/"), key
             assert (REPO_ROOT / path).is_file(), f"pipeline.prompts.{key}"
