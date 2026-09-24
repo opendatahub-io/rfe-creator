@@ -240,6 +240,69 @@ class TestTypeValidation:
         assert result.returncode == 0
 
 
+class TestTypesLink:
+    """The launch block hands subagents the typed files as paths relative to the working
+    directory (Descriptor.launch_path). When that directory is not the plugin checkout — the
+    eval harness links only scripts/, .claude/, .context/ and skills/ into its run directory;
+    a marketplace install runs from the project — the bootstrap links the checkout's types/
+    in so those paths resolve. An existing entry is never replaced; the skip mode links
+    nothing."""
+
+    @staticmethod
+    def _plugin_types():
+        return os.path.realpath(os.path.join(REPO_ROOT, "types"))
+
+    def test_links_types_into_a_working_directory_without_it(self, fake_checkout, tmp_path):
+        _add_rfe_assets(fake_checkout)
+        stdout, stderr, rc = _run()
+        assert rc == 0, stderr
+        link = os.path.join(tmp_path, "types")
+        assert os.path.islink(link)
+        assert os.path.realpath(link) == self._plugin_types()
+        assert os.path.isfile(os.path.join(link, "rfe", "dimensions", "feasibility.md"))
+        line = (
+            f"types/ -> {self._plugin_types()} (typed files reachable from the working directory)"
+        )
+        assert line in stdout.splitlines()
+        # the launch block rendered from that directory is now the relative one
+        block = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(REPO_ROOT, "scripts", "type_registry.py"),
+                "launch-vars",
+                "rfe",
+                "review",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            check=True,
+        ).stdout.splitlines()
+        assert "DIMENSION_FEASIBILITY_PROMPT=types/rfe/dimensions/feasibility.md" in block
+        assert not [ln for ln in block if "=/" in ln]
+        # a second run keeps the link and says nothing more about it
+        stdout, stderr, rc = _run()
+        assert rc == 0, stderr
+        assert os.path.islink(link) and "types/ ->" not in stdout
+
+    def test_an_existing_types_entry_is_left_alone(self, fake_checkout, tmp_path):
+        _add_rfe_assets(fake_checkout)
+        os.makedirs(os.path.join(tmp_path, "types"))
+        _touch(os.path.join(tmp_path, "types", "marker"))
+        stdout, stderr, rc = _run()
+        assert rc == 0, stderr
+        assert not os.path.islink(os.path.join(tmp_path, "types"))
+        assert os.path.isfile(os.path.join(tmp_path, "types", "marker"))
+        assert "types/ ->" not in stdout
+
+    def test_skip_bootstrap_links_nothing(self, fake_checkout, tmp_path):
+        _add_rfe_assets(fake_checkout)
+        env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
+        result = subprocess.run(["bash", SCRIPT], capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        assert not os.path.lexists(os.path.join(tmp_path, "types"))
+
+
 class TestPathsMatchPipelineRegistry:
     """The shell script restates paths PIPELINE_TYPES already owns.
 

@@ -308,10 +308,11 @@ def schema_messages(desc, schema):
 
 def path_messages(desc, repo_root):
     """Every reference gate 1 requires to exist (Q24). A typed file (``pipeline.prompts.*``,
-    ``pipeline.dimensions[].prompt``) resolves through ``Descriptor.typed_path`` — the same
-    projection ``launch-vars`` and the dispatcher use, so a drop-in root's own files are checked
-    where they live and a missing one is never masked by a repository file of the same relative
-    path; every other reference is repo-relative."""
+    ``pipeline.dimensions[].prompt``) resolves through ``Descriptor.typed_path`` — the absolute
+    resolution ``Descriptor.launch_path`` falls back to — so the existence check does not depend
+    on the working directory, a drop-in root's own files are checked where they live and a
+    missing one is never masked by a repository file of the same relative path; every other
+    reference is repo-relative."""
     repo_root = Path(repo_root)
     messages = []
 

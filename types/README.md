@@ -121,11 +121,18 @@ itself is fine — `resolve()` follows the link).
    launcher tokens gate 1 requires (`{TEMPLATE_PATH}`, `{NEXT_ID_FLAGS}`, `{TASKS_DIR}`, ...); no typed
    file may name a skill directory. `python3 scripts/type_registry.py launch-vars <name> review` prints
    the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
-   dispatcher read every typed literal from it. Typed-file paths render ABSOLUTE (resolved from
-   the descriptor's own directory for `types/<name>/...`, else from the plugin root) so the files
-   resolve from any working directory — a marketplace install runs the skills from the project,
-   not the checkout; workspace paths and every `python3 scripts/...` / bootstrap command stay
-   relative, since the headless allowlist matches command text literally. `pipeline.stages` must list `create`, `review`,
+   dispatcher read every typed literal from it. Typed-file paths render as the descriptor's own
+   relative values while the working directory carries those files — the checkout is the cwd,
+   or `scripts/bootstrap-assess-rfe.sh` linked the checkout's `types/` into it (it does so for
+   any working directory without one: the eval harness's run directory, a marketplace project)
+   — and absolute only when it does not: a drop-in root outside the checkout (a
+   `types/<name>/...` path then resolves from the descriptor's own directory, else the plugin
+   root). One frame on purpose: a subagent whose first instruction names a file under an
+   absolute root infers that root for every relative path after it — a drop-in root outside the
+   checkout is the one layout where its own files render absolute next to the shipped relative
+   ones. Workspace paths and every
+   `python3 scripts/...` / bootstrap command are always relative, since the headless allowlist
+   matches command text literally. `pipeline.stages` must list `create`, `review`,
    `split` and `auto-fix` — the stages the dispatcher's phase table launches through the registry;
    `python3 scripts/pipeline_state.py init` refuses a type that omits one before any state is
    written, and gate 1 requires `pipeline.prompts.template` for a type that creates or splits.
@@ -570,9 +577,11 @@ first two changed no verdict and the third removed exactly two false positives.
    descriptor is discovered (an empty root fails, never a vacuous pass); JSON Schema; `kind` is
    `work-item`; every `pipeline.stages` entry has its generic skill (`.claude/skills/rfe-<stage>/SKILL.md`,
    under the plugin root — a drop-in root ships judgement, never a body); every referenced file exists — the typed files (`pipeline.prompts.*`,
-   `dimensions[].prompt`) resolved as `launch-vars` resolves them (under the descriptor's own
-   directory for `types/<name>/...`, else the plugin root), so a drop-in root's own files are the
-   ones checked and a missing one is never masked by a repository file of the same relative path;
+   `dimensions[].prompt`) resolved through `Descriptor.typed_path` — the absolute form
+   `launch-vars` falls back to when the working directory does not carry the file (under the
+   descriptor's own directory for `types/<name>/...`, else the plugin root) — so the check does
+   not depend on the working directory, a drop-in root's own files are the ones checked, and a
+   missing one is never masked by a repository file of the same relative path;
    `eval.config` and `eval.dataset` repo-relative; `score_fields` non-empty and the review schema accepts the
    `verify_phase` error stub; the eval fragment exists, validates against
    `_schema/eval-fragment.schema.json` and renders with the skeleton, and (CLI, `--no-eval-sync`
