@@ -1,0 +1,19 @@
+---
+# Endpoints mirror fullsend-github-ro.yaml — keep both in sync.
+# Differs only in binaries (adds git, pre-commit for repo operations).
+id: jira
+display_name: Jira
+description: Jira
+category: data
+endpoints:
+  # This should be replaced by the user providing its own
+  # `jira-profile.yaml` file, so using here a dummy endpoint.
+  - host: example.atlassian.net
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    access: read-only
+binaries:
+  - path: "**/python"
+  - path: "**/python*"
+  - path: "**/curl"

@@ -1,0 +1,34 @@
+---
+# Endpoints mirror fullsend-github-code.yaml — keep both in sync.
+# This profile omits git/pre-commit binaries (API-only agents).
+id: fullsend-github-ro
+display_name: Fullsend GitHub (read-only)
+description: Read-only GitHub API access for fullsend agents
+category: source_control
+endpoints:
+  - host: api.github.com
+    port: 443
+    protocol: rest
+    access: read-only
+    enforcement: enforce
+  - host: api.github.com
+    port: 443
+    protocol: graphql
+    access: read-only
+    enforcement: enforce
+    path: "/graphql"
+  - host: github.com
+    port: 443
+    protocol: rest
+    access: read-only
+    enforcement: enforce
+  - host: github.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+    path: "/**/git-upload-pack"
+binaries:
+  - "**/gh"
+  - "**/node"
+  - /usr/lib/git-core/git-remote-http

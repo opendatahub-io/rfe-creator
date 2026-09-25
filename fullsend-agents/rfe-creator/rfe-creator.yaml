@@ -1,0 +1,69 @@
+---
+agent: rfe-creator/prompt.md
+model: opus
+image: ghcr.io/fullsend-ai/fullsend-sandbox@sha256:eaf365ad038d762954d8fd5f41618cd6766a8a6a6f76d944aaf160819666734d
+policy: rfe-creator/policy.yaml
+role: rfe-creator
+slug: fullsend-ai-rfe-creator
+
+host_files:
+  - src: rfe-creator/gcp-vertex.env
+    dest: /sandbox/workspace/.env.d/gcp-vertex.env
+    expand: true
+  - src: ${GOOGLE_APPLICATION_CREDENTIALS}
+    dest: /tmp/.gcp-credentials.json
+    optional: true
+
+# Not needed when running from the rfe-creator repository
+# skills:
+#   - skills/architecture-review
+#   - skills/assess-rfe
+#   - skills/export-rubric
+#   - skills/feasibility-review
+#   - skills/initiative-auto-fix
+#   - skills/initiative-create
+#   - skills/initiative-feasibility-review
+#   - skills/initiative-review
+#   - skills/initiative-speedrun
+#   - skills/initiative-split
+#   - skills/initiative-submit
+#   - skills/rfe.auto-fix
+#   - skills/rfe.create
+#   - skills/rfe-creator.update-deps
+#   - skills/rfe-feasibility-review
+#   - skills/rfe.review
+#   - skills/rfe.speedrun
+#   - skills/rfe.split
+#   - skills/rfe.submit
+#   - skills/scope-review
+#   - skills/strategic-alignment-review
+#   - skills/testability-review
+
+pre_script: rfe-creator/pre-rfe-creator.sh
+post_script: rfe-creator/post-rfe-creator.sh
+
+validation_loop:
+  script: rfe-creator/validate-output-schema.sh
+  schema: rfe-creator/result.schema.json
+  max_iterations: 1
+
+timeout_minutes: 120
+
+env:
+  sandbox:
+    FULLSEND_TASK: "${FULLSEND_TASK}"
+    JIRA_SERVER: "${JIRA_SERVER}"
+    JIRA_USER: "${JIRA_USER}"
+  runner:
+    JIRA_SERVER: ${JIRA_SERVER}
+    JIRA_USER: ${JIRA_USER}
+    JIRA_TOKEN: ${JIRA_TOKEN}
+    GH_TOKEN: ${GH_TOKEN}
+
+openshell:
+  profiles:
+    - rfe-creator/jira-profile.yaml
+    - rfe-creator/github-profile.yaml
+providers:
+  - rfe-creator/jira-provider.yaml
+  - rfe-creator/github-provider.yaml
