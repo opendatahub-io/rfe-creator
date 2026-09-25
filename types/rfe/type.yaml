@@ -73,7 +73,7 @@ schema:
 pipeline:
   stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); gate 1 requires one per entry (validate_types.stage_skill_messages, PR-5c); the rfe.* names are compat shims of them
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
-    - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "rfe"], required: true }
+    - { name: assess-rubric, bootstrap: scripts/bootstrap.sh, args: ["--type", "rfe"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
   poll_prefix: ""                                       # pipeline_state.py:107; check_review_progress.py:19-27 unprefixed keys — grandfathered empty (rfe only); also REPORT_CONFIG.default_output "review-report.html" (generate_review_pdf.py:28, Q15)
   state_prefix: ""                                      # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies — grandfathered empty (rfe only)
@@ -90,10 +90,10 @@ pipeline:
       prompt: types/rfe/dimensions/feasibility.md   # pipeline_state.py:102 feasibility_skill
       blocking: true                                    # Q17: ASSESS wave waits on it (wait-for-wave --also-phase feasibility, pipeline_state.py:1193-1195); no script reads a blocking flag — unpinned
   rubric:
-    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 ASSESS_RFE_REPO default (verbatim URL)
-    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # the commit bootstrap-assess-rfe.sh checks out (and verifies) when ASSESS_RFE_REF is unset — assess-rfe PR #10 merge == assess-rfe main on 2026-09-21; the env var overrides for an ad-hoc run. One checkout per repo, so every descriptor sharing this repo pins the same ref (validate_types cross rule 6). Full 40-hex SHA (design §7.3: immutable). Quoted: a digits-only ref would parse as a number
-    path: skills/assess-rfe/scripts/agent_prompt.md     # bootstrap-assess-rfe.sh:48 RUBRIC_FILE; pipeline_state.py:101 == ".context/assess-rfe/" + path (gate 2, Q24)
-    export: artifacts/rfe-rubric.md                     # bootstrap-assess-rfe.sh:103 export_rubric.py; AGENTS.md:11; the RUBRIC_EXPORT launch var of rfe-create/SKILL.md Step 1
+    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap.sh:45 ASSESS_RFE_REPO default (verbatim URL)
+    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # the commit bootstrap.sh checks out (and verifies) when ASSESS_RFE_REF is unset — assess-rfe PR #10 merge == assess-rfe main on 2026-09-21; the env var overrides for an ad-hoc run. One checkout per repo, so every descriptor sharing this repo pins the same ref (validate_types cross rule 6). Full 40-hex SHA (design §7.3: immutable). Quoted: a digits-only ref would parse as a number
+    path: skills/assess-rfe/scripts/agent_prompt.md     # bootstrap.sh:48 RUBRIC_FILE; pipeline_state.py:101 == ".context/assess-rfe/" + path (gate 2, Q24)
+    export: artifacts/rfe-rubric.md                     # bootstrap.sh:103 export_rubric.py; AGENTS.md:11; the RUBRIC_EXPORT launch var of rfe-create/SKILL.md Step 1
   resplit: { score_field: right_sized, below: 2 }       # check_right_sized.py reads score_field/below (registry-derived since PR-2a; was the type-blind `right_sized < 2`); the RESPLIT_FIELD/RESPLIT_BELOW launch vars of rfe-split/SKILL.md Step 3 (Q3: stays 2 for rfe)
 
 batch: { extra_fields: [] }                             # validate_batch_input.py:42 RFE_KNOWN_FIELDS == base {prompt, priority, labels, clarifying_context}

@@ -37,6 +37,14 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 
 Every skill takes `--type <type>` (`rfe` or `initiative`); without it the type is resolved from the ids you pass (`RHAIRFE-*` / `RFE-*` are RFEs, `RHOAIENG-*` / `INIT-*` are Initiatives) and defaults to `rfe`. The dotted names of the original RFE skills (`/rfe.create`, `/rfe.review`, `/rfe.split`, `/rfe.submit`, `/rfe.speedrun`, `/rfe.auto-fix`) remain as compatibility aliases that run the same bodies.
 
+## Install
+
+**From a checkout** (development, CI, the evals): clone the repository and run the skills with the checkout as the working directory. Nothing else is needed; the first skill run bootstraps the vendored dependencies.
+
+**From the Claude Code marketplace:** `/plugin marketplace add opendatahub-io/skills-registry`, then `/plugin install rfe-creator@opendatahub-skills`, and run the skills from any project directory. The plugin lives under `~/.claude/plugins/cache/`; the first thing each skill does in a directory without `scripts/` is run the bootstrap's `--layout` step through its own plugin path, which links the plugin's `scripts/` and `types/` into the working directory. From then on every command runs exactly as in a checkout. The bootstrap refuses a directory that already has its own `scripts/` or `types/` rather than mixing them. What the plugin writes into your project — the two links, `.context/`, the vendored `.claude/agents/*-scorer.md` and `.claude/skills/{assess-rfe,assess-initiative,export-rubric}/` — is appended to `.git/info/exclude` when the directory is the top of a git repository (it prints the list instead when it cannot write there). Permission rules are per project; to run headless without prompts, copy the `permissions.allow` list from this repository's `.claude/settings.json` into your project's `.claude/settings.local.json`.
+
+**From the Codex marketplace** (`codex plugin marketplace add opendatahub-io/skills-registry`): Codex installs the same repository under `~/.codex/plugins/cache/` and runs the skills from your project. Codex substitutes no variables in a skill body, so the first step's path has to be resolved from the skill's location, which Codex shows in its skill list; after that the layout is the same. Only the agent-free skills, `/rfe-create`, `/rfe-submit` and `/rfe-creator.update-deps`, run end to end under Codex: the review, split, auto-fix and speedrun pipelines launch parallel subagents through Claude Code's Agent tool, for which Codex has no equivalent.
+
 ## Pipeline
 
 ### New RFEs

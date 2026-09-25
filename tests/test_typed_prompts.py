@@ -74,6 +74,12 @@ def sentences(text):
     return out
 
 
+# Scripts renamed since the legacy corpus was frozen: the corpus keeps the old name (it is
+# history), the generic surface uses the new one, and the invocation counts as surviving.
+# PR-5d: the workspace bootstrap dropped its assess-rfe-era name (the old name forwards).
+RENAMED_SCRIPTS = {"scripts/bootstrap-assess-rfe.sh": "scripts/bootstrap.sh"}
+
+
 def commands(text, dims=()):
     """Every ``python3 scripts/…`` / ``bash scripts/…`` invocation — a code-block line
     (backslash continuations joined) or an inline backtick span — normalised: trailing comments
@@ -97,6 +103,8 @@ def commands(text, dims=()):
         cmd = re.sub(r"\s+#.*$", "", cmd)
         cmd = re.sub(r"\s--type\s+\S+", "", cmd)
         cmd = re.sub(r"\stype=\S+", "", cmd)
+        for before, after in RENAMED_SCRIPTS.items():
+            cmd = cmd.replace(before, after)
         cmd = re.sub(r"\{[A-Za-z_<>]+\}", "{}", cmd)
         while True:  # nested slots (`<assess_failed or <name>_failed>`) fold innermost-first
             folded = re.sub(r"<[^<>]*>", "\x00", cmd)

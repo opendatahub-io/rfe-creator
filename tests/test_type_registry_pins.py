@@ -94,7 +94,7 @@ POLL_FILE_PREFIX = {"rfe": "tmp/rfe-poll-", "initiative": "tmp/initiative-poll-"
 # PR-5a: the rfe review skill resolves the rubric path from the descriptor at launch time.
 RUBRIC_PATH_GET = "python3 scripts/type_registry.py get rfe pipeline.rubric.path"
 RUBRIC_PATH_TOKEN = "{PROMPT_PATH}=.context/assess-rfe/<pipeline.rubric.path>"
-CONTEXT_DIR = ".context/assess-rfe"  # bootstrap-assess-rfe.sh:44
+CONTEXT_DIR = ".context/assess-rfe"  # bootstrap.sh:44
 ASSESS_STAGING = "tmp/rfe-assess/single"  # byte-stable staging dir (design §10 tail)
 PASS_THRESHOLD = 7  # Q15: scoring machinery, a constant — not per type
 POLL_PHASE_BASES = ("fetch", "assess", "review", "revise", "split")
@@ -1613,7 +1613,7 @@ class TestPipelineTypes:
             cfg["SETUP"]["commands"],
         )
         assert expected == [
-            f"bash scripts/bootstrap-assess-rfe.sh --type {ctx.t}",
+            f"bash scripts/bootstrap.sh --type {ctx.t}",
             "bash scripts/fetch-architecture-context.sh",
         ]
 
@@ -2084,7 +2084,9 @@ class TestSkillLayer:
             assert not (REPO_ROOT / f".claude/skills/initiative-{stage}").exists(), stage
             shim = read(COMPAT_SHIM.format(stage=stage))
             assert f"name: rfe.{stage}\n" in shim, stage
-            assert f"Read `{GENERIC_SKILL.format(stage=stage)}`" in shim, stage
+            # the generic body is read through the skill directory variable, so the shim
+            # resolves it from a checkout and from a marketplace install alike (PR-5d)
+            assert f"Read `${{CLAUDE_SKILL_DIR}}/../rfe-{stage}/SKILL.md`" in shim, stage
             assert "follow it from Step 0 with the same arguments" in shim, stage
             # Claude Code substitutes every occurrence of the token in the invoked skill's
             # text: the shim binds it exactly once (a second, quoted spelling would render as
@@ -2303,9 +2305,9 @@ class TestSkillLayer:
         assert "ID=RHAIRFE-1234" in companion["vars"].splitlines()
 
     def test_bootstrap_script_text(self, ctx):
-        # rows: 193, 194 — bootstrap-assess-rfe.sh reads the repo, the ref and the type list
+        # rows: 193, 194 — bootstrap.sh reads the repo, the ref and the type list
         # from the registry; no literal case arm, no literal SHA
-        sh = read("scripts/bootstrap-assess-rfe.sh")
+        sh = read("scripts/bootstrap.sh")
         assert (
             'REGISTERED="$(python3 "$SCRIPT_DIR/type_registry.py" list 2>/dev/null)" || '
             'REGISTERED=""'
@@ -2327,7 +2329,7 @@ class TestSkillLayer:
         assert re.fullmatch(r"[0-9a-f]{7,40}", rubric["ref"])
         assert "skills/export-rubric/scripts/export_rubric.py" in sh
         block = dict(launch(ctx.t, "create"))
-        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap-assess-rfe.sh --type {ctx.t}"
+        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap.sh --type {ctx.t}"
         if rubric["export"] is None:
             assert "initiative-rubric" not in sh
             assert block["RUBRIC_EXPORT"] == "none"
@@ -3053,7 +3055,7 @@ class TestManifestsAndDocs:
             expected.add(f".claude/agents/{c.pipe['scorer_agent']}.md")
         text = read(".claude/skills/rfe-creator.update-deps/SKILL.md")
         rm_block = re.search(
-            r"rm -rf \.context/assess-rfe(.*?)\nbash scripts/bootstrap-assess-rfe\.sh", text, re.S
+            r"rm -rf \.context/assess-rfe(.*?)\nbash scripts/bootstrap\.sh", text, re.S
         ).group(0)
         removed = set(re.findall(r"(\.(?:context|claude)/\S+)", rm_block))
         pin(

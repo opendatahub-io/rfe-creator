@@ -40,7 +40,7 @@ descriptor value ("Deployment binding override" below).
 
 Follow "Adding a type" in [`types/README.md`](../types/README.md): copy `types/rfe/`, edit only the
 extension points, run `python3 scripts/validate_types.py` (gate 1) and, after
-`bash scripts/bootstrap-assess-rfe.sh`, `python3 scripts/validate_types.py --with-deps` (gate 2).
+`bash scripts/bootstrap.sh`, `python3 scripts/validate_types.py --with-deps` (gate 2).
 Keep `pipeline.rubric.repo` and `pipeline.rubric.ref` identical to the shipped descriptors: the
 bootstrap clones that repository once, at that commit, into `.context/assess-rfe`, and gate 1 refuses
 a second external rubric repository or a second pin (rule 6) until the bootstrap can keep a checkout
@@ -51,9 +51,9 @@ Since PR-5b the skills are generic: `/rfe-create`, `/rfe-review`, `/rfe-split`, 
 literal from `python3 scripts/type_registry.py launch-vars <name> <stage>` — ids, dirs, schemas, the
 scorer agent, the rubric path, the dimensions, the score-field stubs, the re-split threshold. The
 typed-file paths in that block are the descriptor's own relative values while the working directory
-carries those files — the checkout is the cwd, or `scripts/bootstrap-assess-rfe.sh` linked the
-checkout's `types/` into it (it does so for any working directory without one: the eval harness's run
-directory, a marketplace project) — and absolute only when it does not: a drop-in root outside the
+carries those files — the checkout is the cwd, or `scripts/bootstrap.sh` linked the
+plugin's `scripts/` and `types/` into it (its `--layout` step does so for any working directory that is
+not the checkout: a marketplace project) — and absolute only when it does not: a drop-in root outside the
 checkout (a `types/<name>/...` path then resolves from the descriptor's own directory, so the root
 carries its files wherever it lives). One frame on purpose: a subagent whose first instruction names a
 file under an absolute root infers that root for every relative path after it — a drop-in root outside

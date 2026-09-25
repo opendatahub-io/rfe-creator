@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for scripts/bootstrap-assess-rfe.sh --type validation.
+"""Tests for scripts/bootstrap.sh --type validation.
 
 Bootstrap is the only gate between "the plugin checkout is complete" and an
 agent phase that can never finish. A checkout missing the initiative rubric or
@@ -21,7 +21,7 @@ import type_registry  # noqa: E402
 from pipeline_state import PIPELINE_TYPES  # noqa: E402
 
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
-SCRIPT = os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh")
+SCRIPT = os.path.join(REPO_ROOT, "scripts", "bootstrap.sh")
 SKILLS_DIR = os.path.join(REPO_ROOT, ".claude", "skills")
 
 RFE_RUBRIC = "skills/assess-rfe/scripts/agent_prompt.md"
@@ -48,6 +48,12 @@ def fake_checkout(tmp_path):
     os.chdir(tmp_path)
     yield ctx
     os.chdir(orig)
+
+
+def _env_no_skip():
+    return {
+        k: v for k, v in os.environ.items() if k not in ("ASSESS_RFE_REF", "RFE_SKIP_BOOTSTRAP")
+    }
 
 
 def _run(*args):
@@ -210,7 +216,7 @@ class TestTypeValidation:
         <scripts>/type_registry.py nor <scripts>/../types exists — is the one fatal case."""
         stray = tmp_path / "stray" / "scripts"
         stray.mkdir(parents=True)
-        copied = stray / "bootstrap-assess-rfe.sh"
+        copied = stray / "bootstrap.sh"
         shutil.copy(SCRIPT, copied)
         env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
         result = subprocess.run(
@@ -240,60 +246,161 @@ class TestTypeValidation:
         assert result.returncode == 0
 
 
-class TestTypesLink:
-    """The launch block hands subagents the typed files as paths relative to the working
-    directory (Descriptor.launch_path). When that directory is not the plugin checkout — the
-    eval harness links only scripts/, .claude/, .context/ and skills/ into its run directory;
-    a marketplace install runs from the project — the bootstrap links the checkout's types/
-    in so those paths resolve. An existing entry is never replaced; the skip mode links
-    nothing."""
+class TestLayout:
+    """The working directory as the plugin root (PR-5d, design §3.5.1). Every body, prompt,
+    typed file and pipeline command is cwd-relative; when the working directory is not the
+    plugin checkout — the eval harness's run directory, a marketplace install's project — the
+    bootstrap links the plugin's scripts/ and types/ into it. `--layout` does only that and
+    exits, so a skill can call it through its own plugin-relative path before anything
+    relative. A different entry of the same name is a refusal (exit 3), never a fallback;
+    the skip mode links nothing; the compatibility name forwards."""
 
     @staticmethod
-    def _plugin_types():
-        return os.path.realpath(os.path.join(REPO_ROOT, "types"))
+    def _plugin(name):
+        return os.path.realpath(os.path.join(REPO_ROOT, name))
 
-    def test_links_types_into_a_working_directory_without_it(self, fake_checkout, tmp_path):
+    def _assert_linked(self, tmp_path, stdout):
+        for name in ("scripts", "types"):
+            link = os.path.join(tmp_path, name)
+            assert os.path.islink(link), name
+            assert os.path.realpath(link) == self._plugin(name), name
+            line = f"{name}/ -> {self._plugin(name)} (linked into the working directory)"
+            assert line in stdout.splitlines(), (name, stdout)
+        assert os.path.isfile(
+            os.path.join(tmp_path, "types", "rfe", "dimensions", "feasibility.md")
+        )
+        assert os.path.isfile(os.path.join(tmp_path, "scripts", "type_registry.py"))
+
+    def test_full_run_links_scripts_and_types_into_a_working_directory_without_them(
+        self, fake_checkout, tmp_path
+    ):
         _add_rfe_assets(fake_checkout)
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
-        link = os.path.join(tmp_path, "types")
-        assert os.path.islink(link)
-        assert os.path.realpath(link) == self._plugin_types()
-        assert os.path.isfile(os.path.join(link, "rfe", "dimensions", "feasibility.md"))
-        line = (
-            f"types/ -> {self._plugin_types()} (typed files reachable from the working directory)"
-        )
-        assert line in stdout.splitlines()
-        # the launch block rendered from that directory is now the relative one
+        self._assert_linked(tmp_path, stdout)
+        # the launch block rendered from that directory is the relative one, through the links
         block = subprocess.run(
-            [
-                sys.executable,
-                os.path.join(REPO_ROOT, "scripts", "type_registry.py"),
-                "launch-vars",
-                "rfe",
-                "review",
-            ],
+            [sys.executable, "scripts/type_registry.py", "launch-vars", "rfe", "review"],
             capture_output=True,
             text=True,
             cwd=tmp_path,
             check=True,
         ).stdout.splitlines()
         assert "DIMENSION_FEASIBILITY_PROMPT=types/rfe/dimensions/feasibility.md" in block
+        assert "BOOTSTRAP=bash scripts/bootstrap.sh --type rfe" in block
         assert not [ln for ln in block if "=/" in ln]
-        # a second run keeps the link and says nothing more about it
+        # a second run keeps the links and says nothing more about them
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
-        assert os.path.islink(link) and "types/ ->" not in stdout
+        assert "-> " not in stdout
 
-    def test_an_existing_types_entry_is_left_alone(self, fake_checkout, tmp_path):
+    def test_layout_mode_links_and_exits_without_vendoring(self, tmp_path):
+        os.chdir(tmp_path)
+        try:
+            result = subprocess.run(
+                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
+            )
+            assert result.returncode == 0, result.stderr
+            self._assert_linked(tmp_path, result.stdout)
+            assert not os.path.exists(os.path.join(tmp_path, ".context"))
+            # idempotent and silent the second time
+            again = subprocess.run(
+                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
+            )
+            assert again.returncode == 0 and again.stdout == "", again
+            # the compatibility name forwards, arguments included
+            forwarded = subprocess.run(
+                ["bash", os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"), "--layout"],
+                capture_output=True,
+                text=True,
+                env=_env_no_skip(),
+            )
+            assert forwarded.returncode == 0 and forwarded.stdout == "", forwarded
+        finally:
+            os.chdir(REPO_ROOT)
+
+    def test_layout_mode_ignores_the_skip_variable(self, tmp_path):
+        os.chdir(tmp_path)
+        try:
+            env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
+            result = subprocess.run(
+                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=env
+            )
+            assert result.returncode == 0, result.stderr
+            assert os.path.islink(os.path.join(tmp_path, "scripts"))
+            assert "skipping dependency bootstrapping" not in result.stdout
+        finally:
+            os.chdir(REPO_ROOT)
+
+    @pytest.mark.parametrize("name", ["scripts", "types"])
+    def test_a_foreign_entry_is_refused_not_replaced(self, fake_checkout, tmp_path, name):
         _add_rfe_assets(fake_checkout)
-        os.makedirs(os.path.join(tmp_path, "types"))
-        _touch(os.path.join(tmp_path, "types", "marker"))
+        os.makedirs(os.path.join(tmp_path, name))
+        _touch(os.path.join(tmp_path, name, "marker"))
+        stdout, stderr, rc = _run()
+        assert rc == 3, (stdout, stderr)
+        assert f"{tmp_path.resolve()}/{name} exists and is not the plugin's {name}/" in stderr
+        assert "without its own" in stderr
+        assert not os.path.islink(os.path.join(tmp_path, name))
+        assert os.path.isfile(os.path.join(tmp_path, name, "marker"))
+        assert "-> " not in stdout
+
+    def test_a_link_to_the_plugin_is_accepted_a_link_elsewhere_refused(self, tmp_path):
+        os.chdir(tmp_path)
+        try:
+            os.symlink(self._plugin("scripts"), os.path.join(tmp_path, "scripts"))
+            result = subprocess.run(
+                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
+            )
+            assert result.returncode == 0, result.stderr
+            assert "types/ ->" in result.stdout and "scripts/ ->" not in result.stdout
+            os.unlink(os.path.join(tmp_path, "types"))
+            os.makedirs(os.path.join(tmp_path, "elsewhere"))
+            os.symlink(os.path.join(tmp_path, "elsewhere"), os.path.join(tmp_path, "types"))
+            result = subprocess.run(
+                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
+            )
+            assert result.returncode == 3
+            assert "is a link to something else" in result.stderr
+        finally:
+            os.chdir(REPO_ROOT)
+
+    def test_git_exclude_lists_the_links_and_the_vendored_set_best_effort(
+        self, fake_checkout, tmp_path
+    ):
+        _add_rfe_assets(fake_checkout)
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
-        assert not os.path.islink(os.path.join(tmp_path, "types"))
-        assert os.path.isfile(os.path.join(tmp_path, "types", "marker"))
-        assert "types/ ->" not in stdout
+        exclude = os.path.join(tmp_path, ".git", "info", "exclude")
+        with open(exclude) as f:
+            lines = f.read().splitlines()
+        for entry in ("/scripts", "/types", "/.context/", "/.claude/skills/assess-rfe/"):
+            assert entry in lines, (entry, lines)
+        assert "git: excluded" in stdout
+        # idempotent: nothing is appended twice
+        stdout, stderr, rc = _run()
+        assert rc == 0, stderr
+        with open(exclude) as f:
+            assert f.read().splitlines() == lines
+        assert "git: excluded" not in stdout
+        # unwritable exclude file (Codex protects .git under the workspace): a note, not a failure
+        os.remove(exclude)
+        os.makedirs(exclude)  # a directory where the file should be: the append fails
+        stdout, stderr, rc = _run()
+        assert rc == 0, stderr
+        assert "NOTE: could not write" in stdout and "/scripts" in stdout
+
+    def test_checkout_cwd_is_a_no_op(self):
+        result = subprocess.run(
+            ["bash", "scripts/bootstrap.sh", "--layout"],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            env=_env_no_skip(),
+        )
+        assert result.returncode == 0 and result.stdout == "", result
+        assert not os.path.islink(os.path.join(REPO_ROOT, "scripts"))
 
     def test_skip_bootstrap_links_nothing(self, fake_checkout, tmp_path):
         _add_rfe_assets(fake_checkout)
@@ -301,6 +408,7 @@ class TestTypesLink:
         result = subprocess.run(["bash", SCRIPT], capture_output=True, text=True, env=env)
         assert result.returncode == 0, result.stderr
         assert not os.path.lexists(os.path.join(tmp_path, "types"))
+        assert not os.path.lexists(os.path.join(tmp_path, "scripts"))
 
 
 class TestPathsMatchPipelineRegistry:
@@ -351,9 +459,27 @@ class TestCallersDeclareType:
             text = text.replace("{" + key + "}", value)
         return text
 
-    @staticmethod
-    def _bootstrap_lines_in(text):
-        return [ln for ln in text.splitlines() if re.search(r"bootstrap-assess-rfe\.sh", ln)]
+    # The one literal bootstrap call a generic body carries (PR-5d): the layout guard, run
+    # through the skill's own plugin-relative path when the working directory has no
+    # scripts/ — a marketplace install. It takes no type (the layout is type-independent),
+    # so it is exempt from the --type rule below and pinned separately.
+    LAYOUT_GUARD = 'bash "${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh" --layout'
+    GENERIC_BODIES = (
+        "rfe-create",
+        "rfe-review",
+        "rfe-split",
+        "rfe-submit",
+        "rfe-auto-fix",
+        "rfe-speedrun",
+    )
+
+    @classmethod
+    def _bootstrap_lines_in(cls, text):
+        return [
+            ln
+            for ln in text.splitlines()
+            if re.search(r"bash .*bootstrap\.sh", ln) and cls.LAYOUT_GUARD not in ln
+        ]
 
     @pytest.mark.parametrize("t", sorted(PIPELINE_TYPES))
     def test_every_generic_caller_passes_the_resolved_type(self, t):
@@ -367,27 +493,57 @@ class TestCallersDeclareType:
     @pytest.mark.parametrize("t", sorted(PIPELINE_TYPES))
     def test_the_launch_block_is_the_only_bootstrap_site(self, t):
         """No generic body or typed prompt hand-writes the command: every bootstrap call is
-        the BOOTSTRAP launch var, which carries the type — a body cannot drop the flag."""
+        the BOOTSTRAP launch var, which carries the type — a body cannot drop the flag. The
+        layout guard is the one literal exception, and it is the same string everywhere."""
         block = dict(type_registry.launch_vars(self._desc(t), "review"))
-        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap-assess-rfe.sh --type {t}"
+        assert block["BOOTSTRAP"] == f"bash scripts/bootstrap.sh --type {t}"
         for rel, _ in self._surfaces(t):
             with open(os.path.join(REPO_ROOT, rel)) as f:
                 raw = f.read()
-            assert "bootstrap-assess-rfe.sh" not in raw, rel
+            literal = [ln for ln in raw.splitlines() if re.search(r"bash .*bootstrap\.sh", ln)]
+            assert all(self.LAYOUT_GUARD in ln for ln in literal), (rel, literal)
             assert "{BOOTSTRAP}" in raw, rel
+
+    def test_every_generic_body_opens_with_the_layout_guard(self):
+        """PR-5d: each of the six generic bodies carries the guard exactly once, before its
+        first relative command, so a marketplace install (no scripts/ in the cwd) links the
+        plugin's scripts/ and types/ in and then runs every command as written. The guard
+        walks up from the skill directory — no committed symlink, which a Fullsend remote
+        tree fetch would reject — and names the host-neutral rule for hosts that do not
+        substitute the variable."""
+        for name in self.GENERIC_BODIES:
+            with open(os.path.join(SKILLS_DIR, name, "SKILL.md")) as f:
+                text = f.read()
+            assert text.count(self.LAYOUT_GUARD) == 1, name
+            guard_at = text.index(self.LAYOUT_GUARD)
+            first_command = re.search(r"^(python3|bash) scripts/", text, re.M)
+            assert first_command and guard_at < first_command.start(), name
+            assert "three directories above this skill's `SKILL.md`" in text, name
+            assert "If `scripts/bootstrap.sh` is not in the working directory" in text, name
+
+    def test_no_committed_symlinks(self):
+        """No symlink is committed anywhere in the repository except the CLAUDE.md alias that
+        predates this series: a Fullsend remote tree fetch rejects symlinks, and PR-5d's layout
+        is made at runtime, in the working directory, not in the tree."""
+        out = subprocess.run(
+            ["git", "ls-files", "-s"], capture_output=True, text=True, cwd=REPO_ROOT, check=True
+        ).stdout
+        links = sorted(ln.split("\t", 1)[1] for ln in out.splitlines() if ln.startswith("120000"))
+        assert links == ["CLAUDE.md"], links
 
     def test_no_skill_outside_the_generic_callers_bootstraps(self):
         """The compat shims (rfe.*) and every other skill body hand-write no bootstrap call:
-        the launch block is the only site (PR-5c — the per-type callers are gone)."""
+        the launch block is the only site (PR-5c — the per-type callers are gone), plus the
+        layout guard in the six generic bodies (PR-5d)."""
         offenders = []
         for dirpath, _, filenames in os.walk(SKILLS_DIR):
             for name in filenames:
                 path = os.path.join(dirpath, name)
                 rel = os.path.relpath(path, REPO_ROOT)
-                if not name.endswith(".md") or rel.split("/")[2] in self.GENERIC_CALLERS:
+                if not name.endswith(".md") or rel.split("/")[2] in self.GENERIC_BODIES:
                     continue
                 with open(path) as f:
-                    if any(re.search(r"bootstrap-assess-rfe\.sh", ln) for ln in f):
+                    if any(re.search(r"bash .*bootstrap\.sh", ln) for ln in f):
                         offenders.append(rel)
         assert offenders == [".claude/skills/rfe-creator.update-deps/SKILL.md"], offenders
 
@@ -399,7 +555,7 @@ class TestCallersDeclareType:
             setup = _build_phase_config(ptype)["SETUP"]
             # SETUP runs its bootstrap steps as a concurrent "commands" list.
             commands = setup.get("commands") or [setup["command"]]
-            assert any(f"bootstrap-assess-rfe.sh --type {ptype}" in c for c in commands)
+            assert any(f"bootstrap.sh --type {ptype}" in c for c in commands)
 
 
 class TestRubricPin:
@@ -755,7 +911,7 @@ class TestRubricPin:
         stray = tmp_path / "stray"
         (stray / "scripts").mkdir(parents=True)
         (stray / "types" / "rfe").mkdir(parents=True)
-        shutil.copy(SCRIPT, stray / "scripts" / "bootstrap-assess-rfe.sh")
+        shutil.copy(SCRIPT, stray / "scripts" / "bootstrap.sh")
         with open(os.path.join(REPO_ROOT, "types", "rfe", "type.yaml")) as f:
             descriptor = f.read()
         shipped_ref = re.search(r'^    ref: "([0-9a-f]{40})"', descriptor, re.M).group(1)
@@ -771,7 +927,7 @@ class TestRubricPin:
         env["PATH"] = f"{fakebin}{os.pathsep}{env['PATH']}"
         env["ASSESS_RFE_REPO"] = url
         result = subprocess.run(
-            ["bash", str(stray / "scripts" / "bootstrap-assess-rfe.sh"), "--type", "rfe"],
+            ["bash", str(stray / "scripts" / "bootstrap.sh"), "--type", "rfe"],
             capture_output=True,
             text=True,
             env=env,

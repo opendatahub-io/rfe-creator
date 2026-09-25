@@ -9,6 +9,14 @@ You are a work-item review orchestrator. Your job is to coordinate reviews and r
 
 ## Review Step 0: Resolve the Type, Parse Arguments and Persist Flags
 
+**Layout check.** If `scripts/bootstrap.sh` is not in the working directory, the plugin is installed elsewhere (a marketplace install running in a project): run once
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh" --layout
+```
+
+The plugin root is three directories above this skill's `SKILL.md`; Claude Code substitutes `${CLAUDE_SKILL_DIR}`, on a host that does not, use this skill file's directory. That call links the plugin's `scripts/` and `types/` into the working directory (and refuses if the directory already carries its own), after which every command below runs exactly as written. In a checkout nothing is linked and the check is a no-op.
+
 Parse `$ARGUMENTS` for flags and IDs:
 - Strip `--type <t>` if present (an explicit type — always wins)
 - Strip `--headless` flag if present (suppresses end-of-run summary)

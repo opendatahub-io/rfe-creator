@@ -13,6 +13,14 @@ All submission goes through Python scripts that use the Jira REST API directly w
 
 ## Step 0: Resolve the Type and Check Credentials
 
+**Layout check.** If `scripts/bootstrap.sh` is not in the working directory, the plugin is installed elsewhere (a marketplace install running in a project): run once
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh" --layout
+```
+
+The plugin root is three directories above this skill's `SKILL.md`; Claude Code substitutes `${CLAUDE_SKILL_DIR}`, on a host that does not, use this skill file's directory. That call links the plugin's `scripts/` and `types/` into the working directory (and refuses if the directory already carries its own), after which every command below runs exactly as written. In a checkout nothing is linked and the check is a no-op.
+
 Parse `$ARGUMENTS` for `--type <t>`, `--dry-run`, `--headless` and any explicit IDs. Resolve the work-item type — forward only `--type <t>` (when given), `--headless` (when given) and the explicit IDs:
 
 ```bash

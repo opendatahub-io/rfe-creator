@@ -65,6 +65,14 @@ permission allowlist matches command text literally, so expanding
 `scripts/frontmatter.py` to `/abs/path/to/scripts/frontmatter.py` is denied and
 costs a retry.
 
+The working directory is the plugin root in a checkout, in CI and in the evals. In a
+marketplace install it is the user's project: each generic skill's Step 0 layout
+check then runs `scripts/bootstrap.sh --layout` once through the skill's own plugin
+path (`${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh`), which links the plugin's
+`scripts/` and `types/` into the working directory, and the rule above holds
+unchanged from there on. Do not write absolute plugin paths into skill bodies,
+prompts or typed files, and do not commit symlinks: the layout is made at runtime.
+
 ### State Persistence
 
 Long-running skills use `scripts/state.py` to persist state to `tmp/` files so it survives context compression. All skills must use this utility instead of inline bash commands (cat, echo, mkdir) to avoid unnecessary auth prompts.

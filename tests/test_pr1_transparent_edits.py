@@ -25,7 +25,7 @@ carries a test proving the observable output is unchanged:
      the two PR-3c stamp lines (`type:`, `tracker_ref:`), appended.
   3. .claude/settings.json drops dead allowlist entries and adds the three
      registry entries in relative form only (Q20 of the checklist).
-  4. rfe-creator.update-deps removes everything bootstrap-assess-rfe.sh can
+  4. rfe-creator.update-deps removes everything bootstrap.sh can
      install, and .gitignore hides the same set (PR1-22).
   5. make lint / lint.yml run the two descriptor lints before pytest, and the
      three agent-facing docs point at types/README.md and the scripts.
@@ -862,9 +862,9 @@ class TestSettingsAllowlist:
 
 
 def _bootstrap_installs():
-    """Everything scripts/bootstrap-assess-rfe.sh can install, derived from the
+    """Everything scripts/bootstrap.sh can install, derived from the
     script itself plus PIPELINE_TYPES (rubric skill dirs and scorer agents)."""
-    script = _read("scripts/bootstrap-assess-rfe.sh")
+    script = _read("scripts/bootstrap.sh")
     # The copy loops are what make the list "everything": every skills/*/ dir
     # in the checkout and every agents/*.md file, not a fixed subset.
     assert 'for skill_dir in "$CONTEXT_DIR"/skills/*/' in script
@@ -890,7 +890,7 @@ def _update_deps_rm_targets():
     block = re.search(r"### 1\. Update assess-rfe.*?```bash\n(.*?)```", skill, re.DOTALL).group(1)
     joined = block.replace("\\\n", " ")
     lines = [ln.strip() for ln in joined.splitlines() if ln.strip()]
-    assert lines[-1] == "bash scripts/bootstrap-assess-rfe.sh", lines
+    assert lines[-1] == "bash scripts/bootstrap.sh", lines
     assert len(lines) == 2, "step 1 is exactly: one rm, then the bootstrap"
     tokens = lines[0].split()
     assert tokens[:2] == ["rm", "-rf"]

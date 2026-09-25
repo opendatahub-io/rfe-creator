@@ -22,7 +22,7 @@ design-proposals/work-item-types-unified.md §3.3:
     * identity.local_id_pattern is an anchored, compilable regex
     * conventions.labels.alignment only when an alignment dimension is declared
     * pipeline.rubric.ref is a 7-40 char lowercase hex commit SHA — the commit
-      bootstrap-assess-rfe.sh checks out and verifies when ASSESS_RFE_REF is
+      bootstrap.sh checks out and verifies when ASSESS_RFE_REF is
       unset (Q9; the shipped descriptors pin the full 40-hex form); for the D3
       embedded rubric (pipeline.rubric.repo: self) pipeline.rubric.rubric_version
       is a 7-64 char lowercase hex content hash instead
@@ -106,7 +106,7 @@ SCHEMA_RELPATH = Path("_schema") / "type.schema.json"
 FRAGMENT_SCHEMA_RELPATH = "_schema/eval-fragment.schema.json"
 DEFAULT_ASSESS_DIR = Path(".context") / "assess-rfe"
 
-# Q9: lint that the ref is a plausible commit SHA; scripts/bootstrap-assess-rfe.sh
+# Q9: lint that the ref is a plausible commit SHA; scripts/bootstrap.sh
 # checks it out and verifies the checkout (ASSESS_RFE_REF overrides). Matched with
 # fullmatch so a trailing newline (which `$` alone tolerates) is rejected.
 RUBRIC_REF_RE = re.compile(r"^[0-9a-f]{7,40}$")
@@ -844,7 +844,7 @@ def cross_type_findings(registry, env):
                     [name_a, name_b],
                 )
 
-    # (6) ONE external rubric checkout: bootstrap-assess-rfe.sh clones the
+    # (6) ONE external rubric checkout: bootstrap.sh clones the
     #     descriptor's pipeline.rubric.repo into ONE fixed dir, .context/assess-rfe,
     #     and checks out ONE pipeline.rubric.ref. So (6a) every descriptor with an
     #     external rubric must name the same repository — a second external repo
@@ -874,7 +874,7 @@ def cross_type_findings(registry, env):
         )
         cross(
             f"external rubric repositories differ across types: {detail} — "
-            "bootstrap-assess-rfe.sh keeps one checkout (.context/assess-rfe), cloned from "
+            "bootstrap.sh keeps one checkout (.context/assess-rfe), cloned from "
             "the descriptor's pipeline.rubric.repo, so a second external rubric repository "
             "needs bootstrap support (a checkout per repository) before a descriptor may "
             "name it",
@@ -886,7 +886,7 @@ def cross_type_findings(registry, env):
         detail = "; ".join(f"{ref} ({_fmt_types(names)})" for ref, names in sorted(by_ref.items()))
         cross(
             f"pipeline.rubric.ref differs across the types sharing rubric repo {repo!r}: "
-            f"{detail} — bootstrap-assess-rfe.sh keeps one checkout per repo and can honour "
+            f"{detail} — bootstrap.sh keeps one checkout per repo and can honour "
             "one pin",
             [n for names in by_ref.values() for n in names],
         )
@@ -952,7 +952,7 @@ def with_deps_findings(registry, assess_dir, repo_root=None):
             Finding(
                 "*",
                 f"with-deps: assess checkout not found at {assess_dir} "
-                "(run scripts/bootstrap-assess-rfe.sh or pass --assess-dir)",
+                "(run scripts/bootstrap.sh or pass --assess-dir)",
                 2,
             )
         ]

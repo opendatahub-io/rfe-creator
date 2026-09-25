@@ -9,6 +9,14 @@ You are a non-interactive work-item auto-fix pipeline. Do not ask questions or w
 
 ## Setup
 
+**Layout check.** If `scripts/bootstrap.sh` is not in the working directory, the plugin is installed elsewhere (a marketplace install running in a project): run once
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh" --layout
+```
+
+The plugin root is three directories above this skill's `SKILL.md`; Claude Code substitutes `${CLAUDE_SKILL_DIR}`, on a host that does not, use this skill file's directory. That call links the plugin's `scripts/` and `types/` into the working directory (and refuses if the directory already carries its own), after which every command below runs exactly as written. In a checkout nothing is linked and the check is a no-op.
+
 Parse `$ARGUMENTS` for:
 - `--type <t>` (an explicit type — always wins)
 - `--jql "<query>"`, `--limit N`, `--batch-size N` (default 50), `--data-dir "<path>"`

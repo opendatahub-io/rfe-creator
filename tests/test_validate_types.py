@@ -585,7 +585,7 @@ class TestPerTypeGate:
         assert _validate(types_copy).ok
 
     def test_shipped_pins_are_one_full_sha(self):
-        """bootstrap-assess-rfe.sh checks out pipeline.rubric.ref and verifies the checkout,
+        """bootstrap.sh checks out pipeline.rubric.ref and verifies the checkout,
         so the shipped pins are the immutable full form (design §7.3) and, sharing one
         repo, identical."""
         refs = {
@@ -604,7 +604,7 @@ class TestPerTypeGate:
         )
         assert len(hits) == 1 and len(report.findings) == 1, report.lines()
         assert hits[0].types == frozenset({"rfe", "initiative"})
-        assert "bootstrap-assess-rfe.sh keeps one checkout per repo" in hits[0].message
+        assert "bootstrap.sh keeps one checkout per repo" in hits[0].message
 
     @pytest.mark.parametrize(
         "spelling",
