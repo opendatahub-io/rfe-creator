@@ -1,6 +1,6 @@
 # PR-5d — marketplace-compatible layout: plan and decisions
 
-Companion to `work-item-types-pr5-plan.md` ("Known gap outside the series: marketplace installs") and `work-item-types-unified.md` §3.5.1 (packaging stance, settles PR #115). Status: **plan; decisions D1–D8 open**. Facts measured 2026-09-25 on rfe-creator main 281c837.
+Companion to `work-item-types-pr5-plan.md` ("Known gap outside the series: marketplace installs") and `work-item-types-unified.md` §3.5.1 (packaging stance, settles PR #115). Status: **plan; decisions D1–D9 open**. Facts measured 2026-09-25 on rfe-creator main 281c837.
 
 ## 1. The problem, measured
 
@@ -60,6 +60,7 @@ Keep the status quo (launch_path's absolute fallback is already the only in-code
 | D5 | Permission rules in a marketplace project (a plugin cannot ship them — confirmed, §7) | ship a documented settings snippet in README and the registry page; pre-approve the single guard command through each skill's `allowed-tools` frontmatter (substitution applies there); **no** silent writes of permission rules into the user's settings; an opt-in `--write-permissions` flag on the bootstrap is a possible follow-up |
 | D6 | Where the assess context is vendored | keep `.context/assess-rfe`, `.claude/agents`, the vendored assess skills in the project cwd: it is the workspace and `additionalDirectories` already names `.context/assess-rfe`. Plugin `agents/` do load automatically (§7), but under the scoped name `rfe-creator:<agent>`, so moving the scorer agents into the plugin means renaming `subagent_type` in the launch vars — a separate follow-up, not this PR |
 | D7 | Windows and Codex | best effort, documented: symlinks unsupported on Windows checkouts (same as strat); Codex gets one recovery hop if it substitutes no variable |
+| D9 | Rename `scripts/bootstrap-assess-rfe.sh` | **yes, in this PR, with a compat shim.** The name describes its original job; it now validates the type, materialises the layout (`types`, and with B `scripts`), vendors the rubric plugin, agents and skills, fetches the architecture context and exports the rubric — it is the workspace bootstrap. Rename to `scripts/bootstrap.sh`; keep `scripts/bootstrap-assess-rfe.sh` as a two-line `exec` shim for one cycle because the name is also referenced from outside the repo: the autofixer's `.gitlab-ci.yml` job setup (2 sites, its own MR in the PR-10 bucket) and the skills-registry entry and site (15 sites, regenerated when the entry is next touched). In-repo it is ~80 sites (tests 32, types 15, docs 13, scripts 11, `.claude` 4, design 4, `.gitignore` 1), the `{BOOTSTRAP}` launch var, and the two literal allow rules, all updated in the PR; production stays on the old name through the shim until the autofixer MR lands, then the shim goes |
 | D8 | Proof | unit tests for the bootstrap link and refusal paths; a real marketplace install from an empty project with the transcript attached to the PR (A1); the production/eval byte-stability by the usual stage dry run and one eval pair (A2) |
 
 ## 6. Out of scope
@@ -80,4 +81,4 @@ Keep the status quo (launch_path's absolute fallback is already the only in-code
 
 ## 8. Progress
 
-2026-09-25 — plan written; probe 1 and the docs verification done (above); D2 and D5 recommendations settled on them. Awaiting rulings on D1–D8; probe 2 (plugin-installed skill) optional, script at `/tmp/pr4/plugin-var-probe.sh`.
+2026-09-25 — plan written; probe 1 and the docs verification done (above); D2 and D5 recommendations settled on them. Awaiting rulings on D1–D9 (D9 added 2026-09-25: rename the bootstrap script); probe 2 (plugin-installed skill) optional, script at `/tmp/pr4/plugin-var-probe.sh`.
