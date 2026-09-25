@@ -50,6 +50,15 @@ def fake_checkout(tmp_path):
     os.chdir(orig)
 
 
+@pytest.fixture
+def in_tmp(tmp_path):
+    """Run from an empty temp directory and restore the caller's cwd afterwards."""
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+    yield tmp_path
+    os.chdir(orig)
+
+
 def _env_no_skip():
     return {
         k: v for k, v in os.environ.items() if k not in ("ASSESS_RFE_REF", "RFE_SKIP_BOOTSTRAP")
@@ -253,23 +262,37 @@ class TestLayout:
     bootstrap links the plugin's scripts/ and types/ into it. `--layout` does only that and
     exits, so a skill can call it through its own plugin-relative path before anything
     relative. A different entry of the same name is a refusal (exit 3), never a fallback;
-    the skip mode links nothing; the compatibility name forwards."""
+    the skip mode links nothing; the compatibility name forwards; inside a git repository the
+    links, tmp/ and the vendored set go to the repository's info/exclude (best effort)."""
 
     @staticmethod
     def _plugin(name):
         return os.path.realpath(os.path.join(REPO_ROOT, name))
 
-    def _assert_linked(self, tmp_path, stdout):
+    @staticmethod
+    def _layout(*args, env=None):
+        return subprocess.run(
+            ["bash", SCRIPT, "--layout", *args],
+            capture_output=True,
+            text=True,
+            env=env or _env_no_skip(),
+        )
+
+    def _assert_linked(self, where, stdout):
         for name in ("scripts", "types"):
-            link = os.path.join(tmp_path, name)
+            link = os.path.join(where, name)
             assert os.path.islink(link), name
             assert os.path.realpath(link) == self._plugin(name), name
             line = f"{name}/ -> {self._plugin(name)} (linked into the working directory)"
             assert line in stdout.splitlines(), (name, stdout)
-        assert os.path.isfile(
-            os.path.join(tmp_path, "types", "rfe", "dimensions", "feasibility.md")
-        )
-        assert os.path.isfile(os.path.join(tmp_path, "scripts", "type_registry.py"))
+        assert os.path.isfile(os.path.join(where, "types", "rfe", "dimensions", "feasibility.md"))
+        assert os.path.isfile(os.path.join(where, "scripts", "type_registry.py"))
+
+    @staticmethod
+    def _exclude_lines(repo):
+        path = os.path.join(repo, ".git", "info", "exclude")
+        with open(path) as f:
+            return f.read().splitlines()
 
     def test_full_run_links_scripts_and_types_into_a_working_directory_without_them(
         self, fake_checkout, tmp_path
@@ -294,43 +317,50 @@ class TestLayout:
         assert rc == 0, stderr
         assert "-> " not in stdout
 
-    def test_layout_mode_links_and_exits_without_vendoring(self, tmp_path):
-        os.chdir(tmp_path)
-        try:
-            result = subprocess.run(
-                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
-            )
-            assert result.returncode == 0, result.stderr
-            self._assert_linked(tmp_path, result.stdout)
-            assert not os.path.exists(os.path.join(tmp_path, ".context"))
-            # idempotent and silent the second time
-            again = subprocess.run(
-                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
-            )
-            assert again.returncode == 0 and again.stdout == "", again
-            # the compatibility name forwards, arguments included
-            forwarded = subprocess.run(
-                ["bash", os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"), "--layout"],
-                capture_output=True,
-                text=True,
-                env=_env_no_skip(),
-            )
-            assert forwarded.returncode == 0 and forwarded.stdout == "", forwarded
-        finally:
-            os.chdir(REPO_ROOT)
+    def test_layout_mode_links_excludes_and_exits_without_vendoring(self, in_tmp):
+        subprocess.run(["git", "init", "-q", str(in_tmp)], check=True)
+        result = self._layout()
+        assert result.returncode == 0, result.stderr
+        self._assert_linked(in_tmp, result.stdout)
+        assert not os.path.exists(os.path.join(in_tmp, ".context"))
+        lines = self._exclude_lines(in_tmp)
+        for entry in ("/scripts", "/types", "/tmp/"):
+            assert entry in lines, (entry, lines)
+        assert "git: excluded /scripts /types /tmp/ in" in result.stdout
+        # idempotent and silent the second time: no link line, no exclude line, no duplicate entry
+        again = self._layout()
+        assert again.returncode == 0 and again.stdout == "", again
+        assert self._exclude_lines(in_tmp) == lines
+        # the compatibility name forwards, arguments included
+        forwarded = subprocess.run(
+            ["bash", os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"), "--layout"],
+            capture_output=True,
+            text=True,
+            env=_env_no_skip(),
+        )
+        assert forwarded.returncode == 0 and forwarded.stdout == "", forwarded
 
-    def test_layout_mode_ignores_the_skip_variable(self, tmp_path):
-        os.chdir(tmp_path)
-        try:
-            env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
-            result = subprocess.run(
-                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=env
-            )
-            assert result.returncode == 0, result.stderr
-            assert os.path.islink(os.path.join(tmp_path, "scripts"))
-            assert "skipping dependency bootstrapping" not in result.stdout
-        finally:
-            os.chdir(REPO_ROOT)
+    def test_layout_mode_ignores_the_skip_variable(self, in_tmp):
+        env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
+        result = self._layout(env=env)
+        assert result.returncode == 0, result.stderr
+        assert os.path.islink(os.path.join(in_tmp, "scripts"))
+        assert "skipping dependency bootstrapping" not in result.stdout
+
+    def test_layout_runs_after_type_validation(self, in_tmp):
+        result = self._layout("--type", "epic")
+        assert result.returncode == 2, result
+        assert "unknown --type 'epic'" in result.stderr
+        assert not os.path.lexists(os.path.join(in_tmp, "scripts"))
+        assert not os.path.lexists(os.path.join(in_tmp, "types"))
+        result = subprocess.run(
+            ["bash", SCRIPT, "--type"],
+            capture_output=True,
+            text=True,
+            env=_env_no_skip(),
+            timeout=10,
+        )
+        assert result.returncode == 2 and "--type needs a value" in result.stderr
 
     @pytest.mark.parametrize("name", ["scripts", "types"])
     def test_a_foreign_entry_is_refused_not_replaced(self, fake_checkout, tmp_path, name):
@@ -343,53 +373,118 @@ class TestLayout:
         assert "without its own" in stderr
         assert not os.path.islink(os.path.join(tmp_path, name))
         assert os.path.isfile(os.path.join(tmp_path, name, "marker"))
+        other = "types" if name == "scripts" else "scripts"
+        assert not os.path.lexists(os.path.join(tmp_path, other)), "linked before the refusal"
         assert "-> " not in stdout
 
-    def test_a_link_to_the_plugin_is_accepted_a_link_elsewhere_refused(self, tmp_path):
-        os.chdir(tmp_path)
-        try:
-            os.symlink(self._plugin("scripts"), os.path.join(tmp_path, "scripts"))
-            result = subprocess.run(
-                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
-            )
-            assert result.returncode == 0, result.stderr
-            assert "types/ ->" in result.stdout and "scripts/ ->" not in result.stdout
-            os.unlink(os.path.join(tmp_path, "types"))
-            os.makedirs(os.path.join(tmp_path, "elsewhere"))
-            os.symlink(os.path.join(tmp_path, "elsewhere"), os.path.join(tmp_path, "types"))
-            result = subprocess.run(
-                ["bash", SCRIPT, "--layout"], capture_output=True, text=True, env=_env_no_skip()
-            )
-            assert result.returncode == 3
-            assert "is a link to something else" in result.stderr
-        finally:
-            os.chdir(REPO_ROOT)
+    def test_a_link_to_the_plugin_is_accepted_a_link_elsewhere_refused(self, in_tmp):
+        os.symlink(self._plugin("scripts"), os.path.join(in_tmp, "scripts"))
+        result = self._layout()
+        assert result.returncode == 0, result.stderr
+        assert "types/ ->" in result.stdout and "scripts/ ->" not in result.stdout
+        os.unlink(os.path.join(in_tmp, "types"))
+        os.makedirs(os.path.join(in_tmp, "elsewhere"))
+        os.symlink(os.path.join(in_tmp, "elsewhere"), os.path.join(in_tmp, "types"))
+        result = self._layout()
+        assert result.returncode == 3
+        assert "is a link to something else" in result.stderr
 
-    def test_git_exclude_lists_the_links_and_the_vendored_set_best_effort(
+    def test_git_exclude_lists_the_links_tmp_and_the_vendored_set_best_effort(
         self, fake_checkout, tmp_path
     ):
         _add_rfe_assets(fake_checkout)
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        # a user pattern without a trailing newline must survive intact
+        with open(os.path.join(tmp_path, ".git", "info", "exclude"), "w") as f:
+            f.write("/foo")
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
-        exclude = os.path.join(tmp_path, ".git", "info", "exclude")
-        with open(exclude) as f:
-            lines = f.read().splitlines()
-        for entry in ("/scripts", "/types", "/.context/", "/.claude/skills/assess-rfe/"):
+        lines = self._exclude_lines(tmp_path)
+        assert lines[0] == "/foo", lines
+        for entry in ("/scripts", "/types", "/tmp/", "/.context/", "/.claude/skills/assess-rfe/"):
             assert entry in lines, (entry, lines)
         assert "git: excluded" in stdout
         # idempotent: nothing is appended twice
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
-        with open(exclude) as f:
-            assert f.read().splitlines() == lines
+        assert self._exclude_lines(tmp_path) == lines
         assert "git: excluded" not in stdout
         # unwritable exclude file (Codex protects .git under the workspace): a note, not a failure
+        exclude = os.path.join(tmp_path, ".git", "info", "exclude")
         os.remove(exclude)
         os.makedirs(exclude)  # a directory where the file should be: the append fails
         stdout, stderr, rc = _run()
         assert rc == 0, stderr
         assert "NOTE: could not write" in stdout and "/scripts" in stdout
+
+    def test_exclude_entries_are_anchored_from_a_subdirectory(self, tmp_path):
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        orig = os.getcwd()
+        os.chdir(sub)
+        try:
+            result = self._layout()
+        finally:
+            os.chdir(orig)
+        assert result.returncode == 0, result.stderr
+        self._assert_linked(sub, result.stdout)
+        lines = self._exclude_lines(tmp_path)
+        for entry in ("/sub/scripts", "/sub/types", "/sub/tmp/"):
+            assert entry in lines, (entry, lines)
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+            check=True,
+        ).stdout
+        assert status == "", status
+
+    def test_exclude_goes_to_the_common_dir_in_a_linked_worktree(self, tmp_path):
+        main = tmp_path / "main"
+        subprocess.run(["git", "init", "-q", str(main)], check=True)
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@x",
+        }
+        subprocess.run(
+            ["git", "-C", str(main), "commit", "-q", "--allow-empty", "-m", "i"],
+            check=True,
+            env=env,
+        )
+        wt = tmp_path / "wt"
+        subprocess.run(
+            ["git", "-C", str(main), "worktree", "add", "-q", str(wt), "-b", "wt"], check=True
+        )
+        orig = os.getcwd()
+        os.chdir(wt)
+        try:
+            result = self._layout()
+        finally:
+            os.chdir(orig)
+        assert result.returncode == 0, result.stderr
+        self._assert_linked(wt, result.stdout)
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=wt, check=True
+        ).stdout
+        assert status == "", status
+        assert os.path.isfile(os.path.join(main, ".git", "info", "exclude"))
+
+    def test_a_link_that_cannot_be_made_is_an_error(self, in_tmp):
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory modes")
+        os.chmod(in_tmp, 0o555)
+        try:
+            result = self._layout()
+        finally:
+            os.chmod(in_tmp, 0o755)
+        assert result.returncode == 3, result
+        assert "could not link" in result.stderr
+        assert not os.path.lexists(os.path.join(in_tmp, "scripts"))
 
     def test_checkout_cwd_is_a_no_op(self):
         result = subprocess.run(
@@ -472,6 +567,8 @@ class TestCallersDeclareType:
         "rfe-auto-fix",
         "rfe-speedrun",
     )
+    # update-deps runs the bootstrap directly, so it opens with the same guard
+    GUARDED_BODIES = GENERIC_BODIES + ("rfe-creator.update-deps",)
 
     @classmethod
     def _bootstrap_lines_in(cls, text):
@@ -511,20 +608,30 @@ class TestCallersDeclareType:
         walks up from the skill directory — no committed symlink, which a Fullsend remote
         tree fetch would reject — and names the host-neutral rule for hosts that do not
         substitute the variable."""
-        for name in self.GENERIC_BODIES:
+        for name in self.GUARDED_BODIES:
             with open(os.path.join(SKILLS_DIR, name, "SKILL.md")) as f:
                 text = f.read()
             assert text.count(self.LAYOUT_GUARD) == 1, name
             guard_at = text.index(self.LAYOUT_GUARD)
-            first_command = re.search(r"^(python3|bash) scripts/", text, re.M)
+            first_command = re.search(r"^(python3|bash) scripts/|^rm -rf", text, re.M)
             assert first_command and guard_at < first_command.start(), name
-            assert "three directories above this skill's `SKILL.md`" in text, name
+            assert "The plugin root is the skill directory's third parent." in text, name
+            assert "reaches you unsubstituted" in text, name
+            assert "exit 3 means the directory already carries its own: stop" in text, name
             assert "If `scripts/bootstrap.sh` is not in the working directory" in text, name
 
     def test_no_committed_symlinks(self):
         """No symlink is committed anywhere in the repository except the CLAUDE.md alias that
         predates this series: a Fullsend remote tree fetch rejects symlinks, and PR-5d's layout
         is made at runtime, in the working directory, not in the tree."""
+        probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        if probe.returncode != 0:
+            pytest.skip("not a git checkout")
         out = subprocess.run(
             ["git", "ls-files", "-s"], capture_output=True, text=True, cwd=REPO_ROOT, check=True
         ).stdout

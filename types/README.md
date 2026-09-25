@@ -123,8 +123,10 @@ itself is fine — `resolve()` follows the link).
    the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
    dispatcher read every typed literal from it. Typed-file paths render as the descriptor's own
    relative values while the working directory carries those files — the checkout is the cwd,
-   or `scripts/bootstrap.sh` linked the plugin's `scripts/` and `types/` into it (its
-   `--layout` step does so for any working directory that is not the checkout: a marketplace project)
+   or `scripts/bootstrap.sh` linked the plugin's `scripts/` and `types/` into it (its layout
+   step — run alone by `--layout`, and at the start of every normal run — does so for any working
+   directory that is not the checkout: the eval harness's run directory, which already links
+   `scripts/`, gets `types/`; a marketplace project gets both)
    — and absolute only when it does not: a drop-in root outside the checkout (a
    `types/<name>/...` path then resolves from the descriptor's own directory, else the plugin
    root). One frame on purpose: a subagent whose first instruction names a file under an

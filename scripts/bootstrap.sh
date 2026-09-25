@@ -9,8 +9,9 @@
 #   3. vendors the assess-rfe plugin into .context/assess-rfe/ at the commit the type
 #      descriptor pins (pipeline.rubric.ref, design §7.3 / Q9) — or at ASSESS_RFE_REF
 #      when that is set (a branch, tag or commit for an ad-hoc run) — and its scorer
-#      agents and skills into .claude/; fetches the architecture context; exports the
-#      rubric. Safe to run repeatedly: clones on first run, fetches and re-pins after.
+#      agents and skills into .claude/; exports the rubric. (The architecture context
+#      is fetched by scripts/fetch-architecture-context.sh, SETUP's second command.)
+#      Safe to run repeatedly: clones on first run, fetches and re-pins after.
 #
 # Usage: bootstrap.sh [--type <name>] [--layout]
 #
@@ -29,6 +30,11 @@ LAYOUT_ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --type)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --type needs a value" >&2
+        echo "Usage: bootstrap.sh [--type <name>] [--layout]" >&2
+        exit 2
+      fi
       PIPELINE_TYPE="$2"
       shift 2
       ;;
@@ -163,23 +169,27 @@ lay_out_working_directory() {
   done
 }
 
-# Hygiene: what the bootstrap writes into a project is not the project's. When the
-# working directory is the top of a git repository, list those paths in
-# .git/info/exclude (local, uncommitted, idempotent). Best effort: Codex's sandbox
-# protects .git under the workspace, so an unwritable exclude file prints the list
-# once instead of failing. A checkout cwd is skipped (its .gitignore covers them).
+# Hygiene: what the bootstrap writes into a project is not the project's. Inside a
+# git repository, list those paths in the repository's info/exclude (local,
+# uncommitted, idempotent): `git rev-parse --git-path` names the file git reads — the
+# common dir's in a linked worktree — and `--show-prefix` anchors the entries when
+# the working directory is a subdirectory. Best effort: Codex's sandbox protects
+# .git under the workspace, so an unwritable exclude file prints the list once
+# instead of failing. A checkout cwd is skipped (its .gitignore covers them).
 note_excludes() {
   [ -n "$PLUGIN_ROOT" ] && [ "$PLUGIN_ROOT" != "$CWD_P" ] || return 0
-  local top gitdir exclude e missing=()
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
-  [ "$(cd -P "$top" 2>/dev/null && pwd -P)" = "$CWD_P" ] || return 0
-  gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
-  exclude="$gitdir/info/exclude"
+  local exclude prefix e entry missing=()
+  exclude="$(git rev-parse --git-path info/exclude 2>/dev/null)" || return 0
+  [ -n "$exclude" ] || return 0
+  prefix="$(git rev-parse --show-prefix 2>/dev/null)"
   for e in "$@"; do
-    grep -qxF -- "$e" "$exclude" 2>/dev/null || missing+=("$e")
+    entry="/${prefix}${e#/}"
+    grep -qxF -- "$entry" "$exclude" 2>/dev/null || missing+=("$entry")
   done
   [ ${#missing[@]} -eq 0 ] && return 0
-  if { mkdir -p "$gitdir/info" && printf '%s\n' "${missing[@]}" >> "$exclude"; } 2>/dev/null; then
+  if { mkdir -p "$(dirname "$exclude")" \
+       && { [ ! -s "$exclude" ] || [ -z "$(tail -c 1 "$exclude")" ] || printf '\n' >> "$exclude"; } \
+       && printf '%s\n' "${missing[@]}" >> "$exclude"; } 2>/dev/null; then
     echo "git: excluded ${missing[*]} in $exclude"
   else
     echo "NOTE: could not write $exclude - add to your ignore file: ${missing[*]}"
@@ -188,7 +198,7 @@ note_excludes() {
 
 if [ -n "$LAYOUT_ONLY" ]; then
   lay_out_working_directory
-  note_excludes /scripts /types
+  note_excludes /scripts /types /tmp/
   exit 0
 fi
 
@@ -384,4 +394,4 @@ fi
 # Export rubric to artifacts
 python3 "$CONTEXT_DIR/skills/export-rubric/scripts/export_rubric.py" 2>/dev/null || true
 
-note_excludes /scripts /types "${VENDORED[@]}"
+note_excludes /scripts /types /tmp/ "${VENDORED[@]}"

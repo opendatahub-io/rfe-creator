@@ -65,10 +65,12 @@ permission allowlist matches command text literally, so expanding
 `scripts/frontmatter.py` to `/abs/path/to/scripts/frontmatter.py` is denied and
 costs a retry.
 
-The working directory is the plugin root in a checkout, in CI and in the evals. In a
-marketplace install it is the user's project: each generic skill's Step 0 layout
-check then runs `scripts/bootstrap.sh --layout` once through the skill's own plugin
-path (`${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh`), which links the plugin's
+The working directory carries the plugin's `scripts/` and `types/` at those names: it
+is the checkout in development, CI and production, and the eval harness's run
+directory (which links `scripts/` in; the bootstrap links `types/`). In a marketplace
+install it is the user's project: each generic skill's Step 0 layout check then runs
+`scripts/bootstrap.sh --layout` once through the skill's own plugin path
+(`${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh`), which links the plugin's
 `scripts/` and `types/` into the working directory, and the rule above holds
 unchanged from there on. Do not write absolute plugin paths into skill bodies,
 prompts or typed files, and do not commit symlinks: the layout is made at runtime.

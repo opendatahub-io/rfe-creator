@@ -789,6 +789,13 @@ NEW_ALLOW = [
     "Bash(python3 scripts/type_registry.py *)",
     "Bash(python3 scripts/validate_types.py *)",
     "Bash(python3 scripts/generate_eval_config.py *)",
+    # PR-5d: the workspace bootstrap's own name (the old pair stays while the forwarder does)
+    "Bash(bash scripts/bootstrap.sh)",
+    "Bash(bash scripts/bootstrap.sh *)",
+]
+COMPAT_BOOTSTRAP_ALLOW = [
+    "Bash(bash scripts/bootstrap-assess-rfe.sh)",
+    "Bash(bash scripts/bootstrap-assess-rfe.sh *)",
 ]
 STALE_ALLOW = [
     # assess-rfe moved its scripts under skills/<skill>/scripts (assess-rfe#5);
@@ -837,6 +844,29 @@ class TestSettingsAllowlist:
 
     def test_no_duplicates(self):
         assert len(self.allow) == len(set(self.allow))
+
+    def test_compat_bootstrap_rules_live_and_die_with_the_forwarder(self):
+        """PR-5d: scripts/bootstrap-assess-rfe.sh forwards to bootstrap.sh for callers outside
+        the repo; its two allow rules are present exactly while that forwarder exists, so the
+        pair and the file are removed together."""
+        forwarder = os.path.exists(os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"))
+        for entry in COMPAT_BOOTSTRAP_ALLOW:
+            assert (entry in self.allow) == forwarder, entry
+
+    def test_every_launch_bootstrap_matches_an_allow_rule(self):
+        """The BOOTSTRAP launch var is what the orchestrator runs: its text must match a rule
+        (a Bash rule matches the text before its first `*` as written)."""
+        import type_registry
+
+        reg = type_registry.load(extra_roots=[], env={})
+        prefixes = [
+            r[len("Bash(") : -1].split("*", 1)[0]
+            for r in self.allow
+            if r.startswith("Bash(bash scripts/bootstrap")
+        ]
+        for name in reg.names():
+            cmd = dict(type_registry.launch_vars(reg.get(name), "review"))["BOOTSTRAP"]
+            assert any(cmd.startswith(p) for p in prefixes), (cmd, prefixes)
 
     def test_hooks_and_directories_untouched(self):
         assert self.settings["hooks"] == {
