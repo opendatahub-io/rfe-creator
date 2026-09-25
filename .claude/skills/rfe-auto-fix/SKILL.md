@@ -23,7 +23,7 @@ Forward to `resolve` only `--type <t>` (when given), `--headless` (when given) a
 python3 scripts/type_registry.py resolve [--type <t>] [--headless] <IDs>
 ```
 
-It prints one line, `TYPE RESOLVED: <type> (<how>)` — with no `--type` and no ids (JQL mode) a headless run resolves to the legacy default (`rfe`); the JQL's project is cross-checked against that type's binding by `snapshot_fetch.py` below. A non-zero exit is an error: stop. Then print the stage's launch block; every `{VAR}` in this skill is the value of that `VAR=` line:
+In JQL mode there are no ids to forward: run `python3 scripts/type_registry.py resolve [--type <t>] [--headless]`, passing each of those two flags only when the invocation supplied it and nothing else (a bare `resolve` when it supplied neither). It prints one line, `TYPE RESOLVED: <type> (<how>)` — with no `--type` and no ids a headless run resolves to the legacy default (`rfe`); the JQL's project is cross-checked against that type's binding by `snapshot_fetch.py` below. A non-zero exit is an error: stop. Then print the stage's launch block; every `{VAR}` in this skill is the value of that `VAR=` line:
 
 ```bash
 python3 scripts/type_registry.py launch-vars <type> auto-fix
