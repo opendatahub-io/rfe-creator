@@ -123,8 +123,10 @@ itself is fine — `resolve()` follows the link).
    the block every launch renders — the generic bodies (`/rfe-review --type <name>` ...) and the
    dispatcher read every typed literal from it. Typed-file paths render as the descriptor's own
    relative values while the working directory carries those files — the checkout is the cwd,
-   or `scripts/bootstrap-assess-rfe.sh` linked the checkout's `types/` into it (it does so for
-   any working directory without one: the eval harness's run directory, a marketplace project)
+   or `scripts/bootstrap.sh` linked the plugin's `scripts/` and `types/` into it (its layout
+   step — run alone by `--layout`, and at the start of every normal run — does so for any working
+   directory that is not the checkout: the eval harness's run directory, which already links
+   `scripts/`, gets `types/`; a marketplace project gets both)
    — and absolute only when it does not: a drop-in root outside the checkout (a
    `types/<name>/...` path then resolves from the descriptor's own directory, else the plugin
    root). One frame on purpose: a subagent whose first instruction names a file under an
@@ -136,7 +138,7 @@ itself is fine — `resolve()` follows the link).
    `split` and `auto-fix` — the stages the dispatcher's phase table launches through the registry;
    `python3 scripts/pipeline_state.py init` refuses a type that omits one before any state is
    written, and gate 1 requires `pipeline.prompts.template` for a type that creates or splits.
-3. `python3 scripts/validate_types.py` (gate 1); after `bash scripts/bootstrap-assess-rfe.sh`,
+3. `python3 scripts/validate_types.py` (gate 1); after `bash scripts/bootstrap.sh`,
    `python3 scripts/validate_types.py --with-deps` (gate 2). Inspect with
    `python3 scripts/type_registry.py show <name>` / `binding <name>`.
 4. Author the eval prose: `types/<name>/eval/fragment.yaml` (schema
@@ -620,7 +622,7 @@ Alongside: `python3 scripts/lint_prefix_predicates.py` rejects new literal key/s
 
 `main` wins over the prose; each is commented inline: `resplit.below: 2` for both
 (`check_right_sized.py` reads it since PR-2a, so the initiative `1` of §8.2 is a deliberate later
-behaviour change, Q3), `rubric.ref` is the full SHA `bootstrap-assess-rfe.sh` checks out and verifies
+behaviour change, Q3), `rubric.ref` is the full SHA `bootstrap.sh` checks out and verifies
 (one shared assess-rfe checkout, so both descriptors pin the same commit — validate_types cross rule 6;
 `ASSESS_RFE_REF` overrides for an ad-hoc run), `rubric.repo` carries the full URL the bootstrap holds, rfe
 `snapshot.prefix` is `issue-snapshot-` (submit's `''` is a grandfathered sentinel projection),

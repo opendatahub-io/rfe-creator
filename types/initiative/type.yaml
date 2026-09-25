@@ -77,7 +77,7 @@ schema:
 pipeline:
   stages: [create, review, submit, split, auto-fix, speedrun]   # the generic .claude/skills/rfe-{create,review,submit,split,auto-fix,speedrun}/SKILL.md (PR-5b); gate 1 requires one per entry (validate_types.stage_skill_messages, PR-5c); the initiative-* tree was deleted in PR-5c
   context_sources:                                      # DESCRIPTIVE at PR-1: SETUP is the hardcoded concurrent commands list pipeline_state.py:231-234 (exit codes logged, not fatal :227-230), so `required` has no consumer. Projection: SETUP.commands[i] == "bash <bootstrap> <args...>"
-    - { name: assess-rubric, bootstrap: scripts/bootstrap-assess-rfe.sh, args: ["--type", "initiative"], required: true }
+    - { name: assess-rubric, bootstrap: scripts/bootstrap.sh, args: ["--type", "initiative"], required: true }
     - { name: architecture-context, bootstrap: scripts/fetch-architecture-context.sh, required: false }
   poll_prefix: "initiative-"                            # pipeline_state.py:119; check_review_progress.py:28-34 keys initiative-{split,fetch,assess,feasibility,review,revise,alignment}; REPORT_CONFIG.default_output "initiative-review-report.html" (generate_review_pdf.py:69, Q15)
   state_prefix: "initiative-"                           # check_autofix_complete.py ids_file; check_review_progress.py _detect_fast tmp/<state_prefix>{review,split,speedrun}-config.yaml; the STATE_PREFIX launch var of the generic bodies
@@ -99,10 +99,10 @@ pipeline:
       condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208)
       skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
   rubric:
-    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap-assess-rfe.sh:45 (verbatim URL; shared)
-    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # same commit as rfe (one shared checkout; validate_types cross rule 6): the assess-rfe PR #10 merge that brought skills/assess-initiative onto main. bootstrap-assess-rfe.sh checks it out and verifies it unless ASSESS_RFE_REF overrides. Quoted: a digits-only ref would parse as a number
-    path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap-assess-rfe.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
-    export: null                                        # nothing exports an initiative rubric: bootstrap-assess-rfe.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
+    repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap.sh:45 (verbatim URL; shared)
+    ref: "d8391ae379fba0497164550e3a33495bc2007aa2"            # same commit as rfe (one shared checkout; validate_types cross rule 6): the assess-rfe PR #10 merge that brought skills/assess-initiative onto main. bootstrap.sh checks it out and verifies it unless ASSESS_RFE_REF overrides. Quoted: a digits-only ref would parse as a number
+    path: skills/assess-initiative/scripts/agent_prompt.md   # bootstrap.sh:51 INITIATIVE_RUBRIC; pipeline_state.py:113 == ".context/assess-rfe/" + path (gate 2, Q24)
+    export: null                                        # nothing exports an initiative rubric: bootstrap.sh:103 runs export-rubric (rfe only); "initiative-rubric.md" occurs nowhere in the repo
   resplit: { score_field: right_sized, below: 2 }       # Q3: check_right_sized.py reads score_field/below since PR-2a (kept at 2 — behaviour-neutral; was the type-blind `right_sized < 2`); §8.2's `below: 1` is a deliberate later behaviour change (also settles the §8.1 intra-type contradiction). the RESPLIT_FIELD/RESPLIT_BELOW launch vars of rfe-split/SKILL.md Step 3 (D6: the one re-split trigger is this threshold; the legacy initiative body re-split on recommendation=split)
 
 batch: { extra_fields: [parent_key] }                   # validate_batch_input.py:43 INITIATIVE_KNOWN_FIELDS - RFE_KNOWN_FIELDS

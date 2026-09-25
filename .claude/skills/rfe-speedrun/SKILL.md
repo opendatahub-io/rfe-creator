@@ -9,6 +9,14 @@ You are running the full work-item pipeline in speedrun mode. Your goal is to go
 
 ## Step 0: Resolve the Type, Parse Arguments and Persist Flags
 
+**Layout check.** If `scripts/bootstrap.sh` is not in the working directory, run once
+
+```bash
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/bootstrap.sh" --layout
+```
+
+The plugin root is the skill directory's third parent. If `${CLAUDE_SKILL_DIR}` reaches you unsubstituted (a host that does not substitute it, or this file reached through a Read), use this skill file's directory instead. The call links the plugin's `scripts/` and `types/` into the working directory; exit 3 means the directory already carries its own: stop and show its message. Every command below then runs exactly as written.
+
 Parse `$ARGUMENTS` for:
 - `--type <t>`: an explicit type — always wins
 - `--input <path>`: Path to a YAML file with batch entries

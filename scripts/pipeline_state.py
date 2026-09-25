@@ -435,7 +435,7 @@ def _build_phase_config(pipeline_type):
             # always 0, so this preserves behaviour. Fail-fast SETUP belongs to
             # the registry's validate_types.py --verify gate.
             "commands": [
-                f"bash scripts/bootstrap-assess-rfe.sh --type {pipeline_type}",
+                f"bash scripts/bootstrap.sh --type {pipeline_type}",
                 "bash scripts/fetch-architecture-context.sh",
             ],
         },

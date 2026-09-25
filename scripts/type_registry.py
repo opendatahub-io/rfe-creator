@@ -1531,7 +1531,7 @@ def _artifact_dirs(desc):
 
 # -- launch vars (design §4.1, §8.3; PR-5b) -------------------------------------------------
 
-# The vendored assess-rfe checkout (bootstrap-assess-rfe.sh CONTEXT_DIR); pipeline.rubric.path is
+# The vendored assess-rfe checkout (bootstrap.sh CONTEXT_DIR); pipeline.rubric.path is
 # relative to it.
 CONTEXT_DIR = ".context/assess-rfe"
 # The generic create skill's pre-assigned id flag (PR-5 plan D15).
@@ -1737,7 +1737,7 @@ def launch_vars(desc, stage):
         ("SCORER_AGENT", pipe["scorer_agent"]),
         ("PROMPT_PATH", f"{CONTEXT_DIR}/{rubric['path']}"),
         ("RUBRIC_EXPORT", rubric.get("export") or "none"),
-        ("BOOTSTRAP", f"bash scripts/bootstrap-assess-rfe.sh --type {desc.name}"),
+        ("BOOTSTRAP", f"bash scripts/bootstrap.sh --type {desc.name}"),
         ("CREATE_GUIDANCE_PATH", desc.launch_path(prompts.get("create_guidance", ""))),
         ("TEMPLATE_PATH", desc.launch_path(prompts.get("template", ""))),
         ("RULES_PATH", desc.launch_path(prompts.get("review_rules", ""))),

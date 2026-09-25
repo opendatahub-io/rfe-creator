@@ -629,12 +629,12 @@
               "type": "string",
               "pattern": "^(https://github\\.com/)?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
               "not": { "const": "self" },
-              "description": "owner/repo or its https://github.com/ URL (the shipped descriptors carry the URL verbatim because bootstrap-assess-rfe.sh holds it)."
+              "description": "owner/repo or its https://github.com/ URL (the shipped descriptors carry the URL verbatim because bootstrap.sh holds it)."
             },
             "ref": {
               "type": "string",
               "pattern": "^[0-9a-f]{7,40}$",
-              "description": "Immutable commit SHA (tags move). QUOTE it in YAML: an all-digit or digits+e ref would otherwise parse as a number. bootstrap-assess-rfe.sh checks this commit out and verifies the checkout (ASSESS_RFE_REF overrides it for an ad-hoc run); descriptors sharing a repo pin one value."
+              "description": "Immutable commit SHA (tags move). QUOTE it in YAML: an all-digit or digits+e ref would otherwise parse as a number. bootstrap.sh checks this commit out and verifies the checkout (ASSESS_RFE_REF overrides it for an ad-hoc run); descriptors sharing a repo pin one value."
             },
             "path": { "$ref": "#/$defs/repo_path", "description": "Rubric file path inside the assess checkout (gate 2 checks it under --assess-dir)." },
             "export": { "oneOf": [ { "$ref": "#/$defs/artifact_dir" }, { "type": "null" } ], "description": "Where the rubric is exported for authors (artifacts/<type>-rubric.md), or null when nothing exports it. Not required to exist." }

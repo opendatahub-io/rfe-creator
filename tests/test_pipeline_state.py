@@ -2858,7 +2858,7 @@ class TestNoShell:
         )
         ps.cmd_run_phase([])  # must not raise: exit codes are logged, not fatal
         assert [a[:2] for a in launched] == [
-            ["bash", "scripts/bootstrap-assess-rfe.sh"],
+            ["bash", "scripts/bootstrap.sh"],
             ["bash", "scripts/fetch-architecture-context.sh"],
         ]
         assert all(isinstance(a, list) for a in launched)
