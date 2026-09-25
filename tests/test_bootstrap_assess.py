@@ -650,8 +650,11 @@ class TestCallersDeclareType:
                 if not name.endswith(".md") or rel.split("/")[2] in self.GENERIC_BODIES:
                     continue
                 with open(path) as f:
-                    if any(re.search(r"bash .*bootstrap\.sh", ln) for ln in f):
-                        offenders.append(rel)
+                    lines = [ln for ln in f if re.search(r"bash .*bootstrap\.sh", ln)]
+                # the layout guard may appear anywhere (the compat shims carry it too, so the
+                # alias path lays the directory out before reading the generic body)
+                if any(self.LAYOUT_GUARD not in ln for ln in lines):
+                    offenders.append(rel)
         assert offenders == [".claude/skills/rfe-creator.update-deps/SKILL.md"], offenders
 
     def test_pipeline_setup_phase_is_type_aware(self):
