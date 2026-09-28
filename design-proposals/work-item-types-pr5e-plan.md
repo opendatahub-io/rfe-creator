@@ -1,6 +1,6 @@
 # PR-5e plan: the plugin ships its hooks (Claude Code manifest + `hooks/hooks.json`)
 
-Status: drafted 2026-09-28 on `feat/pr5e-plugin-hooks` (stacked on #205 `feat/pr5d-marketplace-layout`); opens after #205 merges. Companion: agent-eval-harness #231 (the harness carries the project's settings hooks into eval runs).
+Status: opened 2026-09-28 as [#206](https://github.com/opendatahub-io/rfe-creator/pull/206) (`feat/pr5e-plugin-hooks`, rebased on main after #205 merged as 3f4233d); eval pair dispatched 09:33 UTC. Companion: agent-eval-harness #231 (the harness carries the project's settings hooks into eval runs).
 
 ## Problem
 
