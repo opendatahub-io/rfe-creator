@@ -27,6 +27,9 @@ Slash commands below (`/eval-setup`, `/eval-run`, etc.) require the [agent-eval-
 
 # Run a subset of cases for faster iteration
 /eval-run --model opus --case autoscaling
+
+# Put an open-weights model under test through OpenRouter (see below)
+/eval-run --config eval-profiles/openrouter-glm-5.2.yaml
 ```
 
 ### Review results
@@ -112,6 +115,99 @@ The 0.92 value was calibrated on two live 5-case runs on 2026-09-07 (claude-opus
 During evaluation, PreToolUse hooks:
 - **Auto-answer** `AskUserQuestion` prompts from test case context
 - **Block Jira** interactions (the skill runs with `--dry-run`)
+
+## Open-weights models through OpenRouter
+
+The same eval can put an open-weights model (GLM, DeepSeek, Kimi, Qwen, …) under test
+through [OpenRouter](https://openrouter.ai). The harness's direct transport
+(agent-eval-harness ≥ 1.53; see its
+[OpenRouter guide](https://opendatahub-io.github.io/agent-eval-harness/guides/openrouter/))
+does the routing: no proxy to start, no hook, nothing to reconcile afterwards.
+
+### Run
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...        # the only variable you need
+
+/eval-run --config eval-profiles/openrouter-glm-5.2.yaml
+/eval-run --config eval-profiles/openrouter-glm-5.2.yaml \
+    --cases case-001-model-signature-verification-at-serving --no-llm-judges   # smoke test (a directory name under eval/dataset/cases)
+
+# Any other model: the shared layer plus the two role flags
+/eval-run --config eval-profiles/openrouter.yaml \
+    --model openrouter:/moonshotai/kimi-k3 --subagent-model openrouter:/moonshotai/kimi-k3
+```
+
+`eval-profiles/` holds one profile per evaluated model (`openrouter-<model>.yaml`) over a
+shared layer (`openrouter.yaml`) that itself `extends: ../eval.yaml`. A profile is a few
+lines — the two roles, the timeout, the MLflow experiment, the extra permissions weaker
+models need — so the dataset, the judges and the thresholds cannot drift from the Anthropic
+baseline. The judge stays on the ambient Anthropic/Vertex Opus. Inspect a merged profile
+with `python3 -m agent_eval.config --print eval-profiles/openrouter-glm-5.2.yaml` (harness
+on `PYTHONPATH`); the run records the chain in `run_result.json` under
+`eval_params.config_chain`.
+
+### What the harness does
+
+- Writes a per-run settings overlay that points Claude Code at OpenRouter with the key from
+  `OPENROUTER_API_KEY`, blanks the Vertex/Bedrock switches the user settings force, and maps
+  every model alias (the haiku slot and the subagents included) to the model under test. Do
+  not put any of that in `execution.env`: the harness rejects it while a plan is active.
+- Checks the provider pins against the public catalog before the first request (preflight)
+  and audits the providers that actually served the run afterwards (`routing.violations`
+  in `run_result.json`; a violation marks the run degraded). It does not apply the pins in
+  flight: see [Provider pins](#provider-pins).
+- Replaces Claude Code's Anthropic-priced estimate — 2 to 60 times the real charge for these
+  models — with the cost OpenRouter reports per generation id (`cost_source:
+  openrouter:generation`, `cost_confidence`; the estimate is kept as `cost_usd_estimate`).
+  Runs before 2026-09-28 went through a local LiteLLM proxy and carry the reconciled figure
+  in `real_cost.json` instead.
+
+### Provider pins
+
+The pins live once, in `eval.yaml` under `models.providers.openrouter.routing.models`
+(rendered from `eval/config/skeleton.yaml`: edit the skeleton and regenerate). Entries are
+keyed by the bare OpenRouter slug and `order` names provider *slugs*; the block is inert for
+the Anthropic baseline. Claude Code cannot send routing in a request, so a pin is a
+declared **set** the harness checks, not a request-time control:
+
+| `routing.enforcement` | Needs | What happens to the pins |
+|---|---|---|
+| `audit` (default) | `OPENROUTER_API_KEY` | checked against the catalog before the first request, audited after the run. Not applied in flight: OpenRouter's own routing picks among every endpoint of the model, and each request served outside the set is a violation (`policy: strict` marks the run degraded). Only the account's ignored-providers setting or a `:variant` on the model id steers the request. |
+| `key-guardrail` | `OPENROUTER_MANAGEMENT_KEY` as well | a per-run key limited to the pinned providers (as a set; `order` is not a priority) and to `budget.run_usd`, enforced server-side and revoked at run end; the agent never holds the operator key. The comparison-grade setting. |
+
+`enforcement` and `policy` are switched in `eval-profiles/openrouter.yaml`, next to
+`budget.run_usd`, never in the skeleton: `key-guardrail` is validated against `run_usd` at
+load, and the base configs do not carry one.
+
+Endpoints come and go (the 2026-09-28 port dropped WandB and moved Gemma to Crusoe for that
+reason): re-verify a pin at `https://openrouter.ai/api/v1/models/<slug>/endpoints`
+(quantization, tool support, status) before relying on it.
+
+### Adding a model
+
+1. Look up the slug and its endpoints, pick the providers (one quantization across the pinned
+   set), add the entry to the skeleton's routing table and run
+   `python3 scripts/generate_eval_config.py`.
+2. Copy `eval-profiles/openrouter-glm-5.2.yaml` to `openrouter-<model>.yaml` and change the
+   two role URIs. A `:nitro` / `:exacto` variant goes on the URI; the routing entry stays
+   keyed by the bare slug.
+3. `python3 -m agent_eval.providers.openrouter.preflight --config eval-profiles/openrouter-<model>.yaml`
+   runs the pin, key and eligibility checks without spending.
+
+### Troubleshooting
+
+- **`preflight failed`** — a pinned provider no longer serves the model at the pinned
+  quantization, or the account cannot use the model (privacy / paid-training settings). Fix
+  the pin or the account; lowering `preflight:` to `warn` is not the answer for a comparison
+  run.
+- **`set OPENROUTER_API_KEY`** — export it in the shell that runs the eval. Never write the
+  key into a config or an env surface the harness forwards.
+- **Vertex 404 / `model_not_found`** — the run is not going through a profile: the plan
+  activates only when the effective skill model is `openrouter:/…` (check
+  `eval_params.config_chain`).
+- **`cost_usd: null`** — no truth source succeeded; `cost_usd_estimate` keeps the estimate
+  and `cost_warnings` says why.
 
 ---
 

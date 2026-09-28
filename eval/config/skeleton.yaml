@@ -24,11 +24,70 @@ runner:
   type: claude-code
   effort: high            # Claude Code reasoning effort: low | medium | high | xhigh | max
 
-# Models — defaults for each role (CLI flags override)
+# Models — defaults for each role (CLI flags override). A bare id is an Anthropic
+# model; `openrouter:/<slug>` on skill/subagent activates the harness's direct
+# OpenRouter transport (no proxy). The `providers` block is the one routing table for
+# the open-weights models under test: it is INERT while the roles are Anthropic and is
+# activated by the profiles under eval-profiles/ (or by `--model` AND `--subagent-model`
+# openrouter:/<slug> together: the base pins `subagent`, so `--model` alone is rejected).
 models:
   skill: claude-opus-4-6
   subagent: claude-opus-4-6
   judge: claude-opus-4-6
+  providers:
+    openrouter:
+      api_key_env: OPENROUTER_API_KEY     # NAME of the variable holding the key, never a value
+      attribution:
+        referer: https://github.com/opendatahub-io/rfe-creator
+        title: rfe-creator eval
+      # The pinned provider SET per model, keyed by the bare OpenRouter slug; `order`
+      # values are provider SLUGS. Claude Code cannot put routing in a request, so the
+      # pins are never applied in flight by the harness: the preflight checks them against
+      # the catalog before the first request, and after the run every request served
+      # outside the set is reported in `routing.violations`. In flight, OpenRouter's own
+      # routing (or the account's ignored-providers setting) picks the endpoint at
+      # `enforcement: audit`; at `key-guardrail` the set becomes the allow-list of a
+      # per-run key, enforced server-side. Where enforcement is chosen — and the only
+      # place to switch it — is eval-profiles/openrouter.yaml. Re-verify a pin at
+      #   https://openrouter.ai/api/v1/models/<slug>/endpoints
+      routing:
+        defaults: { allow_fallbacks: true }
+        models:
+          z-ai/glm-5.2:
+            # The two fp8 hosts the clean 2026-07-20 run used. A run spread over
+            # fp4/unknown-quant hosts degraded glm's tool-call discipline (2026-07-22).
+            order: [novita, streamlake]
+            allow_fallbacks: false
+            quantizations: [fp8]
+          z-ai/glm-5.3-flash:
+            order: [z-ai, novita]         # the first-party host and Novita; both serve fp8
+            allow_fallbacks: false
+          deepseek/deepseek-v4-pro:
+            # fp8 set. WandB, the proxy-era second host, no longer exists on OpenRouter
+            # (2026-09-28); StreamLake fp8 takes its place, as for glm-5.2.
+            order: [novita, streamlake]
+            allow_fallbacks: false
+            quantizations: [fp8]
+          deepseek/deepseek-v4.1-flash:
+            # Single first-party endpoint; it reports quantization "unknown", so a
+            # quantizations pin would exclude it.
+            order: [deepseek]
+            allow_fallbacks: false
+          thinkingmachines/inkling:
+            order: [together]
+            allow_fallbacks: false
+          google/gemma-4-31b-it:
+            # 16-bit only (mixing fp8/fp4 in is not quality-consistent). Cerebras no
+            # longer lists the model and CoreWeave serves fp4 only (2026-09-28). Novita
+            # also lists bf16 but rejected >16384 output tokens at runtime, a hard 400 on
+            # Claude Code's 32k request (2026-07-24), so it is deliberately left out;
+            # several fp4/fp8 hosts cap output at 8-16k too. Crusoe is the usable bf16 host.
+            order: [crusoe]
+            allow_fallbacks: false
+            quantizations: [bf16]
+          # moonshotai/kimi-k3 and qwen/qwen3.7-{plus,max} carry no pin. The proxy's
+          # `sort: throughput` cannot be sent from Claude Code; use the `:nitro`
+          # variant on the model id instead (openrouter:/moonshotai/kimi-k3:nitro).
 
 # Permissions for headless execution
 permissions:
