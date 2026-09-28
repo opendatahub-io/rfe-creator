@@ -44,7 +44,7 @@ So the long pipelines (`/rfe-auto-fix`, `/rfe-speedrun`) run without post-compac
 ## Sequencing
 
 1. #205 merges → rebase `feat/pr5e-plugin-hooks` onto `main` → open PR-5e (eval pair: `eval.yaml`, `eval-initiative.yaml`).
-2. agent-eval-harness #231 merges and releases → PR-5e's eval runs (or a re-run) carry the hook; compare against the pre-#231 baseline knowingly.
+2. agent-eval-harness #231 — merged and released as v1.52.0 on 2026-09-28 → every rfe-creator eval from now on carries the project hooks; the compaction hook itself stays a no-op in eval until PR-5e's skeleton change sets the gate. PR-5e's eval pair is therefore the first measured run with the hook live; compare against the pre-PR-5e baseline knowingly.
 3. After PR-5e: real marketplace re-test from `rfe-creator-test` (plugin hook fires after a forced compaction with the variable exported; banner once in a plain project, twice in the checkout); Codex install test on a Codex machine (`/hooks` trust, then a compaction).
 4. Registry regeneration (user-side, already pending for #205): consider the 0.2.0 bump across the registry entry and both manifests, and the `author` alignment.
 
