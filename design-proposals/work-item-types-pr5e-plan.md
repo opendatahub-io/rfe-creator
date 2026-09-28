@@ -1,0 +1,53 @@
+# PR-5e plan: the plugin ships its hooks (Claude Code manifest + `hooks/hooks.json`)
+
+Status: drafted 2026-09-28 on `feat/pr5e-plugin-hooks` (stacked on #205 `feat/pr5d-marketplace-layout`); opens after #205 merges. Companion: agent-eval-harness #231 (the harness carries the project's settings hooks into eval runs).
+
+## Problem
+
+The compaction-recovery hook (`.claude/settings.json` → `SessionStart`, matcher `compact` → `python3 scripts/pipeline_state.py post-compact-hook`, body gated by `RFE_CREATOR_ENABLE_CONTEXT_HOOK`) exists in exactly one place: the checkout's project settings. Production telemetry (autofixer job 16725119312, `claude-otel.jsonl`) shows it executing on each of the run's three auto-compactions (174k → 40k/10k/6.6k tokens). Nowhere else runs it:
+
+| Surface | Hook present | Why |
+| --- | --- | --- |
+| Checkout (production CI, developers) | yes | project settings |
+| Claude Code marketplace install (#205) | no | plugins do not read the project's settings; #205's README tells the user to copy the `hooks` block by hand |
+| Codex install | no | Codex does not read `.claude/settings.json` |
+| Eval harness | no | the harness writes its own workspace settings and copied only `permissions` (fixed by agent-eval-harness #231) |
+
+So the long pipelines (`/rfe-auto-fix`, `/rfe-speedrun`) run without post-compaction recovery everywhere but the checkout, and every eval to date measured the skill without a piece of its production machinery.
+
+## Decisions
+
+- **E1 — Claude Code manifest.** Add `.claude-plugin/plugin.json` mirroring `.codex-plugin/plugin.json` on `name`, `version`, `description`, `skills` (`./.claude/skills/`), plus `author` (the marketplace owner, `opendatahub-io`; the registry entry's `author` says `jwforres` — align either way at registry regeneration) and `repository`. Pinned equal to the Codex manifest by `tests/test_plugin_manifest.py::TestManifests`. `claude plugin validate .` → "Validation passed".
+- **E2 — One `hooks/hooks.json` for both hosts.** Same three-level shape on both (`hooks` → event → groups → `hooks` handlers, optional top-level `description`); `SessionStart` sources `startup|resume|clear|compact` are common (Claude Code adds `fork`); handler in shell form only (no `args`), `type: command`, `timeout: 30`, command `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pipeline_state.py" post-compact-hook` — Claude Code substitutes the variable inline and exports it; Codex exports `CLAUDE_PLUGIN_ROOT` (alias of `PLUGIN_ROOT`) and its shell expands it. Both hosts run the command with the session cwd (the user's project), which is what `STATE_FILE = tmp/pipeline-state.yaml` needs; the script finds the descriptors through its own location (`PLUGIN_ROOT = Path(__file__).resolve().parent.parent`). No host-specific handler keys (`if`/`once`/`async`; `statusMessage`/`additionalContextLimit`).
+- **E3 — Neither manifest names the hooks file.** Both hosts discover `hooks/hooks.json` at the plugin root by default. An explicit `hooks` value REPLACES default discovery under Codex and is MERGED with it under Claude Code (the docs: "Claude Code merges whatever you declare with `hooks/hooks.json` when that file exists") — omitting it is the one configuration where each host sees exactly one definition. Pinned by `test_no_manifest_names_the_hooks_file`.
+- **E4 — Keep the opt-in gate.** `RFE_CREATOR_ENABLE_CONTEXT_HOOK` stays (b51ee3f, 2026-04-09: "a no-op outside pipeline runs that explicitly opt in"). The state-file check alone is not enough: a stale `tmp/pipeline-state.yaml` from an aborted local run would otherwise inject "Current phase: ASSESS" plus the dispatch loop into an unrelated session after its first compaction — enough to send the model back into a pipeline. Production CI sets the variable (three jobs), the eval config sets it (E5), marketplace users export it (README). Flipping to opt-out is a separate, later decision once the plugin path has run in anger.
+- **E5 — Eval parity.** `eval/config/skeleton.yaml` `execution.env: RFE_CREATOR_ENABLE_CONTEXT_HOOK: "1"`; `eval.yaml` and `eval-initiative.yaml` regenerated. Effective once agent-eval-harness #231 (`execution.project_hooks`, default on) is released: the eval CI clones the harness unpinned from `main` (`HARNESS_REF` overrides). Expect the PR's own eval pair to be the re-baseline; a delta there is the hook's first measured effect, not a regression.
+- **E6 — Double fire is accepted and documented.** A checkout that also has the plugin installed runs both the settings hook and the plugin hook (no plugin/settings dedup in Claude Code): the banner prints twice. Harmless; a per-session lock would be more machinery than the problem.
+- **E7 — Codex.** No `.codex-plugin` change (no `hooks` key, per E3; version unchanged). Codex skips a plugin's hooks until the user reviews and trusts them once with `/hooks` (trust is recorded against the hook's hash, so a later edit re-prompts); `codex exec` and hooks are undocumented; `--dangerously-bypass-hook-trust` exists for vetted automation. A root `plugin.json` per the Agent Plugins spec is not added now (schema `required: [$schema, name]`, `additionalProperties: false` — it cannot carry Claude Code keys; separate decision).
+- **E8 — Version stays 0.1.0.** Parity with the Codex manifest and the registry entry; bump all three together at the registry regeneration that follows #205 + PR-5e (user-side step).
+- **E9 — Production is untouched.** The autofixer runs from the checkout; `.claude/settings.json` is unchanged; no command stream changes.
+
+## Files
+
+- `.claude-plugin/plugin.json` (new), `hooks/hooks.json` (new)
+- `eval/config/skeleton.yaml` (+`execution.env`), `eval.yaml`, `eval-initiative.yaml` (regenerated)
+- `README.md`: marketplace paragraph (no `hooks` block to copy; the gate; double fire) and the Codex paragraph (discovery, `/hooks` trust, `codex exec` undocumented)
+- `tests/test_plugin_manifest.py`: manifests mirror each other; no manifest names the hooks file; plugin hooks are the settings hooks rooted at the plugin (regex `(\S+) (scripts/\S+)(.*)` → `\1 "${CLAUDE_PLUGIN_ROOT}/\2"\3`); handlers portable (shell form, quoted root, int timeout, no host-only keys); SessionStart sources portable; the hook run through `sh -c` from a foreign cwd with `CLAUDE_PLUGIN_ROOT` set prints a plain-text banner starting `[PIPELINE STATE RECOVERY]` (never `{`, under 10,000 chars) in an initialized pipeline directory, and nothing without the gate or without a state file.
+
+## Verification log
+
+- Probe (2026-09-28): from an empty temp cwd, `python3 <worktree>/scripts/pipeline_state.py post-compact-hook` → no state file: silent, exit 0; state file + gate unset: silent; `init --type rfe --headless` + gate: `[PIPELINE STATE RECOVERY] Setup in progress (phase: INIT)` + one line of instruction. (A hand-written state file without `start_time` is refused by `validate-state` — the test uses `init`.)
+- Docs facts (research agent, sources: code.claude.com hooks/plugins-reference/plugin-marketplaces; developers.openai.com plugins; learn.chatgpt.com hooks; agent-plugins.org spec): shape, matchers, env, cwd, stdout → context (Claude Code: plain stdout added, 10,000-char cap, `{…}` parsed as JSON; Codex: plain stdout added as developer context, ~2,500-token cap, spill to a file), Codex default discovery and explicit-replaces rule, trust review, `codex exec` undocumented.
+- `claude plugin validate .` on the branch: Validation passed. `tests/test_plugin_manifest.py`: 10 passed.
+- Eval CI: `redhat/rhel-ai/agentic-ci/rfe-creator-eval` `.gitlab-ci.yml` clones the harness unpinned from `main` (`HARNESS_REPO`/`HARNESS_REF` overrides).
+
+## Sequencing
+
+1. #205 merges → rebase `feat/pr5e-plugin-hooks` onto `main` → open PR-5e (eval pair: `eval.yaml`, `eval-initiative.yaml`).
+2. agent-eval-harness #231 merges and releases → PR-5e's eval runs (or a re-run) carry the hook; compare against the pre-#231 baseline knowingly.
+3. After PR-5e: real marketplace re-test from `rfe-creator-test` (plugin hook fires after a forced compaction with the variable exported; banner once in a plain project, twice in the checkout); Codex install test on a Codex machine (`/hooks` trust, then a compaction).
+4. Registry regeneration (user-side, already pending for #205): consider the 0.2.0 bump across the registry entry and both manifests, and the `author` alignment.
+
+## Out of scope
+
+Flipping the gate to opt-out (E4); a root Agent-Plugins `plugin.json` (E7); Harbor task packages in the harness (they carry `eval.yaml` permissions, not project settings — unchanged by #231); deduplicating the double fire (E6).
