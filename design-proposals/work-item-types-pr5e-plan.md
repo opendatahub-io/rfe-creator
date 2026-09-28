@@ -42,6 +42,8 @@ So the long pipelines (`/rfe-auto-fix`, `/rfe-speedrun`) run without post-compac
 - Docs facts (research agent, sources: code.claude.com hooks/plugins-reference/plugin-marketplaces; developers.openai.com plugins; learn.chatgpt.com hooks; agent-plugins.org spec): shape, matchers, env, cwd, stdout → context (Claude Code: plain stdout added, 10,000-char cap, `{…}` parsed as JSON; Codex: plain stdout added as developer context, ~2,500-token cap, spill to a file), Codex default discovery and explicit-replaces rule, trust review, `codex exec` undocumented.
 - `claude plugin validate .` on the branch: Validation passed. `tests/test_plugin_manifest.py`: 10 passed.
 - Eval CI: `redhat/rhel-ai/agentic-ci/rfe-creator-eval` `.gitlab-ci.yml` clones the harness unpinned from `main` (`HARNESS_REPO`/`HARNESS_REF` overrides).
+- #206 eval pair (dispatched 09:33 UTC, reported 11:27/11:32 UTC, head af7ec59, harness v1.52.0 so the hook was live): **rfe PASS** — rfe_quality 4.385, revision_quality 4.923, every check 1.0; **initiative PASS** — initiative_quality 4.19, revision_quality 4.71, every check 1.0. Against the #179 baseline (rfe 4.28/4.76, initiative 4.31/4.81) that is within run-to-run variance: no measurable effect of the hook on a 10-case batch, as expected when no auto-compaction fires.
+- skills-registry #123: CI green; CodeRabbit's one thread (the `--validate-remote-plugins` check still demanded an upstream manifest from a strict entry) fixed in 829f2c8 — a strict entry that declares `skills_dir` needs no manifest yet; three tests cover pre-manifest / no-`skills_dir` / manifest-present.
 
 ## Sequencing
 
