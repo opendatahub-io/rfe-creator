@@ -127,11 +127,12 @@ does the routing: no proxy to start, no hook, nothing to reconcile afterwards.
 ### Run
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...        # the only variable you need
+export OPENROUTER_API_KEY=sk-or-...        # the additional variable for OpenRouter (agent only)
 
+# A full run still needs the ambient Anthropic/Vertex credentials: the judges stay on Opus.
 /eval-run --config eval-profiles/openrouter-glm-5.2.yaml
 /eval-run --config eval-profiles/openrouter-glm-5.2.yaml \
-    --cases case-001-model-signature-verification-at-serving --no-llm-judges   # smoke test (a directory name under eval/dataset/cases)
+    --cases case-001-model-signature-verification-at-serving --no-llm-judges   # smoke test: one case, no judge, OpenRouter key only
 
 # Any other model: the shared layer plus the two role flags
 /eval-run --config eval-profiles/openrouter.yaml \
@@ -183,6 +184,30 @@ load, and the base configs do not carry one.
 Endpoints come and go (the 2026-09-28 port dropped WandB and moved Gemma to Crusoe for that
 reason): re-verify a pin at `https://openrouter.ai/api/v1/models/<slug>/endpoints`
 (quantization, tool support, status) before relying on it.
+
+### Secrets and permissions
+
+At `audit` the agent runs with the operator key: the harness puts it in the run's
+settings env (`provider.key_exposed_to_agent: true` in `run_result.json`) and every Bash
+command inherits it. Two consequences for this profile:
+
+- Use a dedicated, credit-capped OpenRouter key for evals, or `key-guardrail`, which hands
+  the agent a per-run key limited to the pinned providers and to `budget.run_usd` and
+  revokes it at run end.
+- The shared profile allows `Bash(python3 *)` and `Bash(bash *)` so that subagents can
+  call the pipeline scripts by absolute workspace path (weaker models do, and a headless
+  denial ends the run). The rules widen subagents only: the orchestrator already holds
+  unrestricted Bash through the skill's own `allowed-tools`. No Bash rule can express
+  "these scripts at any path" without also matching `python3 -c`, and deny rules are
+  text-only, so the narrow fix is harness-side (absolute twins of the project's script
+  rules).
+
+`eval-profiles/openrouter-sandboxed.yaml` is the opt-in egress control: Claude Code's OS
+sandbox around every Bash command with an empty network allow-list, the key scrubbed from
+command environments, sandboxed commands auto-approved (so the two rules go) and the
+bootstrap scripts skipped. Local runner on macOS only until the Harbor images ship
+bubblewrap, and not yet exercised by a live run: the file header describes the smoke test
+that promotes it to the default.
 
 ### Adding a model
 

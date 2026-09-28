@@ -117,7 +117,10 @@ def _bare_slug(uri):
     return uri[len("openrouter:/") :].split(":", 1)[0]
 
 
-MODEL_PROFILES = [p for p in PROFILES if p.name != "openrouter.yaml"]
+LAYERS = [PROFILES_DIR / "openrouter.yaml", PROFILES_DIR / "openrouter-sandboxed.yaml"]
+MODEL_PROFILES = [p for p in PROFILES if merged(p)[0]["models"]["skill"].startswith("openrouter:/")]
+BASE_ALLOW = ["Skill", "Agent", "Edit(tmp/rfe-assess/**)"]
+BLANKET_BASH = ["Bash(python3 *)", "Bash(bash *)"]
 
 
 def test_profiles_exist_next_to_the_shared_layer():
@@ -145,8 +148,9 @@ def test_model_profile_puts_skill_and_subagent_on_openrouter(profile):
     assert _bare_slug(models["skill"]) == _bare_slug(models["subagent"])
 
 
-def test_shared_layer_alone_keeps_the_anthropic_roles():
-    cfg, _ = merged(PROFILES_DIR / "openrouter.yaml")
+@pytest.mark.parametrize("layer", LAYERS, ids=lambda p: p.name)
+def test_shared_layer_alone_keeps_the_anthropic_roles(layer):
+    cfg, _ = merged(layer)
     base = _load(REPO / "eval.yaml")
     assert {k: cfg["models"][k] for k in ("skill", "subagent", "judge")} == {
         k: base["models"][k] for k in ("skill", "subagent", "judge")
@@ -154,13 +158,21 @@ def test_shared_layer_alone_keeps_the_anthropic_roles():
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=lambda p: p.name)
-def test_merged_allow_list_keeps_the_pipeline_rules_and_adds_the_open_model_ones(profile):
-    cfg, _ = merged(profile)
+def test_merged_allow_list_keeps_the_pipeline_rules(profile):
+    cfg, chain = merged(profile)
     allow = cfg["permissions"]["allow"]
     assert len(allow) == len(set(allow)), allow
-    assert {"Skill", "Agent"} <= set(allow), allow
-    assert {"Bash(python3 *)", "Bash(bash *)", "Write(/tmp/rfe-assess/**)"} <= set(allow), allow
+    assert _load(REPO / "eval.yaml")["permissions"]["allow"] == BASE_ALLOW
+    if any(p.name == "openrouter-sandboxed.yaml" for p in chain):
+        # Sandboxed Bash needs no rule (autoAllowBashIfSandboxed), so the sandbox layer
+        # restates the base list and nothing else.
+        assert allow == BASE_ALLOW
+    else:
+        assert allow == BASE_ALLOW + BLANKET_BASH
     assert cfg["permissions"].get("deny") == []
+    # Claude Code consults Edit()/Read() path rules only; a Write(path) rule is accepted,
+    # never matched, and warned about at startup.
+    assert not [r for r in allow if r.startswith("Write(")], allow
 
 
 @pytest.mark.parametrize(
@@ -176,10 +188,34 @@ def test_no_config_authors_the_managed_transport_env_or_a_key(path):
     assert not KEY_SHAPED.search(path.read_text()), f"{path.name} contains a key-shaped value"
 
 
-@pytest.mark.parametrize("profile", MODEL_PROFILES, ids=lambda p: p.name)
-def test_profile_blanks_the_jira_write_credentials_and_nothing_else(profile):
+@pytest.mark.parametrize("profile", PROFILES, ids=lambda p: p.name)
+def test_profile_blanks_the_jira_write_credentials_and_little_else(profile):
     cfg, _ = merged(profile)
-    assert cfg["execution"]["env"] == {"JIRA_USER": "", "JIRA_TOKEN": ""}
+    env = cfg["execution"]["env"]
+    assert env["JIRA_USER"] == "" and env["JIRA_TOKEN"] == ""
+    assert set(env) <= {"JIRA_USER", "JIRA_TOKEN", "RFE_SKIP_BOOTSTRAP"}, env
+
+
+def test_sandboxed_layer_locks_bash_egress_and_hides_the_key():
+    cfg, chain = merged(PROFILES_DIR / "openrouter-sandboxed.yaml")
+    assert [p.name for p in chain] == ["eval.yaml", "openrouter.yaml", "openrouter-sandboxed.yaml"]
+    sandbox = cfg["runner"]["settings"]["sandbox"]
+    assert sandbox["enabled"] is True and sandbox["failIfUnavailable"] is True
+    assert sandbox["autoAllowBashIfSandboxed"] is True, "no rule needed for sandboxed Bash"
+    assert sandbox["allowUnsandboxedCommands"] is False and sandbox["excludedCommands"] == []
+    assert sandbox["network"] == {"allowedDomains": [], "strictAllowlist": True}
+    assert "/tmp/rfe-assess" in sandbox["filesystem"]["allowWrite"]
+    assert {"name": "ANTHROPIC_AUTH_TOKEN", "mode": "deny"} in sandbox["credentials"]["envVars"]
+    assert cfg["execution"]["env"]["RFE_SKIP_BOOTSTRAP"] == "1", (
+        "bootstrap clones + writes .claude/skills"
+    )
+    # Everything else is the shared layer's.
+    shared, _ = merged(PROFILES_DIR / "openrouter.yaml")
+    for key in ("models", "mlflow", "judges", "dataset", "thresholds"):
+        assert cfg[key] == shared[key], key
+    assert cfg["execution"]["timeout"] == shared["execution"]["timeout"]
+    assert cfg["execution"]["max_budget_usd"] == shared["execution"]["max_budget_usd"]
+    assert cfg["runner"]["type"] == shared["runner"]["type"]
 
 
 @pytest.mark.parametrize("profile", MODEL_PROFILES, ids=lambda p: p.name)

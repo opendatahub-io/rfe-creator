@@ -44,15 +44,26 @@ models:
         enforcement: audit
         policy: strict
 
-# Added to eval.yaml's allow list (profiles extend scalar lists). Weaker models
-# invoke the pipeline scripts by ABSOLUTE workspace path, which no relative project
-# rule matches; a headless denial ends the run on a text-only turn
-# (2026-07-24-deepseek-v4-pro died in Phase 1 this way). A trailing-wildcard
-# interpreter prefix matches both forms. Safe here: throwaway workspace, --dry-run,
-# and the PreToolUse Jira gate still applies. /private/tmp variants are derived.
+# Added to eval.yaml's allow list (profiles extend scalar lists). Weaker models invoke
+# the pipeline scripts by ABSOLUTE workspace path, which no relative project rule
+# matches, and a headless denial ends the run on a text-only turn
+# (2026-07-24-deepseek-v4-pro died in Phase 1 this way). What these two rules do and
+# do not change:
+# - They widen SUBAGENTS only: the orchestrator already holds unrestricted Bash for the
+#   whole run through rfe.speedrun's own `allowed-tools`, which workspace trust never
+#   gates.
+# - They are not what exposes the key. At `audit` the operator key sits in the agent's
+#   settings env by harness design (`provider.key_exposed_to_agent: true`) and every
+#   Bash child inherits it, rules or no rules. Mitigate with key hygiene: a dedicated,
+#   credit-capped key at audit, or key-guardrail (per-run key, revoked at run end).
+# - No Bash rule can express "these scripts at any path" safely: a `*` before the script
+#   name also matches `-c '<code>'`, and deny rules are text-only, not a boundary. The
+#   narrow fix is harness-side (absolute twins of the project's script rules); OS-level
+#   egress control is openrouter-sandboxed.yaml, which drops these two rules.
+# Write(...) path rules are never consulted by Claude Code (Edit(...) covers Write) and
+# the project's Edit(/tmp/rfe-assess/**) is carried over, so none is added here.
 permissions:
   allow:
-    - "Write(/tmp/rfe-assess/**)"
     - "Bash(python3 *)"
     - "Bash(bash *)"
 
