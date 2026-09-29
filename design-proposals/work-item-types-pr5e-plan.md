@@ -1,6 +1,6 @@
 # PR-5e plan: the plugin ships its hooks (Claude Code manifest + `hooks/hooks.json`)
 
-Status: opened 2026-09-28 as [#206](https://github.com/opendatahub-io/rfe-creator/pull/206) (`feat/pr5e-plugin-hooks`, rebased on main after #205 merged as 3f4233d); eval pair dispatched 09:33 UTC. Companion: agent-eval-harness #231 (the harness carries the project's settings hooks into eval runs).
+Status: **merged 2026-09-29** as [#206](https://github.com/opendatahub-io/rfe-creator/pull/206) (main 120196e), after skills-registry #123. Real marketplace install verified the same day from an isolated config dir: `rfe-creator@opendatahub-skills` 0.1.0, 13 skills, `SessionStart` hook, enabled. Companion: agent-eval-harness #231 (the harness carries the project's settings hooks into eval runs).
 
 ## Problem
 
