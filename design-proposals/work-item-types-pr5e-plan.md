@@ -47,7 +47,7 @@ So the long pipelines (`/rfe-auto-fix`, `/rfe-speedrun`) run without post-compac
 
 ## Sequencing
 
-1. #205 merged → PR-5e open as #206 (eval pair dispatched). **Merge skills-registry #123 before #206** (E10).
+1. #205 merged → PR-5e open as #206 (eval pair PASS). skills-registry #123 **merged 2026-09-29** (registry main 75ea865: rfe-creator `strict: true` + `skills_dir`, entry publishes `skills` with no `strict` key; five CodeRabbit rounds folded in — declared `skills_dir` authoritative, `strict: true` appends to the manifest's `skills/` + named paths, `strict: false` + manifest rejected, SKILL.md containment, manifest `./` scans root children). #206 is unblocked: mergeable, clean, lint + CodeRabbit green.
 2. agent-eval-harness #231 — merged and released as v1.52.0 on 2026-09-28 → every rfe-creator eval from now on carries the project hooks; the compaction hook itself stays a no-op in eval until PR-5e's skeleton change sets the gate. PR-5e's eval pair is therefore the first measured run with the hook live; compare against the pre-PR-5e baseline knowingly.
 3. After PR-5e: real marketplace re-test from `rfe-creator-test` (plugin hook fires after a forced compaction with the variable exported; banner once in a plain project, twice in the checkout); Codex install test on a Codex machine (`/hooks` trust, then a compaction).
 4. Registry regeneration (user-side, already pending for #205): consider the 0.2.0 bump across the registry entry and both manifests, and the `author` alignment.
