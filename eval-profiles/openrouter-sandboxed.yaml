@@ -9,9 +9,9 @@
 # - No network from Bash at all (empty allow-list, strict). Model traffic is in-process
 #   and unaffected; an exfiltration through python3, bash or curl has nowhere to go.
 # - ANTHROPIC_AUTH_TOKEN is scrubbed from every sandboxed command's environment.
-# - Sandboxed commands run without a permission rule (autoAllowBashIfSandboxed), so the
-#   absolute-path denials that motivated Bash(python3 *) / Bash(bash *) cannot happen and
-#   those two rules go: !replace restates eval.yaml's own list.
+# - Sandboxed commands run without a permission rule (autoAllowBashIfSandboxed), so
+#   even a script the rules do not name (a `python3 -c` one-liner) runs — inside the
+#   sandbox, with no network and no key.
 # - The bootstrap scripts are skipped: they clone from GitHub and write into
 #   .claude/skills, both denied by the sandbox. Precondition: run
 #   scripts/bootstrap-assess-rfe.sh and scripts/fetch-architecture-context.sh in the
@@ -27,12 +27,6 @@ extends: openrouter.yaml
 execution:
   env:
     RFE_SKIP_BOOTSTRAP: "1"
-
-permissions:
-  allow: !replace
-    - "Skill"
-    - "Agent"
-    - "Edit(tmp/rfe-assess/**)"
 
 runner:
   settings:

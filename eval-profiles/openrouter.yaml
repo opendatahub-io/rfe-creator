@@ -3,7 +3,7 @@
 #   /eval-run --config eval-profiles/openrouter.yaml \
 #       --model openrouter:/<slug> --subagent-model openrouter:/<slug>
 #
-# The harness's direct transport (agent-eval-harness >= 1.53) does the rest: the
+# The harness's direct transport (agent-eval-harness >= 1.53.1) does the rest: the
 # per-run settings overlay points Claude Code at OpenRouter with the key from
 # OPENROUTER_API_KEY, blanks the Vertex/Bedrock switches the user settings force,
 # derives the model aliases, checks the pins in eval.yaml before the first request,
@@ -44,28 +44,19 @@ models:
         enforcement: audit
         policy: strict
 
-# Added to eval.yaml's allow list (profiles extend scalar lists). Weaker models invoke
-# the pipeline scripts by ABSOLUTE workspace path, which no relative project rule
-# matches, and a headless denial ends the run on a text-only turn
-# (2026-07-24-deepseek-v4-pro died in Phase 1 this way). What these two rules do and
-# do not change:
-# - They widen SUBAGENTS only: the orchestrator already holds unrestricted Bash for the
-#   whole run through rfe.speedrun's own `allowed-tools`, which workspace trust never
-#   gates.
-# - They are not what exposes the key. At `audit` the operator key sits in the agent's
-#   settings env by harness design (`provider.key_exposed_to_agent: true`) and every
-#   Bash child inherits it, rules or no rules. Mitigate with key hygiene: a dedicated,
-#   credit-capped key at audit, or key-guardrail (per-run key, revoked at run end).
-# - No Bash rule can express "these scripts at any path" safely: a `*` before the script
-#   name also matches `-c '<code>'`, and deny rules are text-only, not a boundary. The
-#   narrow fix is harness-side (absolute twins of the project's script rules); OS-level
-#   egress control is openrouter-sandboxed.yaml, which drops these two rules.
-# Write(...) path rules are never consulted by Claude Code (Edit(...) covers Write) and
-# the project's Edit(/tmp/rfe-assess/**) is carried over, so none is added here.
-permissions:
-  allow:
-    - "Bash(python3 *)"
-    - "Bash(bash *)"
+# No permission rule is added here. Weaker models invoke the pipeline scripts by
+# ABSOLUTE workspace path, which no relative project rule matches, and a headless
+# denial ends the run on a text-only turn (2026-07-24-deepseek-v4-pro died in Phase 1
+# this way); the harness (>= 1.53.1) closes that by adding an absolute-workspace twin
+# to every relative script rule it carries over from .claude/settings.json — the same
+# program on the same file, never a wildcard. A blanket Bash(python3 *) / Bash(bash *)
+# would only have added an exfiltration transport for subagents: at `audit` the
+# operator key sits in the agent's settings env by harness design
+# (`provider.key_exposed_to_agent: true`). What remains denied by design is anything
+# that is not one of the project's scripts (`python3 -c`, `bash -c`, curl); a model
+# that leans on those is denied, not the run. Key hygiene still applies: a dedicated,
+# credit-capped key at `audit`, or key-guardrail. OS-level egress control is
+# openrouter-sandboxed.yaml.
 
 mlflow:
   experiment: rfe-speedrun-openrouter

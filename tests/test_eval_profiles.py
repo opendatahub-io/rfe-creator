@@ -2,15 +2,16 @@
 """Tests for the OpenRouter eval profiles (eval-profiles/) and the routing table the generated
 configs carry.
 
-The harness (agent-eval-harness >= 1.53) layers a profile over its base with the ``extends:``
+The harness (agent-eval-harness >= 1.53.1) layers a profile over its base with the ``extends:``
 policy: mappings merge key by key, scalars override, scalar lists extend with dedupe. The
 tests mirror only that much of the policy, so they stay stdlib+pyyaml and import nothing from
 the harness, and they pin the properties the migration off the LiteLLM proxy relies on:
 
 * every profile chains back to the generated ``eval.yaml`` and a model profile merges to an
   ``openrouter:/`` skill AND subagent (a mixed pair fails the harness's provider-kind check);
-* the merged allow list still carries ``Skill`` and ``Agent`` (the headless pipeline) plus the
-  rules weaker models need;
+* the merged allow list is exactly the base's (``Skill``, ``Agent``, the tmp Edit rule): no
+  profile adds a blanket interpreter rule — the harness's absolute-workspace twins of the
+  project's script rules cover the absolute-path calls weaker models make;
 * no config authors the transport env the harness owns while a plan is active (the base URL,
   the auth token, the Vertex switches, the model aliases — rejected on presence) and nothing
   names an OpenRouter key;
@@ -120,7 +121,6 @@ def _bare_slug(uri):
 LAYERS = [PROFILES_DIR / "openrouter.yaml", PROFILES_DIR / "openrouter-sandboxed.yaml"]
 MODEL_PROFILES = [p for p in PROFILES if merged(p)[0]["models"]["skill"].startswith("openrouter:/")]
 BASE_ALLOW = ["Skill", "Agent", "Edit(tmp/rfe-assess/**)"]
-BLANKET_BASH = ["Bash(python3 *)", "Bash(bash *)"]
 
 
 def test_profiles_exist_next_to_the_shared_layer():
@@ -158,17 +158,15 @@ def test_shared_layer_alone_keeps_the_anthropic_roles(layer):
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=lambda p: p.name)
-def test_merged_allow_list_keeps_the_pipeline_rules(profile):
-    cfg, chain = merged(profile)
+def test_merged_allow_list_is_the_base_list_and_nothing_more(profile):
+    cfg, _ = merged(profile)
     allow = cfg["permissions"]["allow"]
-    assert len(allow) == len(set(allow)), allow
     assert _load(REPO / "eval.yaml")["permissions"]["allow"] == BASE_ALLOW
-    if any(p.name == "openrouter-sandboxed.yaml" for p in chain):
-        # Sandboxed Bash needs no rule (autoAllowBashIfSandboxed), so the sandbox layer
-        # restates the base list and nothing else.
-        assert allow == BASE_ALLOW
-    else:
-        assert allow == BASE_ALLOW + BLANKET_BASH
+    # No profile widens Bash: the harness's absolute twins of the project's relative
+    # script rules cover the absolute-path calls; a blanket interpreter rule would be an
+    # exfiltration transport for subagents holding the operator key at `audit`.
+    assert allow == BASE_ALLOW, allow
+    assert not [r for r in allow if r.startswith("Bash(")]
     assert cfg["permissions"].get("deny") == []
     # Claude Code consults Edit()/Read() path rules only; a Write(path) rule is accepted,
     # never matched, and warned about at startup.

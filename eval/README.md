@@ -120,7 +120,7 @@ During evaluation, PreToolUse hooks:
 
 The same eval can put an open-weights model (GLM, DeepSeek, Kimi, Qwen, …) under test
 through [OpenRouter](https://openrouter.ai). The harness's direct transport
-(agent-eval-harness ≥ 1.53; see its
+(agent-eval-harness ≥ 1.53.1; see its
 [OpenRouter guide](https://opendatahub-io.github.io/agent-eval-harness/guides/openrouter/))
 does the routing: no proxy to start, no hook, nothing to reconcile afterwards.
 
@@ -194,18 +194,20 @@ command inherits it. Two consequences for this profile:
 - Use a dedicated, credit-capped OpenRouter key for evals, or `key-guardrail`, which hands
   the agent a per-run key limited to the pinned providers and to `budget.run_usd` and
   revokes it at run end.
-- The shared profile allows `Bash(python3 *)` and `Bash(bash *)` so that subagents can
-  call the pipeline scripts by absolute workspace path (weaker models do, and a headless
-  denial ends the run). The rules widen subagents only: the orchestrator already holds
-  unrestricted Bash through the skill's own `allowed-tools`. No Bash rule can express
-  "these scripts at any path" without also matching `python3 -c`, and deny rules are
-  text-only, so the narrow fix is harness-side (absolute twins of the project's script
-  rules).
+- The profile adds no Bash rule. Weaker models call the pipeline scripts by absolute
+  workspace path, which no relative project rule matches, and a headless denial ends the
+  run; the harness (≥ 1.53.1) adds an absolute-workspace twin to every relative script
+  rule it carries over from `.claude/settings.json`, the same program on the same file
+  and never a wildcard. A blanket `Bash(python3 *)` would only add an exfiltration
+  transport for subagents (the orchestrator already holds unrestricted Bash through the
+  skill's own `allowed-tools`). Anything that is not one of the project's scripts, such
+  as a `python3 -c` one-liner, stays denied; a model that leans on those is denied, not
+  the run.
 
 `eval-profiles/openrouter-sandboxed.yaml` is the opt-in egress control: Claude Code's OS
 sandbox around every Bash command with an empty network allow-list, the key scrubbed from
-command environments, sandboxed commands auto-approved (so the two rules go) and the
-bootstrap scripts skipped. Local runner on macOS only until the Harbor images ship
+command environments, sandboxed commands auto-approved (even a `python3 -c` one-liner
+runs, with no network and no key) and the bootstrap scripts skipped. Local runner on macOS only until the Harbor images ship
 bubblewrap, and not yet exercised by a live run: the file header describes the smoke test
 that promotes it to the default.
 
