@@ -69,12 +69,15 @@ Stories:
 
 Done when: a third descriptor with an `eval.config` runs in the eval CI without touching the eval repository.
 
-## Epic F — Registry update for the plugin (skills-registry) — [AISDLC-186](https://redhat.atlassian.net/browse/AISDLC-186)
+## Epic F — skills-registry entry and plugin releases for rfe-creator — [AISDLC-186](https://redhat.atlassian.net/browse/AISDLC-186)
+
+Re-scoped 2026-09-30 after review: the version bump is a release step, not a registry chore. Claude Code re-fetches a marketplace plugin only when its computed version changes (manifest `version` first, then the entry's, then the commit SHA); rfe-creator pins `0.1.0` in both places with `ref: main` and no commit pin, so marketplace users are frozen at the commit they installed until the string changes. The registry schema requires an entry version, so entry and manifest must stay equal. Policy: minor bump per user-visible increment (the classifier ships as 0.2.0), patch bump for merged behaviour changes visible to interactive users, none for internal-only work.
 
 Stories:
-- F1 (AISDLC-210). rfe-creator entry: version `0.2.0` across the entry and both manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`), `author` alignment (entry says `jwforres`, manifest `opendatahub-io`), contract `rubric_ref` pins moved to the current main.
+- F1 (AISDLC-210). rfe-creator entry hygiene at 0.1.0: `author` alignment (entry says `jwforres`, manifest `opendatahub-io`), contract `rubric_ref` pins moved to the current main, and a registry validator rule that the entry version equals the upstream manifest version (nothing checks it today; `claude plugin validate` only compares them for plugins inside the marketplace tree).
 - F2 (AISDLC-211). `provides` metadata for the generic skills (design PR-10) and the `--type` surface described in the entry's contracts.
 - F3 (AISDLC-212). Weekly AST-normalised parity sweep across rfe-creator, strat-creator and epic-creator in Upstream Plugin Checks (decision D9, first half).
+- F5 (AISDLC-220). Release rfe-creator 0.2.0 with the classification stages (blocked by AISDLC-181): bump both manifests in the final classification PR and the registry entry in the same window, verify a `0.1.0` install updates to `0.2.0`, add a "Releasing" section to the README, and record whether an interim 0.1.1 goes out after the hardening PRs merge.
 - F4 (AISDLC-213). spike-executor: #127 (`strict: true` + contract) merged 2026-09-30; what remains is the upstream `repository` field fix in `IKRedHat/SPIKE-executor`.
 
 ## Epic G — Pipeline hardening from the 2026-09-29 incident (Feature criterion: "retries, duplicates, partial failures and recovery are tested") — [AISDLC-187](https://redhat.atlassian.net/browse/AISDLC-187)
