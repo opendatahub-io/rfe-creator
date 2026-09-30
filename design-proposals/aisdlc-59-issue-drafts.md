@@ -1,6 +1,6 @@
 # AISDLC-59 — remaining work as Epics and Stories (created 2026-09-30)
 
-Parent: Feature [AISDLC-59](https://redhat.atlassian.net/browse/AISDLC-59) "Make RFE Creator support pluggable planning workloads" (Outcome AISDLC-151, Big Rock AISDLC-58). Existing child: Epic AISDLC-62 "Pluggable work item types: one intake, many destinations" (the delivered PR-1 … PR-5 series; one open Story, RHAIFIRST-567). Hierarchy in AISDLC: Feature → Epic → Story. No labels: the `team-ai-first` convention is retired (2026-09-30); the Team field was left unset.
+Parent: Feature [AISDLC-59](https://redhat.atlassian.net/browse/AISDLC-59) "Make RFE Creator support pluggable planning workloads" (Outcome AISDLC-151, Big Rock AISDLC-58). Existing child: Epic AISDLC-62 "Pluggable work item types: one intake, many destinations" (the delivered PR-1 … PR-5 series) — closed 2026-09-30 after its last open Story, RHAIFIRST-567, was re-parented to AISDLC-182. Hierarchy in AISDLC: Feature → Epic → Story. No labels: the `team-ai-first` convention is retired (2026-09-30); the Team field was left unset.
 
 Status: all seven Epics and their 31 Stories were created in AISDLC on 2026-09-30 (keys below), Epics assigned to the Feature owner, Stories unassigned, all in status New.
 
@@ -28,8 +28,9 @@ Stories:
 - B3 (AISDLC-195). One scorer: a single scorer agent parameterised by type replaces `rfe-scorer` / `initiative-scorer` and the vendored per-type copies; the dispatcher's `subagent_type` comes from the descriptor.
 - B4 (AISDLC-196). Assess-detection convergence: retire the four detection mechanisms inherited from assess-rfe #10 in favour of the registry's poll/state prefixes.
 - B5 (AISDLC-197). Eval re-baseline for both types after B3/B4 (pairwise against the previous run, as for #206).
+- B6 (RHAIFIRST-567, folded in 2026-09-30 from AISDLC-62). Run report list key to a stable `per_item`, in the same `report_schema_version: 2` bump as B1: readers and the generated eval checks accept both keys first, the writer switches with the bump, the 20 harbor task copies are regenerated, `reporting.item_key` leaves the descriptor and the schema. Not shipped standalone. State on main 120196e: descriptors still declare `item_key`, the reader is not dual-key, external consumers (rfe-autofixer, rfe-creator-eval, strat-creator) have zero references.
 
-Done when: artifacts and run reports carry provenance, SETUP refuses a broken type before spending, and one scorer serves every type with parity on the evals.
+Done when: artifacts and run reports carry provenance, SETUP refuses a broken type before spending, one scorer serves every type with parity on the evals, and the run report shape no longer varies by type.
 
 ## Epic C — Initiative rubric and questionnaire review (content, with the Initiative owners) — [AISDLC-183](https://redhat.atlassian.net/browse/AISDLC-183)
 
