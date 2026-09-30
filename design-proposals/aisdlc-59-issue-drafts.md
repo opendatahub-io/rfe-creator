@@ -92,6 +92,19 @@ Stories:
 - G6. Approved-item immutability — **existing** RHAIFIRST-397 / RHAIFIRST-398, linked to AISDLC-187 as related (RHAIFIRST-612, the Draft auto-approve epic, linked as well: same approval-policy family as G5).
 - G7 (AISDLC-219). Layout guard wording: the checkout still runs the guard once as a no-op (production and dry runs); reword the condition so a skill directory inside the working directory skips it, and pin it.
 
+## Epic H — End-user documentation of the pluggable work item type mechanism — [AISDLC-221](https://redhat.atlassian.net/browse/AISDLC-221)
+
+Added 2026-09-30 at the user's request. Feature criterion: "adding another workload is documented and does not require forking RFE Creator". Today the mechanism is documented for the people who built it: the README is RFE-first with Initiatives in one paragraph and "Work Item Types" under *Development*; `types/README.md` is a field reference interleaved with delivery history; `docs/type-provider-guide.md` assumes a reader who edits the repository. Three readers have no page: the plugin user, the type owner, the operator.
+
+Stories:
+- H1 (AISDLC-222). User guide "Working with work item types": what a type is, the registered types, how the type is chosen in user terms (`--type`, batch mapping, ids/artifacts, RFE default), aliases, what changes per type, wrong-type recovery, the classification notice once AISDLC-181 ships. Linked from the README top and the skill descriptions.
+- H2 (AISDLC-223). Tutorial "Add a work item type" end to end on the paper `epic` fixture: descriptor, template, guidance, dimensions, eval fragment, gates as a checklist with failure messages, drop-in root vs pull request, ownership after merge; commands exercised by a test or CI job.
+- H3 (AISDLC-224). Operator runbook "Run a type in production": opt-in label, selection JQL, results subtree, stage dry run, approval policy, run report; written once for Initiatives with Epic D (related to AISDLC-205) in a form the next type copies.
+- H4 (AISDLC-225). Reference hygiene: delivery history out of `types/README.md` into a development page; "Work Item Types" out of the README's *Development* section; one `--type` wording across skill descriptions, both manifests and the registry entry (related to AISDLC-211).
+- H5 (AISDLC-226). Docs that stay true: a `make lint` check that the user-facing pages list exactly the registered types and that the documented resolution order matches `type_registry.resolve`; a reader test per page as the acceptance step.
+
+Done when: a PM files an Initiative from the user guide alone, a team adds a third type from the tutorial without a call, the Initiative rollout follows the runbook, and the checks keep the pages in step with the registry.
+
 ## Folded or dropped after review (2026-09-30)
 
 - Plugin and packaging follow-ups: the autofixer job setup, forwarder removal and baked plugin moved into D3; the layout-guard wording into G7; the local development marketplace, the marketplace re-test, the Codex test, closing #115/#146 and merging #172 are kept out of Jira for now.
@@ -106,4 +119,4 @@ Stories:
 
 ## Suggested order
 
-G (in flight) → E → D (with C running in parallel with the owners) → B → A → F.
+G (in flight) → E → D (with C running in parallel with the owners; H3 written alongside D) → B → A (H1 gains the classification section) → F. H1, H2, H4 and H5 can start now.
