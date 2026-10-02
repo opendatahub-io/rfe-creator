@@ -17,6 +17,9 @@ __pycache__/
 venv/
 *.egg
 
+# Local secrets and cluster settings (loaded by the eval harness's Harbor runner)
+.env
+
 # Claude Code local settings
 .claude/settings.local.json
 .mcp.json

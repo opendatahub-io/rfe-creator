@@ -1,0 +1,62 @@
+# Shared layer for evaluating open-weights models through OpenRouter. Not a model
+# choice by itself: run one of the openrouter-<model>.yaml profiles next to it, or
+#   /eval-run --config eval-profiles/openrouter.yaml \
+#       --model openrouter:/<slug> --subagent-model openrouter:/<slug>
+#
+# The harness's direct transport (agent-eval-harness >= 1.53.1) does the rest: the
+# per-run settings overlay points Claude Code at OpenRouter with the key from
+# OPENROUTER_API_KEY, blanks the Vertex/Bedrock switches the user settings force,
+# derives the model aliases, checks the pins in eval.yaml before the first request,
+# and replaces the Anthropic-priced cost estimate with the real OpenRouter charge.
+# No proxy, no hook, nothing to start. See eval/README.md.
+extends: ../eval.yaml
+
+execution:
+  timeout: 36000          # open-weights models can be a lot slower than opus
+  # REAL dollars per run (batch mode = one invocation). The CLI's own cap is this
+  # value x cli_budget_inflation (50), because Claude Code meters an Anthropic-priced
+  # estimate 2-60x above the OpenRouter charge; the real pool is budget.run_usd below.
+  max_budget_usd: 30.0
+  env:
+    # The eval runs --dry-run, but a weaker model can ignore that and call
+    # submit.py against the real Jira. Blank the write creds so any such write
+    # fails auth instead of mutating production. MCP Jira is denied by the tool
+    # handler; nothing else here is needed — the transport env is the harness's.
+    JIRA_USER: ""
+    JIRA_TOKEN: ""
+
+models:
+  providers:
+    openrouter:
+      budget:
+        run_usd: 30.0     # whole-run real-dollar pool: flagged at audit, enforced in flight at key-guardrail
+      # How the pins in eval.yaml are enforced. This is the place to switch it (not the
+      # skeleton: key-guardrail is validated against budget.run_usd, which lives here).
+      #   audit          pins checked before the first request and audited after it; NOT
+      #                  applied in flight — OpenRouter routes among every endpoint of the
+      #                  model, and requests served outside the pinned set land in
+      #                  routing.violations (policy: strict marks the run degraded).
+      #   key-guardrail  needs OPENROUTER_MANAGEMENT_KEY: a per-run key limited to the
+      #                  pinned providers (as a set — order is not a priority) and to
+      #                  budget.run_usd, enforced server-side and revoked at run end. The
+      #                  comparison-grade setting unless the account restricts providers.
+      routing:
+        enforcement: audit
+        policy: strict
+
+# No permission rule is added here. Weaker models invoke the pipeline scripts by
+# ABSOLUTE workspace path, which no relative project rule matches, and a headless
+# denial ends the run on a text-only turn (2026-07-24-deepseek-v4-pro died in Phase 1
+# this way); the harness (>= 1.53.1) closes that by adding an absolute-workspace twin
+# to every relative script rule it carries over from .claude/settings.json — the same
+# program on the same file, never a wildcard. A blanket Bash(python3 *) / Bash(bash *)
+# would only have added an exfiltration transport for subagents: at `audit` the
+# operator key sits in the agent's settings env by harness design
+# (`provider.key_exposed_to_agent: true`). What remains denied by design is anything
+# that is not one of the project's scripts (`python3 -c`, `bash -c`, curl); a model
+# that leans on those is denied, not the run. Key hygiene still applies: a dedicated,
+# credit-capped key at `audit`, or key-guardrail. OS-level egress control is
+# openrouter-sandboxed.yaml.
+
+mlflow:
+  experiment: rfe-speedrun-openrouter

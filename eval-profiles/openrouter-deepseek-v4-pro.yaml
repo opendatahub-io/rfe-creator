@@ -1,0 +1,6 @@
+# deepseek/deepseek-v4-pro as the model under test (pins: eval.yaml models.providers.openrouter).
+# Run: /eval-run --config eval-profiles/openrouter-deepseek-v4-pro.yaml
+extends: openrouter.yaml
+models:
+  skill: openrouter:/deepseek/deepseek-v4-pro
+  subagent: openrouter:/deepseek/deepseek-v4-pro

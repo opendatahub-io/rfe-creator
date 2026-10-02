@@ -1,0 +1,46 @@
+# Opt-in: the shared OpenRouter layer plus Claude Code's OS sandbox around every Bash
+# command (Seatbelt on macOS; bubblewrap + socat on Linux). Local runner only: Harbor task
+# packages do not apply runner.settings and the images ship no bubblewrap.
+#
+#   /eval-run --config eval-profiles/openrouter-sandboxed.yaml \
+#       --model openrouter:/z-ai/glm-5.2 --subagent-model openrouter:/z-ai/glm-5.2
+#
+# What it changes against openrouter.yaml:
+# - No network from Bash at all (empty allow-list, strict). Model traffic is in-process
+#   and unaffected; an exfiltration through python3, bash or curl has nowhere to go.
+# - ANTHROPIC_AUTH_TOKEN is scrubbed from every sandboxed command's environment.
+# - Sandboxed commands run without a permission rule (autoAllowBashIfSandboxed), so
+#   even a script the rules do not name (a `python3 -c` one-liner) runs — inside the
+#   sandbox, with no network and no key.
+# - The bootstrap scripts are skipped: they clone from GitHub and write into
+#   .claude/skills, both denied by the sandbox. Precondition: run
+#   scripts/bootstrap-assess-rfe.sh and scripts/fetch-architecture-context.sh in the
+#   checkout first; the workspace symlinks .claude/skills, .claude/agents and .context/
+#   from it.
+#
+# NOT yet exercised by a live run (needs an OpenRouter key). Smoke test: one case with
+# --no-llm-judges; the sandbox must initialise under `claude -p` and a deliberate
+# `curl https://example.com` from Bash must fail. Then point the model profiles at this
+# layer instead of openrouter.yaml.
+extends: openrouter.yaml
+
+execution:
+  env:
+    RFE_SKIP_BOOTSTRAP: "1"
+
+runner:
+  settings:
+    sandbox:
+      enabled: true
+      failIfUnavailable: true            # a run without the sandbox is not this profile
+      autoAllowBashIfSandboxed: true
+      allowUnsandboxedCommands: false    # no unsandboxed-retry escape hatch
+      excludedCommands: []
+      network:
+        allowedDomains: []
+        strictAllowlist: true            # deny instead of prompting; honoured because the harness passes the settings via --settings
+      filesystem:
+        allowWrite: ["/tmp/rfe-assess"]  # /tmp is not in the sandbox's default write set
+      credentials:
+        envVars:
+          - { name: ANTHROPIC_AUTH_TOKEN, mode: deny }
