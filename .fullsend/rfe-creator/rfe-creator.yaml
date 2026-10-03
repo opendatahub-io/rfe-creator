@@ -5,7 +5,7 @@ effort: high
 image: ghcr.io/fullsend-ai/fullsend-sandbox@sha256:259605fea321353552fdefd3a6a55e8b5c260998dfc5a622ed143e41a429995a
 policy: https://raw.githubusercontent.com/fullsend-ai/agents/11dd3ad15ab5033fd04661d7faf6f7af45548d2f/policies/base.yaml#sha256=3ed634401d87a1327fffe5e266272d930321484ce8a91dfa5fe447d4f2e00470
 role: rfe-creator
-slug: fullsend-ai-rfe-creator
+slug: opendatahub-io-rfe-creator
 
 host_files:
   - src: rfe-creator/gcp-vertex.env

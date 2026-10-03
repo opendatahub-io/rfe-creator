@@ -87,17 +87,24 @@ if [[ -z "${STATE}" || ! -f "${STATE}" ]]; then
   exit 1
 fi
 
+# On any failure below, hand the next iteration what the previous one reported.
+# Both fields are agent-written free text that fullsend fences into the retry
+# prompt as data; keep each to one bounded line so they cannot crowd out the
+# resume instruction.
+SUMMARY=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(" ".join(str(r.get("summary", "")).split())[:300])' "${RESULT_FILE}")
+ERRORS=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); e=r.get("errors", []); e=e if isinstance(e, list) else [e]; print(" ".join("; ".join(map(str, e)).split())[:300])' "${RESULT_FILE}")
+
 PHASE=$(awk -F': *' '/^phase:/{print $2; exit}' "${STATE}")
 if [[ "${PHASE}" != "DONE" ]]; then
   echo "FAIL: pipeline phase is ${PHASE:-unknown}, not DONE. Resume it with: python3 scripts/pipeline_state.py next-action"
+  echo "FAIL: previous run summary: ${SUMMARY}"
+  echo "FAIL: previous run errors: ${ERRORS}"
   exit 1
 fi
 
 RUNS_DIR="${TARGET_REPO_DIR}/artifacts/auto-fix-runs"
 if [[ -z "$(ls -A "${RUNS_DIR}" 2>/dev/null)" ]]; then
   echo "FAIL: phase DONE but ${RUNS_DIR} is empty"
-  SUMMARY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("summary",""))' "${RESULT_FILE}")
-  ERRORS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("errors",[]))' "${RESULT_FILE}")
   echo "FAIL: previous run summary: ${SUMMARY}"
   echo "FAIL: previous run errors: ${ERRORS}"
   exit 1

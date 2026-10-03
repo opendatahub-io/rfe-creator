@@ -183,3 +183,11 @@ claude -p "/rfe-speedrun --headless --announce-complete --input batch.yaml"
 ```
 
 Flag persistence: parsed arguments are written to `tmp/*.yaml` config files so they survive context compression during long batch runs.
+
+### Fullsend
+
+The repository also ships a [Fullsend](https://fullsend.sh) agent under `.fullsend/`
+that runs the same skills inside an OpenShell sandbox, with Jira reachable read-only
+through a provider and bootstrap done on the host. See
+[.fullsend/rfe-creator/README.md](.fullsend/rfe-creator/README.md) for prerequisites,
+environment variables and the `fullsend run` invocation.

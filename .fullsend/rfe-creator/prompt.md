@@ -12,12 +12,12 @@ artifacts, and emit a single structured result file.
 
 ## Inputs
 
-- `FULLSEND_TASK` — skill invocation string (e.g. `/rfe.create --dry-run
+- `FULLSEND_TASK` — skill invocation string (e.g. `/rfe-create --dry-run
   "Improve observability..."`). May be empty.
 - `FULLSEND_OUTPUT_DIR` — write `agent-result.json` here.
-- `JIRA_SERVER`, `JIRA_USER`, `JIRA_TOKEN` — Jira REST credentials
-- (always set; fullsend validates them before the run starts).
-- 
+- `JIRA_SERVER`, `JIRA_USER`, `JIRA_TOKEN` — Jira REST credentials (always set;
+  fullsend validates them before the run starts).
+
 The working directory is the rfe-creator target repo. Invoke `scripts/*.py` by
 that relative path exactly. Do not expand it to an absolute path.
 
@@ -69,8 +69,9 @@ Write `$FULLSEND_OUTPUT_DIR/agent-result.json`. Valid JSON, no markdown fences.
 - `action`: `completed` | `failed` | `skipped`
 - `pipeline`: `none` when skipped; otherwise the generic skill that ran
   (`rfe-auto-fix`, `rfe-speedrun`, `rfe-review`, ...).
-- `type`: the resolved   work-item type (`rfe`, `initiative`, ...), from
-  the `TYPE RESOLVED:` line the   skill prints or `type:` in `tmp/pipeline-state.yaml`.
+- `type`: the resolved work-item type (`rfe`, `initiative`, ...), from the
+  `TYPE RESOLVED:` line the skill prints or `type:` in `tmp/pipeline-state.yaml`;
+  `none` when skipped.
 - Counts default to 0. Include `errors` as an array of strings (empty if none).
 - Set `dry_run` to true when Jira writes were skipped.
 

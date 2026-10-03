@@ -14,12 +14,12 @@
     "type": {
       "type": "string",
       "minLength": 1,
-      "description": "Type of object created, reviewed, etc."
+      "description": "Resolved work-item type (rfe, initiative, ...); none when skipped."
     },
     "pipeline": {
       "type": "string",
       "minLength": 1,
-      "description": "Which pipeline ran (e.g. rfe-create, rfe-speedrun, none)."
+      "description": "Generic skill that ran (e.g. rfe-create, rfe-auto-fix, rfe-review); none when skipped."
     },
     "summary": {
       "type": "string",
@@ -27,35 +27,23 @@
     },
     "items_created": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Work items of `type` created in this run."
     },
     "items_reviewed": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Work items of `type` reviewed in this run."
     },
     "items_submitted": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Work items of `type` submitted in this run."
     },
     "items_split": {
       "type": "integer",
-      "minimum": 0
-    },
-    "initiatives_created": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "initiatives_reviewed": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "initiatives_submitted": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "initiatives_split": {
-      "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Work items of `type` split in this run."
     },
     "errors": {
       "type": "array",

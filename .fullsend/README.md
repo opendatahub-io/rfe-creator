@@ -1,21 +1,21 @@
-# RFE Creator Fullsend Agents
+# RFE Creator Fullsend Agent
 
-**Note**: Fullsend agents for `rfe-creator` are under development and in a very alpha stage.
-They only allow for local execution or a heavily customized workflow. They are not yet
-in a state to run them within Fullsend on GitHub or GitLab default Fullsend workflows. You
-can find instructions on how to run Fullsend agents locally in the
-[fullsend documentation](https://fullsend.sh) and in each agent README's here.
+**Note**: the Fullsend agent for `rfe-creator` is under development and in an early
+stage. It supports local execution and heavily customized workflows only; it is not
+yet ready for the default Fullsend workflows on GitHub or GitLab. See the
+[fullsend documentation](https://fullsend.sh) for running agents locally, and the
+[rfe-creator agent README](./rfe-creator/README.md) for this agent's setup.
 
-This folder contains the agent implemented for [Fullsend](https://fullsend.sh) that make
-use of the RFE Creator skills.
+This folder contains the agent implemented for [Fullsend](https://fullsend.sh) that
+makes use of the RFE Creator skills.
 
-To use this agent run add it to your configuration file with:
+To use this agent from another repository, add it to your configuration file with:
 
 ```bash
 fullsend agent add --fullsend-dir .fullsend https://github.com/opendatahub-io/rfe-creator/blob/main/.fullsend/rfe-creator/rfe-creator.yaml
 ```
 
-For this change on your `.fullsend/config.yaml` file:
+This adds the following to your `.fullsend/config.yaml`:
 
 ```yaml
 agents:
@@ -25,7 +25,10 @@ allowed_remote_resources:
   - https://raw.githubusercontent.com/fullsend-ai/fullsend/
   - https://raw.githubusercontent.com/fullsend-ai/agents/
   - https://raw.githubusercontent.com/opendatahub-io/rfe-creator/
-
 ```
 
-More details in the [rfe-creator README](./rfe-creator/README.md).
+From a checkout of this repository, run it directly with
+`fullsend run rfe-creator --fullsend-dir .fullsend --target-repo . --env-file .env`;
+the
+[rfe-creator agent README](./rfe-creator/README.md) lists the prerequisites and
+environment variables.
