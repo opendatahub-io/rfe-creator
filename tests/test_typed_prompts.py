@@ -180,6 +180,18 @@ _allow("rfe", f"{LEGACY}/rfe/prompts/review-agent.md", *_DIMENSION_GENERIC_REVIE
 # changing"); the initiative's "Read the initiative: <path>" is the same read, the path now the
 # skeleton's `Task file:` header line.
 _allow("initiative", f"{LEGACY}/initiative/prompts/revise-agent.md", "read the initiative")
+# Overlay discovery moved from the Glob tool to scripts/list_overlays.py: the dedicated Glob
+# tool no longer exists on native Claude Code builds (2.1.117+), and shell globs/loops are not
+# on the headless Bash allowlist, so the four sentences that scripted a Glob-then-Read pass are
+# replaced by one call to the allow-listed script; the matching rules themselves are unchanged.
+_OVERLAY_DISCOVERY = (
+    "check for overlay files with the glob tool",
+    "read each match except",
+    "frontmatter can run to 40 lines",
+    "use glob and read for this",
+)
+for _t in ("rfe", "initiative"):
+    _allow(_t, f"{LEGACY}/{_t}/dimensions/feasibility.md", *_OVERLAY_DISCOVERY)
 
 # (type, legacy file) -> substrings of normalised script invocations the collapse rewrote, why.
 ALLOWED_COMMANDS = {}

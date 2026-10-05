@@ -22,7 +22,7 @@ If the Read on `LATEST_VERSION` returns an error (file not found) or the PLATFOR
 
 ## Architecture Context Overlays
 
-Check for overlay files with the Glob tool: `.context/architecture-context/overlays/*.md`. Read each match except `README.md` and keep the ones with `status: active` in their frontmatter. Frontmatter can run to 40 lines and keeps growing, so pass `limit: 60` to Read for this filtering pass rather than loading whole files. Use Glob and Read for this, never a Bash glob or `for` loop — shell globs and loops are not on the headless Bash allowlist, so a loop costs a denied turn and then falls back to Read anyway. These overlays are human-authored corrections to the generated architecture docs — version bumps, maturity changes, dependency shifts.
+List the overlays with `python3 scripts/list_overlays.py`. It prints one line per active overlay — path, id, title, releases, affects — and already skips `README.md` and superseded files; it prints nothing when the directory is absent. Do not search the directory yourself: the dedicated Glob tool does not exist on native Claude Code builds, and shell globs and loops are not on the headless Bash allowlist, so the listing is the one path that works under every runner. Apply the filters below to the listing, then Read only the matching files. These overlays are human-authored corrections to the generated architecture docs — version bumps, maturity changes, dependency shifts.
 
 Filter for relevant overlays:
 1. **Status**: `status` must be `active` (ignore `superseded`)

@@ -23,7 +23,7 @@ that relative path exactly. Do not expand it to an absolute path.
 
 ## Dispatch
 
-1. Run `printenv FULLSEND_TASK` to read your task.
+1. Run `echo "$FULLSEND_TASK"` to read your task.
 2. If `tmp/pipeline-state.yaml` exists and its phase is not DONE, do not start a
    new run: resume with `python3 scripts/pipeline_state.py next-action` and
    follow it until the phase is DONE. This is what a validation retry looks
