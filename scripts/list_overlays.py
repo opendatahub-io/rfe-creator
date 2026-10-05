@@ -52,8 +52,10 @@ def overlay_entries(directory):
         path = os.path.join(directory, name)
         try:
             data, _body = read_frontmatter(path)
-        except ValidationError as exc:
-            print(f"WARNING: skipping {path}: {exc}", file=sys.stderr)
+        except ValidationError:
+            # Path only: the parser's message quotes the offending source line, and this
+            # warning lands in CI job logs.
+            print(f"WARNING: skipping {path}: invalid YAML frontmatter", file=sys.stderr)
             continue
         if str(data.get("status", "")).strip().lower() != "active":
             continue
