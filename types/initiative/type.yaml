@@ -109,6 +109,7 @@ batch: { extra_fields: [parent_key] }                   # validate_batch_input.p
 snapshot:
   prefix: "initiative-snapshot-"                        # snapshot_fetch.py:65; submit.py:105 (forwarded when truthy :672-673,:1170-1171); bootstrap_snapshot.py:676-677
   report_prefix: "initiative-run-"                      # generate_run_report.py:50 output_prefix; bootstrap_snapshot.py:49; submit.py:325
+  results_subdir: "initiative"                          # clone_results_repo.py sparse set (DATA_REPO_TYPES); autofixer push-results.py / restore-artifacts.sh via `type_registry.py get` — initiative/<run>/ and initiative/latest in the shared results repository (AISDLC-202)
 reporting:
   item_key: per_initiative                              # generate_run_report.py:49; bootstrap_snapshot.py:50
   criterion_labels: { what: WHAT, why: WHY, scope: Scope, open_to_how: HOW, right_sized: Right-sized }   # generate_review_pdf.py:82-88 (key order = display order)

@@ -42,7 +42,8 @@ design-proposals/work-item-types-unified.md §3.3:
     * cross-type invariants, evaluated on EFFECTIVE bindings (§3.2.1(b)):
       unique (tracker, project, issue_type); unique local_prefix,
       local_id_pattern, id_field; unique non-empty poll/state/report prefixes
-      (empty grandfathered for type rfe only); snapshot.prefix non-empty and
+      and snapshot.results_subdir (the type's subtree of the shared results
+      repository; empty grandfathered for type rfe only); snapshot.prefix non-empty and
       pairwise prefix-collision-free (snapshot_fetch.py:142-149 globs
       f"{prefix}*.yaml"); no local_prefix stem equal to any effective project key;
       no type's effective local_prefix mints an id (f"{prefix}1") that another
@@ -799,9 +800,15 @@ def cross_type_findings(registry, env):
         for value, names in _duplicates(pairs).items():
             cross(f"duplicate {label} {value!r} shared by types: {_fmt_types(names)}", names)
 
-    # (3) poll/state/report prefixes: empty only for the grandfathered type,
-    #     unique among the non-empty values
-    for dotted in ("pipeline.poll_prefix", "pipeline.state_prefix", "snapshot.report_prefix"):
+    # (3) poll/state/report prefixes and the results subtree: empty only for the
+    #     grandfathered type, unique among the non-empty values (two types sharing a
+    #     snapshot.results_subdir would read and move each other's `latest`)
+    for dotted in (
+        "pipeline.poll_prefix",
+        "pipeline.state_prefix",
+        "snapshot.report_prefix",
+        "snapshot.results_subdir",
+    ):
         non_empty = []
         for name, desc in descs.items():
             value = _opt(desc, dotted)
