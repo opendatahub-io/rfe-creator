@@ -429,9 +429,12 @@ subtree name is the descriptor field `snapshot.results_subdir`
 | `rfe` | `""` — the root, grandfathered: the repository's history and the production `latest` live there | `<ts>/` | `latest` |
 | `initiative` | `initiative` | `initiative/<ts>/` | `initiative/latest` |
 
-The write side (the autofixer's `push-results.py` / `restore-artifacts.sh`)
-and the read side here take the subtree from the same place,
-`python3 scripts/type_registry.py get <type> snapshot.results_subdir`:
+The read side here takes the subtree from
+`python3 scripts/type_registry.py get <type> snapshot.results_subdir`; the
+write side (the autofixer's `push-results.py` / `restore-artifacts.sh`)
+will read the same field the same way once the rfe-autofixer MR "typed
+results scripts" (in review) lands — until then pushes still go to the
+repository root. On the read side:
 
 - **`clone_results_repo.py`** — the `--data-dir` clone the auto-fix job
   makes before the fetch — sparse-checks out, for every type named in
@@ -441,9 +444,9 @@ and the read side here take the subtree from the same place,
   materialized: no reports, tasks or reviews. It then creates each
   requested subtree directory, so before a type's first push the fetch
   reads an existing, empty subtree (`Data repo: no 'latest' symlink`),
-  not a missing path. `DATA_REPO_TYPES` unset means the rfe pair exactly
-  as the production RFE job has always cloned it, without loading the
-  registry.
+  not a missing path. `DATA_REPO_TYPES` unset means the rfe's three
+  patterns exactly as the production RFE job has always cloned them,
+  without loading the registry.
 - **`snapshot_fetch.py fetch --data-dir <clone>/<subdir>`** follows the
   subtree's `latest`, then walks its run directories backwards for the
   type's `<snapshot.prefix>*.yaml`. Only a name that parses as
@@ -451,7 +454,8 @@ and the read side here take the subtree from the same place,
   applies too), so the rfe read at the root never enters `initiative/`,
   `test-data/` or a hand-made `test-run/`, whatever they hold; the
   subtree-name grammar (a letter first) guarantees no subdir can parse
-  as a run.
+  as a run, and gate 1 refuses `latest`, `test-data` and `test-run` as
+  a subtree name (`scripts/validate_types.py`).
 
 Two consequences worth knowing:
 

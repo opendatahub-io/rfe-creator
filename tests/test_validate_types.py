@@ -1073,6 +1073,22 @@ class TestCrossTypeGate:
         )
         _assert_finding(_validate(types_copy), "schema: $.snapshot.results_subdir", "initiative")
 
+    @pytest.mark.parametrize("value", ["latest", "test-data", "test-run"])
+    def test_results_subdir_reserved_names(self, types_copy, value):
+        """Names that pass the grammar but the readers treat specially: `latest` is every
+        subtree's symlink, `test-data` is what the sparse clone excludes and the readers
+        skip by name, `test-run` the hand-made fixture directory. No type may claim them."""
+        assert validate_types.RESERVED_RESULTS_SUBDIRS == {"latest", "test-data", "test-run"}
+        _mutate(
+            types_copy, "initiative", lambda d: d["snapshot"].__setitem__("results_subdir", value)
+        )
+        report = _validate(types_copy)
+        hits = _assert_finding(
+            report, f"snapshot.results_subdir {value!r} is reserved (type 'initiative')", "*"
+        )
+        assert hits[0].types == frozenset({"initiative"})
+        assert len(report.findings) == 1
+
     def test_results_subdir_is_required(self, types_copy):
         """A drop-in must say where its results live (next to prefix / report_prefix)."""
         _mutate(types_copy, "initiative", lambda d: d["snapshot"].pop("results_subdir"))

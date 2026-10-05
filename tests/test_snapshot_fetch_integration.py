@@ -890,7 +890,10 @@ class TestCloneThenFetch:
             ["git", "-C", src, "commit", "-m", "add latest"], check=True, capture_output=True
         )
 
-        # Clone it with clone_results_repo.py
+        # Clone it with clone_results_repo.py, as the production RFE job does (no
+        # DATA_REPO_TYPES): a developer's exported value would select that type's
+        # subtree instead of the root baseline and every issue would count as new.
+        monkeypatch.delenv("DATA_REPO_TYPES", raising=False)
         clone_dest = str(tmp_path / "cloned")
         r = subprocess.run(
             [sys.executable, CLONE_SCRIPT, src, clone_dest],
