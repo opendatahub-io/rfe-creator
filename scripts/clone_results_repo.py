@@ -26,7 +26,7 @@ the subtrees to materialize: each type contributes `/<subdir>/latest` and
 empty), both read from types/<type>/type.yaml through the type registry, and the
 requested subtree directories are created after the checkout so a first run finds an
 existing, empty subtree ("no 'latest' symlink") instead of a missing path. Unset, the
-sparse set is the literal rfe pair (DEFAULT_SPARSE_PATTERNS) and the registry is not
+sparse set is the three literal rfe patterns (DEFAULT_SPARSE_PATTERNS) and the registry is not
 imported: the production RFE job's clone is unchanged. `test-data/` is always excluded.
 An unknown type name is an error before anything is cloned.
 
