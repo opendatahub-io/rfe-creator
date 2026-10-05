@@ -2,7 +2,7 @@
 name: rfe-speedrun
 description: End-to-end pipeline for work items of any registered type — RFEs by default, Initiatives with --type initiative. Accepts a single idea, Jira key(s), or a YAML batch file. Creates, reviews, auto-fixes (with splits), and submits. Supports --headless, --announce-complete, and --dry-run for CI.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill
+allowed-tools: Read, Write, Edit, Bash, AskUserQuestion, Skill
 ---
 
 You are running the full work-item pipeline in speedrun mode. Your goal is to go from problem statements or objectives to submitted Jira tickets with minimal interaction. You orchestrate by calling other skills — never duplicate their work.
