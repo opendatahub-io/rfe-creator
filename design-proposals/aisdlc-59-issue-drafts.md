@@ -87,8 +87,9 @@ Stories:
 - G1 (AISDLC-214). Stop hook guard — **existing** rfe-creator #209 (in review).
 - G2 (AISDLC-215). Submit holds an interrupted revision — **existing** rfe-creator #210 (in review).
 - G3 (AISDLC-216). Job-level green-run guard — **existing** rfe-autofixer MR !12 (in review).
-- G4 (AISDLC-217). Deterministic zero-work end: `pipeline_state` reaches DONE (or a `RESULT: NO_TASKS` marker) on zero items without the model improvising `set-phase DONE`.
+- G4 (AISDLC-217). Deterministic zero-work end: `pipeline_state` reaches DONE (or a `RESULT: NO_TASKS` marker) on zero items without the model improvising `set-phase DONE`. — **done** by rfe-creator #213 (merged 2026-10-05, main be98b85): `BATCH_START` with `total_batches` 0 routes to DONE, fails closed without the resume check's output or next to pending ids/batch files, no run report; promotion pending.
 - G5 (AISDLC-218). Auto-approve on a `split` recommendation: decide whether the rubric pass should approve an item the review wants split (the right-sizing gap, `project_right_sized_calibration_gap`), and change `submit.py`'s policy accordingly.
+- G6 (AISDLC-275, created 2026-10-05, low priority). Submit hold: detect an interrupted *second* revision pass. The hold's signal (`auto_revised` false + body changed) is a sticky boolean that REASSESS_RESTORE re-raises before pass 2, so a pass-2 agent cut off after the body edit would publish. Per-pass completion marker; trigger = `revision_cycles: 2` in production reports (0/485 since 2026-09-10) or another revise-agent death.
 - G6. Approved-item immutability — **existing** RHAIFIRST-397 / RHAIFIRST-398, linked to AISDLC-187 as related (RHAIFIRST-612, the Draft auto-approve epic, linked as well: same approval-policy family as G5).
 - G7 (AISDLC-219). Layout guard wording: the checkout still runs the guard once as a no-op (production and dry runs); reword the condition so a skill directory inside the working directory skips it, and pin it.
 
