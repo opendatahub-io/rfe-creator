@@ -346,7 +346,10 @@ def build_report(
         before = data.get("before_score")
         if before is not None:
             entry["before_score"] = before
-            before_score_list.append(before)
+        # An item that was never revised has no before_score, but its "before"
+        # is its "after". Averaging only the revised items would compare two
+        # different populations and report a phantom regression.
+        before_score_list.append(before if before is not None else score)
 
         if data.get("auto_revised") and before is not None and before != score:
             entry["revision_cycles"] = 1
@@ -354,15 +357,18 @@ def build_report(
             entry["revision_cycles"] = 0
 
         scores = data.get("scores")
-        if isinstance(scores, dict):
-            for f in score_fields:
-                if f in scores:
-                    after_totals[f].append(scores[f])
+        scores = scores if isinstance(scores, dict) else {}
         before_scores = data.get("before_scores")
-        if isinstance(before_scores, dict):
-            for f in score_fields:
-                if f in before_scores:
-                    before_totals[f].append(before_scores[f])
+        before_scores = before_scores if isinstance(before_scores, dict) else {}
+        for f in score_fields:
+            if f in scores:
+                after_totals[f].append(scores[f])
+                # Same rule as before_score_list above: an unrevised item's
+                # "before" is its "after", so a criterion with no recorded
+                # before falls back to its own score. A criterion present
+                # only in before_scores is counted on neither side — on one
+                # side it would compare different populations again.
+                before_totals[f].append(before_scores.get(f, scores[f]))
 
         kids = children_map.get(item_id)
         if kids:
