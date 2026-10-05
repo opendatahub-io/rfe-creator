@@ -57,6 +57,11 @@ Stories:
 - D4 (AISDLC-205). Opt-in label: name it, document it for Initiative owners, add it to the descriptor's `conventions.labels`.
 - D5 (AISDLC-206). Approval policy for Initiatives: dry-run period, then live with auto-approve off; define the RHOAIENG transition target and comment marker (`[Initiative Creator]`) with the owners before the first live run.
 - D6 (AISDLC-207). First production runs monitored (run report, Jira effects), then the opt-in label lifted or kept as a decision.
+- D7 (AISDLC-278, 2026-10-05). Split hold: a submit switch that withholds split submissions until reviewed (today splits run regardless of `--auto-approve`; needed for the proposal's D3).
+- D8 (AISDLC-279, 2026-10-05). Interrupted-revision hold independent of `--auto-approve` (the #210 hold is gated on the switch; live-with-auto-approve-off would publish).
+- D9 (AISDLC-280, 2026-10-05). Fetch the Parent field for Initiatives so the alignment check can run on fetched items (fetch_issue has no `parent`; 2/197 open Initiatives have a RHAISTRAT parent).
+- D10 (AISDLC-281, 2026-10-05). Runner stops enabling the image-baked plugin — split out of D3/AISDLC-204 (needs an agentic-ci disable-all sentinel + image bump).
+- Status 2026-10-05: D1 decided + corrected on AISDLC-202 (read side is NOT zero code); rfe-autofixer MR !15 (MR-A) + rfe-creator #215 (PR-B) in review; owner proposal at design-proposals/initiative-production-proposal.md (decisions D1-D6 for 183/205/206/207); RHOAIENG has no Approved status.
 
 Done when: a scheduled initiative job runs green on the promoted tree with opt-in scope, and the first live results have been reviewed with the owners.
 
