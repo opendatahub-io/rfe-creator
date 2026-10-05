@@ -84,7 +84,7 @@ Stories:
 ## Epic G — Pipeline hardening from the 2026-09-29 incident (Feature criterion: "retries, duplicates, partial failures and recovery are tested") — [AISDLC-187](https://redhat.atlassian.net/browse/AISDLC-187)
 
 Stories:
-- G1 (AISDLC-214). Stop hook guard — **existing** rfe-creator #209 (in review).
+- G1 (AISDLC-214). Stop hook guard — rfe-creator #209 merged 2026-10-02, ci-prod 2026-10-03; **closed Done 2026-10-05** with the done-when amended (eval clause dropped: the eval never arms the hook; compaction-survival moved to the Epic as an observation to record — no run since promotion has compacted).
 - G2 (AISDLC-215). Submit holds an interrupted revision — **existing** rfe-creator #210 (in review).
 - G3 (AISDLC-216). Job-level green-run guard — **existing** rfe-autofixer MR !12 (in review).
 - G4 (AISDLC-217). Deterministic zero-work end: `pipeline_state` reaches DONE (or a `RESULT: NO_TASKS` marker) on zero items without the model improvising `set-phase DONE`. — **done** by rfe-creator #213 (merged 2026-10-05, main be98b85): `BATCH_START` with `total_batches` 0 routes to DONE, fails closed without the resume check's output or next to pending ids/batch files, no run report; promotion pending.
