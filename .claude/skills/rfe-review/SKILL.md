@@ -2,10 +2,10 @@
 name: rfe-review
 description: Review and improve work items of any registered type — RFEs (RHAIRFE) and Initiatives (RHOAIENG, /rfe-review --type initiative). Accepts one or more Jira keys to fetch and review existing items, or reviews local artifacts from /rfe-create. Runs rubric scoring and the type's review dimensions (technical feasibility, strategic alignment), then auto-revises the issues it finds.
 user-invocable: true
-allowed-tools: Glob, Bash, Agent, AskUserQuestion
+allowed-tools: Bash, Agent, AskUserQuestion
 ---
 
-You are a work-item review orchestrator. Your job is to coordinate reviews and revisions by launching agents and reading structured results. **Critical: never read file contents into your context — only read frontmatter via `scripts/frontmatter.py read` and check file existence via Glob.** All content-heavy work (reading item bodies, assessment results, writing review files, doing revisions) is delegated to agents.
+You are a work-item review orchestrator. Your job is to coordinate reviews and revisions by launching agents and reading structured results. **Critical: never read file contents into your context — only read frontmatter via `scripts/frontmatter.py read` and check file existence via `scripts/check_review_progress.py --list-ids` (the dedicated Glob tool does not exist on native Claude Code builds, and shell globs are not on the headless allowlist).** All content-heavy work (reading item bodies, assessment results, writing review files, doing revisions) is delegated to agents.
 
 ## Review Step 0: Resolve the Type, Parse Arguments and Persist Flags
 
@@ -42,7 +42,13 @@ python3 scripts/state.py init tmp/{STATE_PREFIX}review-config.yaml type={TYPE} h
 python3 scripts/state.py write-ids tmp/{STATE_PREFIX}review-all-ids.txt <all_IDs>
 ```
 
-For each ID, check if `{TASKS_DIR}/<id>.md` already exists locally (use Glob, don't read the file). Separate IDs into:
+Check which IDs already have a task file locally, without reading or searching for the files:
+
+```bash
+python3 scripts/check_review_progress.py --phase {POLL_PREFIX}fetch --id-file tmp/{STATE_PREFIX}review-all-ids.txt --list-ids
+```
+
+This is a one-shot existence check, not a wave poll: ignore the `NEXT_POLL` value it prints. Separate IDs by its output, `COMPLETED_IDS` and `PENDING_IDS`:
 - **Local**: task file exists — skip fetch
 - **Remote**: task file missing — needs Jira fetch
 
@@ -67,7 +73,7 @@ python3 scripts/state.py write-ids {POLL_FILE_PREFIX}fetch.txt <all_remote_IDs>
 python3 scripts/check_review_progress.py --phase {POLL_PREFIX}fetch --id-file {POLL_FILE_PREFIX}fetch.txt
 ```
 
-After all fetch agents complete, verify task files exist via Glob. For any missing, write an error to the review file:
+After the poll ends, run the same check once more with `--list-ids`; every ID under `PENDING_IDS` has no task file. For each, write an error to the review file:
 
 ```bash
 python3 scripts/frontmatter.py set {REVIEWS_DIR}/<ID>-review.md {ID_FIELD}=<ID> score=0 pass=false recommendation=revise feasibility=feasible auto_revised=false needs_attention=true {SCORE_ZERO_SET} error="fetch_failed: task file not created" type={TYPE}
@@ -120,10 +126,10 @@ python3 scripts/check_review_progress.py --phase {POLL_PREFIX}<name> --id-file {
 
 A non-blocking dimension (`DIMENSION_<NAME>_BLOCKING=false`) is polled the same way (`--phase {POLL_PREFIX}<name>`) but only for the IDs it was launched for — skip its poll block entirely when it was launched for none, since the checker exits 2 on an empty ID list. It is informational, not blocking: if it is still PENDING after 5 minutes, stop polling and continue; the prerequisite check below records the missing file without failing the ID.
 
-After completion, check prerequisites for each ID via Glob:
-- If assess result (`{ASSESS_STAGING}/<ID>.result.md`) is missing → write error: `assess_failed`
-- If a blocking dimension's file (its `DIMENSION_<NAME>_FILE` line) is missing → write error: `<name>_failed`
-- If a non-blocking dimension's file is missing AND its agent was launched → note but do not treat as a blocking error
+After completion, run each of those polls once more with `--list-ids` and read its `PENDING_IDS`:
+- An ID under `PENDING_IDS` for `{POLL_PREFIX}assess` has no assess result (`{ASSESS_STAGING}/<ID>.result.md`) → write error: `assess_failed`
+- An ID under `PENDING_IDS` for a blocking dimension's phase has no `DIMENSION_<NAME>_FILE` → write error: `<name>_failed`
+- An ID under `PENDING_IDS` for a non-blocking dimension whose agent was launched → note but do not treat as a blocking error
 
 For any missing prerequisite:
 

@@ -267,20 +267,23 @@ def check_id(phase, rfe_id, since=None):
     return "completed"
 
 
+def classify_ids(phase, ids):
+    """Per-ID verdicts for one phase: {"completed": [...], "pending": [...], "error": [...]},
+    each list in input order. The orchestrators use this (``--list-ids``) for the existence
+    checks they used to do with the Glob tool, which native Claude Code builds no longer
+    provide (2.1.117+); one call answers "which IDs have the file" for a whole batch."""
+    buckets = {"completed": [], "pending": [], "error": []}
+    for rfe_id in ids:
+        buckets[check_id(phase, rfe_id)].append(rfe_id)
+    return buckets
+
+
 def _check_phase(phase, ids, fast):
     """Check one phase and return (completed, errors, pending, total, next_poll)."""
-    completed = 0
-    errors = 0
-    pending_ids = []
-
-    for rfe_id in ids:
-        result = check_id(phase, rfe_id)
-        if result == "completed":
-            completed += 1
-        elif result == "error":
-            errors += 1
-        else:
-            pending_ids.append(rfe_id)
+    buckets = classify_ids(phase, ids)
+    completed = len(buckets["completed"])
+    errors = len(buckets["error"])
+    pending_ids = buckets["pending"]
 
     total = len(ids)
     pending = len(pending_ids)
@@ -353,6 +356,12 @@ def main():
         help="Additional phases to check (wait mode)",
     )
     parser.add_argument("--id-file", help="File containing IDs (one per line or space-separated)")
+    parser.add_argument(
+        "--list-ids",
+        action="store_true",
+        help="single-phase mode: also print COMPLETED_IDS=, PENDING_IDS= (and ERROR_IDS= when "
+        "any) so the caller can tell which IDs have the phase's file without searching for it",
+    )
     parser.add_argument(
         "--fast-poll",
         action="store_true",
@@ -447,6 +456,12 @@ def main():
             parts.append(f"ERRORS={errors}")
         parts.append(f"NEXT_POLL={next_poll}")
         print(", ".join(parts))
+        if args.list_ids:
+            buckets = classify_ids(args.phase, ids)
+            print("COMPLETED_IDS=" + " ".join(buckets["completed"]))
+            print("PENDING_IDS=" + " ".join(buckets["pending"]))
+            if buckets["error"]:
+                print("ERROR_IDS=" + " ".join(buckets["error"]))
 
 
 if __name__ == "__main__":

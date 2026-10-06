@@ -472,7 +472,7 @@ PROCESSED→ABSENT transition — once an issue enters the snapshot, it stays.
 
 | # | Source | Destination | Trigger | Mechanism |
 |---|---|---|---|---|
-| H1 | Create | Review | User invokes `/rfe-review RFE-NNN` | Task file existence check via Glob |
+| H1 | Create | Review | User invokes `/rfe-review RFE-NNN` | Task file existence check via `check_review_progress.py --phase <prefix>fetch --list-ids` |
 | H2 | Speedrun Phase 1 | Create | Mode A (always --headless), Mode C (--headless only if speedrun is headless) | Invoke /rfe-create [--headless] |
 | H3 | Speedrun Phase 2 | Auto-Fix | IDs in `tmp/speedrun-all-ids.txt` | Explicit IDs passed as args |
 | H4 | Speedrun Phase 3 | Submit | `SUBMIT=` from `collect_recommendations.py` | Passing IDs passed to `/rfe-submit` |

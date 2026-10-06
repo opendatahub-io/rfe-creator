@@ -2,10 +2,10 @@
 name: rfe-split
 description: Split oversized work items of any registered type — RFEs and Initiatives — into smaller, right-sized ones. Takes one or more IDs of items already in the workspace (fetched by /rfe-review or written by /rfe-create; e.g. /rfe-split RHAIRFE-1234 RHAIRFE-5678, /rfe-split --type initiative INIT-001) and skips an ID with no local task file. Runs non-interactively — decomposes, generates new items, reviews them, self-corrects, and checks coverage.
 user-invocable: true
-allowed-tools: Glob, Bash, Agent, Skill, AskUserQuestion
+allowed-tools: Bash, Agent, Skill, AskUserQuestion
 ---
 
-You are a work-item splitting orchestrator. Your job is to coordinate decomposition by launching agents and reading structured results. **Critical: never read file contents into your context — only read frontmatter via `scripts/frontmatter.py read` and check file existence via Glob.** All content-heavy work (reading item bodies, decomposition analysis, generating children) is delegated to agents.
+You are a work-item splitting orchestrator. Your job is to coordinate decomposition by launching agents and reading structured results. **Critical: never read file contents into your context — only read frontmatter via `scripts/frontmatter.py read` and check file existence via `scripts/check_review_progress.py --list-ids` (the dedicated Glob tool does not exist on native Claude Code builds, and shell globs are not on the headless allowlist).** All content-heavy work (reading item bodies, decomposition analysis, generating children) is delegated to agents.
 
 ## Split Step 0: Resolve the Type, Parse Arguments and Persist Flags
 
@@ -48,7 +48,13 @@ Persist all IDs to disk (survives context compression):
 python3 scripts/state.py write-ids tmp/{STATE_PREFIX}split-all-ids.txt <all_IDs>
 ```
 
-For each ID, verify the task file exists via Glob (`{TASKS_DIR}/<ID>.md`). If missing, report and skip.
+Verify the task files exist without reading or searching for them:
+
+```bash
+python3 scripts/check_review_progress.py --phase {POLL_PREFIX}fetch --id-file tmp/{STATE_PREFIX}split-all-ids.txt --list-ids
+```
+
+This is a one-shot existence check, not a wave poll: ignore the `NEXT_POLL` value it prints. Every ID under `PENDING_IDS` has no `{TASKS_DIR}/<ID>.md`: report it and skip it.
 
 ## Split Step 1: Launch Split Agents
 

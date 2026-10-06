@@ -783,6 +783,34 @@ class TestLegacyMode:
             sys.argv = old_argv
         return exit_code, captured.getvalue()
 
+    def test_list_ids_names_each_bucket(self, tmp_path):
+        """--list-ids is the orchestrators' existence check (the Glob tool is gone on native
+        Claude Code builds): one call says which IDs have the phase's file and which do not."""
+        (tmp_path / "A.md").write_text("done")
+        (tmp_path / "C.md").write_text("done")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"fetch": lambda id: str(tmp_path / f"{id}.md")},
+        ):
+            code, out = self._run_main(["--phase", "fetch", "--list-ids", "A", "B", "C", "D"])
+        assert code == 0
+        lines = out.strip().splitlines()
+        assert lines[0] == "COMPLETED=2/4, PENDING=2, NEXT_POLL=30"
+        assert lines[1] == "COMPLETED_IDS=A C"
+        assert lines[2] == "PENDING_IDS=B D"
+        assert len(lines) == 3  # no ERROR_IDS line when nothing errored
+
+    def test_list_ids_with_everything_present(self, tmp_path):
+        for name in ("A", "B"):
+            (tmp_path / f"{name}.md").write_text("done")
+        with patch.dict(
+            "check_review_progress.PHASE_CHECKS",
+            {"fetch": lambda id: str(tmp_path / f"{id}.md")},
+        ):
+            code, out = self._run_main(["--phase", "fetch", "--list-ids", "A", "B"])
+        assert code == 0
+        assert out.strip().splitlines()[1:] == ["COMPLETED_IDS=A B", "PENDING_IDS="]
+
     def test_legacy_format_unchanged(self, tmp_path):
         """Legacy mode output format is flat CSV, not prefixed by phase."""
         (tmp_path / "A.md").write_text("done")

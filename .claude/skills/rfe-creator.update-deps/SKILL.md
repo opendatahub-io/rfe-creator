@@ -3,7 +3,7 @@ name: rfe-creator.update-deps
 description: Force re-vendor the dependencies — assess-rfe skills at the descriptor-pinned commit and the latest architecture context. Use after bumping pipeline.rubric.ref or to repair a stale copy.
 user-invocable: true
 disable-model-invocation: true
-allowed-tools: Bash, Glob
+allowed-tools: Bash
 ---
 
 **Layout check.** The plugin root is the skill directory's third parent. Unless the working directory is that root (a checkout), run once

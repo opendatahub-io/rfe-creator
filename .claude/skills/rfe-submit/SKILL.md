@@ -2,7 +2,7 @@
 name: rfe-submit
 description: Submit or update work items of any registered type in Jira — new RHAIRFE tickets for new RFEs, RHOAIENG Initiative tickets for Initiatives (/rfe-submit --type initiative), or updates to existing tickets fetched from Jira. Use after /rfe-review.
 user-invocable: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Bash
 ---
 
 You are a work-item submission assistant. Your job is to create or update the type's Jira tickets from reviewed artifacts.
