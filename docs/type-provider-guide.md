@@ -129,6 +129,14 @@ Rules that are easy to trip:
   `fetch_issue.py --fetch-all --type <t>` reads `dirs.{tasks,originals}`, `identity.id_field`
   and `companions.comments` (all schema-required), plus the effective
   `identity.jira.{project,issue_type}` it verifies the fetched issue against.
+- **A type picks its results subtree.** `snapshot.results_subdir` names the type's subtree of
+  the shared results repository (`<subdir>/<run>/` and `<subdir>/latest`; `''` is the root,
+  grandfathered for `rfe`) — gate 1 requires it next to `prefix` / `report_prefix`, keeps
+  non-empty values unique and refuses the reserved names `latest`, `test-data` and `test-run`;
+  `clone_results_repo.py` reads it for every type named in `DATA_REPO_TYPES`, and the
+  autofixer's push / restore scripts will read it through `type_registry.py get` once the
+  rfe-autofixer MR "typed results scripts" (in review) lands — until then pushes still go to
+  the repository root (`docs/snapshot-incremental-fetch.md` "Results repository layout").
 - **Submit facts are read at import, for every type.** `submit.TYPE_CONFIGS` and
   `split_submit.SPLIT_CONFIG` read `identity.jira.{project,issue_type,key_prefixes}`,
   `identity.{id_field,local_prefix}`, `dirs.{tasks,reviews,originals}`,

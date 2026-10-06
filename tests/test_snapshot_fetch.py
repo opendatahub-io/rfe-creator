@@ -432,6 +432,41 @@ def _make_results_dir(tmp_path, runs):
     return repo
 
 
+_INIT_DESC = type_registry.load().get("initiative")
+_INIT_SUBDIR = _INIT_DESC.get("snapshot.results_subdir")
+_INIT_PREFIX = _INIT_DESC.get("snapshot.prefix")
+
+
+def _write_snapshot(run_dir, filename, issues):
+    snap_dir = os.path.join(run_dir, "auto-fix-runs")
+    os.makedirs(snap_dir, exist_ok=True)
+    with open(os.path.join(snap_dir, filename), "w") as f:
+        yaml.dump({"issues": issues}, f)
+
+
+def _shared_layout(tmp_path, initiative_latest=True):
+    """The AISDLC-202 results repository: rfe runs and `latest` at the root, initiative
+    runs and `latest` under <results_subdir>/. Each `latest` points at the OLDER run of
+    its type, as after a dry run pushed a newer run without moving `latest`.
+    Returns (root, initiative subtree)."""
+    root = _make_results_dir(
+        tmp_path,
+        [
+            {"name": "20260401-120000", "snapshot": {"issues": {"RHAIRFE-1": "rfe-old"}}},
+            {"name": "20260403-120000", "snapshot": {"issues": {"RHAIRFE-1": "rfe-new"}}},
+        ],
+    )
+    os.symlink("20260401-120000", os.path.join(root, "latest"))
+    sub = os.path.join(root, _INIT_SUBDIR)
+    for name, value in (("20260402-130000", "init-old"), ("20260404-130000", "init-new")):
+        _write_snapshot(
+            os.path.join(sub, name), f"{_INIT_PREFIX}{name}.yaml", {"RHOAIENG-1": value}
+        )
+    if initiative_latest:
+        os.symlink("20260402-130000", os.path.join(sub, "latest"))
+    return root, sub
+
+
 class TestLoadSnapshotFromDir:
     def test_follows_latest_symlink(self, tmp_path):
         """Finds snapshot via latest symlink."""
@@ -521,6 +556,94 @@ class TestLoadSnapshotFromDir:
         assert data is not None
         # Should prioritise the symlink target (older), not newest
         assert data["issues"] == {"RHAIRFE-1": "old"}
+
+    def test_skips_non_timestamp_dirs(self, tmp_path):
+        """Only a YYYYMMDD-HHMMSS name is a run directory (bootstrap_snapshot's rule):
+        a sibling type's subtree, a hand-made test-run/ and a suffixed copy are never
+        read, even when they hold rfe-prefixed snapshots newer than every run."""
+        repo = _make_results_dir(
+            tmp_path,
+            [{"name": "20260401-120000", "snapshot": {"issues": {"RHAIRFE-1": "real"}}}],
+        )
+        for stray in (_INIT_SUBDIR, "test-run", "20260409-120000-copy", "20260409"):
+            _write_snapshot(
+                os.path.join(repo, stray),
+                "issue-snapshot-20260409-120000.yaml",
+                {"RHAIRFE-1": stray},
+            )
+
+        data = load_snapshot_from_dir(repo)
+        assert data is not None
+        assert data["issues"] == {"RHAIRFE-1": "real"}
+
+    def test_only_non_timestamp_dirs_returns_none(self, tmp_path):
+        repo = str(tmp_path / "data-repo")
+        _write_snapshot(
+            os.path.join(repo, "test-run"),
+            "issue-snapshot-20260401-120000.yaml",
+            {"RHAIRFE-1": "x"},
+        )
+        assert load_snapshot_from_dir(repo) is None
+
+    def test_latest_pointing_outside_the_run_names_falls_back_to_the_scan(self, tmp_path):
+        repo = _make_results_dir(
+            tmp_path,
+            [{"name": "20260401-120000", "snapshot": {"issues": {"RHAIRFE-1": "real"}}}],
+        )
+        _write_snapshot(
+            os.path.join(repo, "test-run"),
+            "issue-snapshot-20260409-120000.yaml",
+            {"RHAIRFE-1": "x"},
+        )
+        os.symlink("test-run", os.path.join(repo, "latest"))
+        data = load_snapshot_from_dir(repo)
+        assert data["issues"] == {"RHAIRFE-1": "real"}
+
+    # ── the shared layout (AISDLC-202): root = rfe, <results_subdir>/ = initiative ──
+
+    def test_subtree_read_follows_its_own_latest(self, tmp_path, capsys):
+        """--data-dir <clone>/initiative with the initiative prefix follows initiative/latest
+        (the older run), not the newest directory, in a tree that also holds rfe runs."""
+        _root, sub = _shared_layout(tmp_path)
+        data = load_snapshot_from_dir(sub, prefix=_INIT_PREFIX)
+        assert data is not None
+        assert data["issues"] == {"RHOAIENG-1": "init-old"}
+        assert "Data repo latest: 20260402-130000" in capsys.readouterr().err
+
+    def test_root_read_ignores_the_subtree(self, tmp_path, capsys):
+        """The rfe read at the root follows the root `latest` and never visits
+        <results_subdir>/, by the timestamp rule rather than by what it happens to hold."""
+        root, _sub = _shared_layout(tmp_path)
+        data = load_snapshot_from_dir(root)
+        assert data is not None
+        assert data["issues"] == {"RHAIRFE-1": "rfe-old"}
+        assert f"{_INIT_SUBDIR}/" not in capsys.readouterr().err
+
+    def test_subtree_read_with_the_rfe_prefix_finds_nothing(self, tmp_path):
+        """Prefixes keep the types apart even inside one subtree."""
+        _root, sub = _shared_layout(tmp_path)
+        assert load_snapshot_from_dir(sub) is None
+
+    def test_subtree_without_latest_scans_its_newest_run(self, tmp_path, capsys):
+        """No <results_subdir>/latest yet (only dry runs pushed, --no-update-latest): the
+        newest run directory holding a snapshot is the baseline. Documented in
+        docs/snapshot-incremental-fetch.md "Results repository layout"; benign because a
+        --dry-run submit never marks an entry processed."""
+        _root, sub = _shared_layout(tmp_path, initiative_latest=False)
+        data = load_snapshot_from_dir(sub, prefix=_INIT_PREFIX)
+        assert data is not None
+        assert data["issues"] == {"RHOAIENG-1": "init-new"}
+        assert "no 'latest' symlink" in capsys.readouterr().err
+
+    def test_empty_subtree_is_not_a_missing_path(self, tmp_path, capsys):
+        """What clone_results_repo.py leaves before the first push of a type: an existing,
+        empty subtree — an empty baseline, not a setup failure."""
+        sub = tmp_path / "data-repo" / _INIT_SUBDIR
+        sub.mkdir(parents=True)
+        assert load_snapshot_from_dir(str(sub), prefix=_INIT_PREFIX) is None
+        err = capsys.readouterr().err
+        assert "no 'latest' symlink" in err
+        assert "Data repo path not found" not in err
 
 
 class TestWriteIdFile:

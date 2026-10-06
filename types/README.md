@@ -40,7 +40,7 @@ writes the selected `--type`'s layout (`dirs.{tasks,originals}`, `identity.id_fi
 companion gated on `companions.comments`). Those two tables are built at import for **every**
 registered type — and `submit.py` imports `snapshot_fetch` — so a drop-in must carry
 `conventions.labels.{ignore,split_quarantine}` and `snapshot.{prefix,report_prefix}` (gate 1
-already requires the two `snapshot` keys but not the two labels; copying `types/rfe/` keeps them
+already requires the `snapshot` keys but not the two labels; copying `types/rfe/` keeps them
 all) or the import fails with a `KeyError` naming the type and the field. Since PR-2d the Jira write
 path is a projection too: `submit.TYPE_CONFIGS` and `split_submit.SPLIT_CONFIG` build over `names()`
 from `identity.jira.{project,issue_type,key_prefixes}`, `identity.{id_field,local_prefix}`,
@@ -83,6 +83,7 @@ itself is fine — `resolve()` follows the link).
 | `check_revised.py` | `_TYPE_CONFIG`; `--type` validated through `type_registry.parse_type_arg` (unknown → exit 2 with the registered list) | PR-2a; PR-3a (validation) |
 | `check_review_progress.py` | `PHASE_CHECKS`, `check_id` id field + modes by phase base, `--phase` / `--also-phase` choices; the Phase-1 `create` row for every type (PR-5b: the generic speedrun body polls `<poll_prefix>create`); the `_detect_fast` config allowlist is the descriptor projection `state_prefix` × {review, split, speedrun} written out | PR-2b; PR-5b (create row, allowlist) |
 | `check_right_sized.py` | `_TYPE_CONFIG`, `pipeline.resplit`; `--type` validated through `type_registry.parse_type_arg` (unknown → exit 2 with the registered list) | PR-2a; PR-3a (validation) |
+| `clone_results_repo.py` | `snapshot.{results_subdir,prefix}` of every type named in `DATA_REPO_TYPES` — the sparse set `/<subdir>/latest` + `/<subdir>/*/auto-fix-runs/<prefix>*.yaml` per type (root forms for an empty subdir), the subtree directories created after the checkout; unknown name → exit 1 before any clone. Unset = the three literal rfe patterns without loading the registry (the production RFE job's clone, run fail-open before `requirements.txt` is installed), pinned by test to the rfe descriptor's projection (`tests/test_clone_results_repo.py`). The autofixer's `push-results.py` / `restore-artifacts.sh` read the same `snapshot.results_subdir` through `python3 scripts/type_registry.py get` once the rfe-autofixer MR "typed results scripts" (in review) lands; until then pushes still go to the repository root | AISDLC-202 (typed path); the default path is the grandfathered literal, pinned |
 | `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
 | `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
@@ -177,7 +178,7 @@ asserts that every differing or one-sided leaf falls under one of these keys:
 | Group | Dotted keys that differ between the two files |
 |---|---|
 | Identity | `type`, `display.entity`, `display.entity_plural`, `identity.jira.{project,issue_type,key_prefixes}`, `identity.{local_prefix,local_id_pattern,id_field}` |
-| Layout | `dirs.{tasks,originals,reviews}`, `index.enabled`, `companions.comments`, `batch.extra_fields`, `snapshot.{prefix,report_prefix}` |
+| Layout | `dirs.{tasks,originals,reviews}`, `index.enabled`, `companions.comments`, `batch.extra_fields`, `snapshot.{prefix,report_prefix,results_subdir}` (`results_subdir` = the type's subtree of the shared results repository: `''` the root for `rfe`, `initiative/` for initiative — AISDLC-202) |
 | Conventions | `conventions.{type_label,label_prefix,comment_prefix,removed_context_preamble,query_default,parent_key_patterns}`, `conventions.labels.*` (every reserved key; `alignment.*` only when an alignment dimension exists) |
 | Schema | `schema.task.extra_fields` (rfe adds `size`), `schema.review.{score_fields,extra_fields,extra_rules}` |
 | Pipeline | `pipeline.{poll_prefix,state_prefix,scorer_agent}`, `pipeline.prompts.*`, `pipeline.dimensions[]` (name/prompt/blocking/condition/skip_stub), `pipeline.rubric.{ref,path,export}`, `pipeline.context_sources[].args` (the `--type` argument) |
@@ -591,7 +592,9 @@ first two changed no verdict and the third removed exactly two false positives.
    descriptor root; cross-type: unique
    effective `(tracker, project, issue_type)`, unique `local_prefix`, `local_id_pattern`,
    `id_field`, poll/state prefixes (empty allowed for `rfe` only), snapshot prefixes non-empty and
-   pairwise not prefix-of-each-other, `report_prefix` non-empty except `rfe`, no `local_prefix`
+   pairwise not prefix-of-each-other, `report_prefix` and `results_subdir` (the type's subtree of the
+   shared results repository) non-empty and unique except `rfe`, `results_subdir` never `latest`,
+   `test-data` or `test-run`, no `local_prefix`
    stem equal to an effective project key, `rubric.ref` a 7–40-char hex SHA (or, for the D3
    embedded rubric `rubric.repo: self`, `rubric.rubric_version` a 7–64-char hex content hash),
    one external `rubric.repo` across all descriptors and one `rubric.ref` for it, repositories

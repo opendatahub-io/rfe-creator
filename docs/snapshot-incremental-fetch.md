@@ -416,6 +416,71 @@ issues that genuinely changed since the last CI run. The Done-status
 check prevents reopened issues from being silently treated as "unchanged"
 when they were never processed.
 
+## Results repository layout
+
+The results repository the CI jobs push to is one repository with one
+subtree per work-item type (AISDLC-202). A subtree holds that type's
+`YYYYMMDD-HHMMSS` run directories and its own `latest` symlink. The
+subtree name is the descriptor field `snapshot.results_subdir`
+(`types/<type>/type.yaml`), never a CI literal:
+
+| Type | `snapshot.results_subdir` | Runs | `latest` |
+|------|---------------------------|------|----------|
+| `rfe` | `""` — the root, grandfathered: the repository's history and the production `latest` live there | `<ts>/` | `latest` |
+| `initiative` | `initiative` | `initiative/<ts>/` | `initiative/latest` |
+
+The read side here takes the subtree from
+`python3 scripts/type_registry.py get <type> snapshot.results_subdir`; the
+write side (the autofixer's `push-results.py` / `restore-artifacts.sh`)
+will read the same field the same way once the rfe-autofixer MR "typed
+results scripts" (in review) lands — until then pushes still go to the
+repository root. On the read side:
+
+- **`clone_results_repo.py`** — the `--data-dir` clone the auto-fix job
+  makes before the fetch — sparse-checks out, for every type named in
+  `DATA_REPO_TYPES` (comma-separated registry names), `/<subdir>/latest`
+  and `/<subdir>/*/auto-fix-runs/<snapshot.prefix>*.yaml` (root forms for
+  `rfe`), always excluding `test-data/`. Nothing else of a run is
+  materialized: no reports, tasks or reviews. It then creates each
+  requested subtree directory, so before a type's first push the fetch
+  reads an existing, empty subtree (`Data repo: no 'latest' symlink`),
+  not a missing path. `DATA_REPO_TYPES` unset means the rfe's three
+  patterns exactly as the production RFE job has always cloned them,
+  without loading the registry.
+- **`snapshot_fetch.py fetch --data-dir <clone>/<subdir>`** follows the
+  subtree's `latest`, then walks its run directories backwards for the
+  type's `<snapshot.prefix>*.yaml`. Only a name that parses as
+  `YYYYMMDD-HHMMSS` is a run directory (the rule `bootstrap_snapshot.py`
+  applies too), so the rfe read at the root never enters `initiative/`,
+  `test-data/` or a hand-made `test-run/`, whatever they hold; the
+  subtree-name grammar (a letter first) guarantees no subdir can parse
+  as a run, and gate 1 refuses `latest`, `test-data` and `test-run` as
+  a subtree name (`scripts/validate_types.py`).
+
+Two consequences worth knowing:
+
+- **A subtree without `latest` reads its newest run.** A type's live job
+  moves that type's `latest`; dry runs push their run directory with
+  `--no-update-latest`. Until the first live push of a type, the newest
+  pushed run — a dry run included — is the next run's baseline (the log
+  says `Data repo: no 'latest' symlink, scanning directories` and
+  `Previous snapshot: from data dir`). Benign today because
+  `submit.py --dry-run` never marks an entry `processed` (entries stay
+  `processed: false` and are re-selected); it stops being benign the day
+  a dry run writes `processed`. The root `latest`, which every RFE run
+  has had, is what spares `rfe` this.
+- **A manual baseline for a subtree needs a full clone.**
+  `bootstrap_snapshot.py` takes the subtree as its results directory:
+  `python3 scripts/bootstrap_snapshot.py "<jql>" --type initiative --results-dir <full clone>/initiative`.
+  Its partial-clone probe (`_run_dir_has_snapshots`) is rfe-prefixed for
+  every type (grandfathered, see the adoption table in `types/README.md`),
+  so a sparse clone of another type's subtree is not recognised as
+  partial — clone the repository in full before bootstrapping.
+
+The invariants below are per snapshot file and hold unchanged: each type
+reads and writes its own subtree, and selection, growth, hashing and
+`processed` never cross subtrees.
+
 ## Design Invariants
 
 These invariants must hold and should guide future refactors:
@@ -499,3 +564,4 @@ These invariants must hold and should guide future refactors:
 | `scripts/submit.py` | Jira writes, update snapshot with post-submit hashes |
 | `scripts/split_submit.py` | Split submissions (does not update snapshot — see Known Gaps) |
 | `scripts/bootstrap_snapshot.py` | Initial snapshot from prior run history |
+| `scripts/clone_results_repo.py` | Sparse clone of the results repository for `--data-dir`: the root for `rfe`, each `DATA_REPO_TYPES` type's subtree ("Results repository layout") |

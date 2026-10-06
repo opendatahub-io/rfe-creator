@@ -42,7 +42,10 @@ design-proposals/work-item-types-unified.md §3.3:
     * cross-type invariants, evaluated on EFFECTIVE bindings (§3.2.1(b)):
       unique (tracker, project, issue_type); unique local_prefix,
       local_id_pattern, id_field; unique non-empty poll/state/report prefixes
-      (empty grandfathered for type rfe only); snapshot.prefix non-empty and
+      and snapshot.results_subdir (the type's subtree of the shared results
+      repository; empty grandfathered for type rfe only; never `latest`,
+      `test-data` or `test-run` — names the readers and the sparse clone treat
+      specially); snapshot.prefix non-empty and
       pairwise prefix-collision-free (snapshot_fetch.py:142-149 globs
       f"{prefix}*.yaml"); no local_prefix stem equal to any effective project key;
       no type's effective local_prefix mints an id (f"{prefix}1") that another
@@ -164,6 +167,16 @@ CODE_SUFFIXES = (".py", ".sh", ".bash", ".zsh")
 # pre-date the per-type prefixing (tmp/speedrun-all-ids.txt, run-report.*),
 # see pipeline_state.py:107, check_autofix_complete.py:18, generate_run_report.py:30.
 GRANDFATHERED_EMPTY_PREFIX_TYPE = "rfe"
+
+# Names no type may claim as its snapshot.results_subdir: the readers and the sparse
+# clone treat them specially, so a subtree so named would be followed, skipped or left
+# out instead of read. `latest` is the symlink every subtree carries
+# (snapshot_fetch.load_snapshot_from_dir and bootstrap_snapshot.py follow it and skip
+# the name), `test-data` is what clone_results_repo.py excludes (`!/test-data/**`) and
+# the same readers skip, `test-run` the hand-made fixture directory the timestamp
+# filter is documented to leave out (docs/snapshot-incremental-fetch.md "Results
+# repository layout").
+RESERVED_RESULTS_SUBDIRS = frozenset({"latest", "test-data", "test-run"})
 
 # Mirror of verify_phase.py:105-127 — the constant part of the error stub the
 # post-barrier verifier writes with `frontmatter.py set` when an agent produced
@@ -799,9 +812,16 @@ def cross_type_findings(registry, env):
         for value, names in _duplicates(pairs).items():
             cross(f"duplicate {label} {value!r} shared by types: {_fmt_types(names)}", names)
 
-    # (3) poll/state/report prefixes: empty only for the grandfathered type,
-    #     unique among the non-empty values
-    for dotted in ("pipeline.poll_prefix", "pipeline.state_prefix", "snapshot.report_prefix"):
+    # (3) poll/state/report prefixes and the results subtree: empty only for the
+    #     grandfathered type, unique among the non-empty values (two types sharing a
+    #     snapshot.results_subdir would read and move each other's `latest`), and the
+    #     subtree never a name the readers treat specially (RESERVED_RESULTS_SUBDIRS)
+    for dotted in (
+        "pipeline.poll_prefix",
+        "pipeline.state_prefix",
+        "snapshot.report_prefix",
+        "snapshot.results_subdir",
+    ):
         non_empty = []
         for name, desc in descs.items():
             value = _opt(desc, dotted)
@@ -814,6 +834,9 @@ def cross_type_findings(registry, env):
                         f"grandfathered for type {GRANDFATHERED_EMPTY_PREFIX_TYPE!r} only)",
                         [name],
                     )
+                continue
+            if dotted == "snapshot.results_subdir" and value in RESERVED_RESULTS_SUBDIRS:
+                cross(f"{dotted} {value!r} is reserved (type {name!r})", [name])
                 continue
             non_empty.append((value, name))
         for value, names in _duplicates(non_empty).items():

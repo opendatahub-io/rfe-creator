@@ -214,7 +214,11 @@ def _third_type(root, name="docs"):
     data["pipeline"]["poll_prefix"] = "docs-"
     data["pipeline"]["state_prefix"] = "docs-"
     data["pipeline"]["rubric"]["export"] = "artifacts/docs-rubric.md"
-    data["snapshot"] = {"prefix": "docs-snapshot-", "report_prefix": "docs-run-"}
+    data["snapshot"] = {
+        "prefix": "docs-snapshot-",
+        "report_prefix": "docs-run-",
+        "results_subdir": "docs",
+    }
     data["reporting"]["item_key"] = "per_doc"
     data["eval"]["mlflow_experiment"] = "docs-speedrun-eval"
     # The quality judge is named <type>_quality (generate_eval_config); a copied rfe_quality
@@ -991,6 +995,10 @@ class TestCrossTypeGate:
             ("pipeline.poll_prefix", lambda d: d["pipeline"].__setitem__("poll_prefix", "")),
             ("pipeline.state_prefix", lambda d: d["pipeline"].__setitem__("state_prefix", "")),
             ("snapshot.report_prefix", lambda d: d["snapshot"].__setitem__("report_prefix", "")),
+            (
+                "snapshot.results_subdir",
+                lambda d: d["snapshot"].__setitem__("results_subdir", ""),
+            ),
         ],
     )
     def test_empty_prefix_is_grandfathered_for_rfe_only(self, types_copy, dotted, setter):
@@ -1010,6 +1018,8 @@ class TestCrossTypeGate:
         assert desc.get("pipeline.poll_prefix") == ""
         assert desc.get("pipeline.state_prefix") == ""
         assert desc.get("snapshot.report_prefix") == ""
+        # AISDLC-202: rfe's runs stay at the root of the shared results repository.
+        assert desc.get("snapshot.results_subdir") == ""
         assert validate_types.GRANDFATHERED_EMPTY_PREFIX_TYPE == "rfe"
         assert _validate(TYPES_ROOT).ok
 
@@ -1031,6 +1041,61 @@ class TestCrossTypeGate:
         )
         _assert_finding(
             _validate(types_copy), "duplicate snapshot.report_prefix 'initiative-run-'", "*"
+        )
+
+    def test_duplicate_results_subdir(self, types_copy):
+        """AISDLC-202: two types in one results subtree would read and move each other's
+        `latest`; a second type reusing 'initiative' is a cross-type finding."""
+        _mutate(
+            types_copy,
+            "rfe",
+            lambda d: d["snapshot"].__setitem__("results_subdir", "initiative"),
+        )
+        hits = _assert_finding(
+            _validate(types_copy),
+            "duplicate snapshot.results_subdir 'initiative' shared by types: initiative, rfe",
+            "*",
+        )
+        assert hits[0].types == frozenset({"rfe", "initiative"})
+
+    def test_shipped_results_subdirs(self):
+        """The decision record: rfe at the root (grandfathered), initiative under initiative/."""
+        reg = type_registry.load(root=TYPES_ROOT, extra_roots=[], env={})
+        assert reg.get("rfe").get("snapshot.results_subdir") == ""
+        assert reg.get("initiative").get("snapshot.results_subdir") == "initiative"
+
+    @pytest.mark.parametrize("value", ["20260101-000000", "Initiative", "-initiative", "a/b"])
+    def test_results_subdir_grammar(self, types_copy, value):
+        """A subtree name starts with a letter and is one path segment, so it can never
+        parse as a YYYYMMDD-HHMMSS run name (the readers' timestamp filter) nor nest."""
+        _mutate(
+            types_copy, "initiative", lambda d: d["snapshot"].__setitem__("results_subdir", value)
+        )
+        _assert_finding(_validate(types_copy), "schema: $.snapshot.results_subdir", "initiative")
+
+    @pytest.mark.parametrize("value", ["latest", "test-data", "test-run"])
+    def test_results_subdir_reserved_names(self, types_copy, value):
+        """Names that pass the grammar but the readers treat specially: `latest` is every
+        subtree's symlink, `test-data` is what the sparse clone excludes and the readers
+        skip by name, `test-run` the hand-made fixture directory. No type may claim them."""
+        assert validate_types.RESERVED_RESULTS_SUBDIRS == {"latest", "test-data", "test-run"}
+        _mutate(
+            types_copy, "initiative", lambda d: d["snapshot"].__setitem__("results_subdir", value)
+        )
+        report = _validate(types_copy)
+        hits = _assert_finding(
+            report, f"snapshot.results_subdir {value!r} is reserved (type 'initiative')", "*"
+        )
+        assert hits[0].types == frozenset({"initiative"})
+        assert len(report.findings) == 1
+
+    def test_results_subdir_is_required(self, types_copy):
+        """A drop-in must say where its results live (next to prefix / report_prefix)."""
+        _mutate(types_copy, "initiative", lambda d: d["snapshot"].pop("results_subdir"))
+        _assert_finding(
+            _validate(types_copy),
+            "schema: $.snapshot: 'results_subdir' is a required property",
+            "initiative",
         )
 
     @pytest.mark.parametrize("prefix", ["issue-snapshot-initiative-", "issue-"])
@@ -1671,6 +1736,7 @@ class TestExtraTypes:
         _assert_finding(report, "snapshot.prefix collision:", "*")
         _assert_finding(report, "pipeline.poll_prefix is empty for type 'clone'", "*")
         _assert_finding(report, "snapshot.report_prefix is empty for type 'clone'", "*")
+        _assert_finding(report, "snapshot.results_subdir is empty for type 'clone'", "*")
 
     def test_drop_in_schema_findings_are_reported_under_its_name(self, tmp_path):
         extra = _third_type(tmp_path / "extra")

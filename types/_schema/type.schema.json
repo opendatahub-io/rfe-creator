@@ -659,11 +659,12 @@
         "mode": { "type": "string", "enum": ["incremental", "none"], "default": "incremental", "description": "RESERVED. none for kinds without snapshots (they declare processed_gate instead)." },
         "prefix": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9-]*-$", "description": "Snapshot file prefix. Never empty; the cross-type lint requires prefixes to be pairwise not prefix-of-each-other." },
         "report_prefix": { "type": "string", "pattern": "^([a-z][a-z0-9-]*-)?$", "description": "Run-report filename prefix (generate_run_report output_prefix, bootstrap_snapshot). '' is grandfathered for type rfe only." },
+        "results_subdir": { "type": "string", "pattern": "^([a-z][a-z0-9-]*)?$", "description": "Subtree of the shared results repository that holds this type's runs (<subdir>/<run>/ and <subdir>/latest). '' is the repository root, grandfathered for type rfe only; the cross-type lint requires non-empty values to be unique and refuses the reserved names latest, test-data and test-run. Starts with a letter, so a subtree name can never parse as a YYYYMMDD-HHMMSS run name. Read by clone_results_repo.py (DATA_REPO_TYPES); the autofixer's push-results.py / restore-artifacts.sh read it through `type_registry.py get` once the rfe-autofixer MR 'typed results scripts' (in review) lands." },
         "processed_gate": { "type": "string", "minLength": 1, "description": "RESERVED. How a kind with mode none decides an input was already processed (e.g. remote_children)." }
       },
       "if": { "properties": { "mode": { "const": "none" } }, "required": ["mode"] },
       "then": { "required": ["processed_gate"], "not": { "required": ["prefix"] } },
-      "else": { "required": ["prefix", "report_prefix"] }
+      "else": { "required": ["prefix", "report_prefix", "results_subdir"] }
     },
     "reporting": {
       "type": "object",

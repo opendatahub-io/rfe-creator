@@ -3168,7 +3168,7 @@ EXTENSION_POINTS = [
     r"^index\.enabled$",
     r"^companions\.comments$",
     r"^batch\.extra_fields",
-    r"^snapshot\.(prefix|report_prefix)$",
+    r"^snapshot\.(prefix|report_prefix|results_subdir)$",
     r"^conventions\.(type_label|label_prefix|comment_prefix|removed_context_preamble|query_default|parent_key_patterns)",
     r"^conventions\.labels\.",
     r"^schema\.task\.extra_fields",

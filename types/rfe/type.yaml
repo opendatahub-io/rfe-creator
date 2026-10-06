@@ -100,6 +100,7 @@ batch: { extra_fields: [] }                             # validate_batch_input.p
 snapshot:
   prefix: "issue-snapshot-"                             # snapshot_fetch.py:60; defaults :142,:163,:281. Q16: submit.py:74 holds "" as a SENTINEL for this default (:672-673,:1170-1171) — a grandfathered projection ('' if type == rfe else prefix), never compare literally
   report_prefix: ""                                     # generate_run_report.py:30 output_prefix; bootstrap_snapshot.py:45; submit.py:325 — grandfathered empty (rfe only)
+  results_subdir: ""                                    # clone_results_repo.py sparse set (DATA_REPO_TYPES); autofixer push-results.py / restore-artifacts.sh via `type_registry.py get` once rfe-autofixer MR "typed results scripts" (in review) lands — grandfathered root (rfe only): the results repository's run history and the production `latest` live at its root (AISDLC-202)
 reporting:
   item_key: per_rfe                                     # generate_run_report.py:29; bootstrap_snapshot.py:46
   criterion_labels: { what: WHAT, why: WHY, open_to_how: HOW, not_a_task: Not-a-task, right_sized: Right-sized }   # generate_review_pdf.py:31-37 (key order = display order)

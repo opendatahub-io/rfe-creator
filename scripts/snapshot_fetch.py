@@ -318,9 +318,16 @@ def find_previous_snapshot(snapshot_dir=None, prefix=_RFE_SNAPSHOT_PREFIX):
 def load_snapshot_from_dir(data_dir, prefix=_RFE_SNAPSHOT_PREFIX):
     """Find the previous snapshot in a local data directory.
 
-    Follows the 'latest' symlink to find the most recent run, then
-    walks backwards through run directories looking for a snapshot
-    in auto-fix-runs/.
+    ``data_dir`` is one type's subtree of the shared results repository (AISDLC-202:
+    the repository root for rfe, ``<snapshot.results_subdir>/`` for every other type),
+    holding that type's YYYYMMDD-HHMMSS run directories and its 'latest' symlink.
+    Follows 'latest' to the most recent run, then walks backwards through the run
+    directories looking for a <prefix>*.yaml snapshot in auto-fix-runs/. Only a name
+    that parses as YYYYMMDD-HHMMSS is a run directory (the rule bootstrap_snapshot
+    applies too), so a sibling type's subtree, test-data/ or a hand-made directory at
+    the same level is never read, whatever it contains. Without 'latest' the newest
+    run directory holding a snapshot is the baseline (docs/snapshot-incremental-fetch.md
+    "Results repository layout").
 
     Returns snapshot_data dict or None.
     """
@@ -337,11 +344,15 @@ def load_snapshot_from_dir(data_dir, prefix=_RFE_SNAPSHOT_PREFIX):
         print("Data repo: no 'latest' symlink, scanning directories", file=sys.stderr)
         latest_target = None
 
-    # Collect run directories sorted newest-first
+    # Collect run directories sorted newest-first: timestamp-named entries only
     run_dirs = []
     for name in sorted(os.listdir(data_dir), reverse=True):
         if name.startswith(".") or name in ("latest", "test-data"):
             continue
+        try:
+            datetime.strptime(name, "%Y%m%d-%H%M%S")
+        except ValueError:
+            continue  # another type's subtree or a hand-made dir, not a run
         path = os.path.join(data_dir, name)
         if os.path.isdir(path):
             run_dirs.append(name)
