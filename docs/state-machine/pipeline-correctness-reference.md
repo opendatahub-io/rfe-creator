@@ -1058,10 +1058,11 @@ again. The run report maps that error prefix to `blocked_reason` and counts the 
 blocked, which is what `bootstrap_snapshot` reads as not processed, so a snapshot rebuilt
 from the reports agrees with the live one (RHAIFIRST-571). The hold needs evidence of a
 rewrite: an original on disk that differs from the task body; without an original the
-item takes the update path as before. A submit re-run over already-held artifacts (the
-manual submit jobs) holds again idempotently, re-applying the labels without a second
-comment, and the comment is posted even when the item already carried the needs-attention
-label at fetch. Under `--dry-run` the hold is reported and nothing is written. Known
+item takes the update path as before. A submit re-run over already-held artifacts holds
+again idempotently, re-applying the labels without a second comment — but only when the
+re-run itself passes `--auto-approve` or `--hold-interrupted` (the two switches, below) —
+and the comment is posted even when the item already carried the needs-attention label at
+fetch. Under `--dry-run` the hold is reported and nothing is written. Known
 limit: the hold keys on `auto_revised`, which `REASSESS_RESTORE` restores to `true` before
 `REASSESS_REVISE`, so a run that dies inside a *second* revision pass is not detected; the
 durable fix is a per-wave revision marker set by the pipeline (AISDLC-275).
@@ -1072,13 +1073,25 @@ opt-in period, and on them the 2026-09-29 shape would have published. `--hold-in
 arms the same hold without the approval transition and reads no approved state from the
 type's binding, so a type that never approves can pass it. Every non-interactive run that
 does not pass `--auto-approve` must pass `--hold-interrupted`; passing both holds once
-(`--auto-approve` implies it, so the RFE job's command stream is unchanged). An interactive
-submit — the `/rfe-submit` skill, which passes neither — keeps the update path: a human who
-edits the task file before `/rfe-submit` is making a manual revision and carries no flag
-either. Pinned by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py`
-(the matrix: each switch alone, both, neither) and
-`tests/test_initiative_submit_integration.py` (the Initiative type under
-`--hold-interrupted`).
+(`--auto-approve` implies it, so the RFE job's command stream is unchanged). The hold is a
+property of the invocation, not of the artifacts: a re-run over artifacts a previous submit
+held holds again only when the re-run passes `--auto-approve` or `--hold-interrupted`; a
+switch-less re-run takes the update path and publishes the held rewrite. In-repo the one
+non-interactive caller of the skill, the `/rfe-speedrun` Phase 3 handoff, passes
+`--headless`, under which `/rfe-submit` appends `--hold-interrupted`. Follow-up
+(rfe-autofixer): the manual replay jobs `submit-rfe` (live) and `submit-rfe-dry` run
+`scripts/submit.py --artifacts-dir … --generate-report …` with neither switch — a re-run
+over artifacts a previous submit held would publish the held rewrite — and the Initiative
+jobs' submit line passes neither either; add `--hold-interrupted` to `submit-rfe`,
+`submit-rfe-dry` and the Initiative jobs' submit line (the RFE production job already
+passes `--auto-approve`). An interactive submit — the `/rfe-submit` skill without
+`--headless`, which passes neither — keeps the update path: a human who edits the task
+file before `/rfe-submit` is making a manual revision and carries no flag either. Pinned
+by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py` (the matrix: each
+switch alone, both, neither), `tests/test_initiative_submit_integration.py` (the
+Initiative type under `--hold-interrupted`) and the submit-skill pin in
+`tests/test_type_registry_pins.py` (the `--headless` form carries `--hold-interrupted`,
+the interactive form does not).
 
 ## 6. Cross-References
 

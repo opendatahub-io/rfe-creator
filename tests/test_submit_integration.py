@@ -573,8 +573,10 @@ class TestInterruptedRevisionHold:
     def test_rerun_over_held_artifacts_holds_again_without_a_second_comment(
         self, art_dir, jira, hold_switch
     ):
-        """The manual submit jobs re-run submit over the same artifacts: the hold is
-        idempotent, the labels are re-applied, the comment is posted once."""
+        """A re-run over artifacts a previous submit held, passing the switch again (the
+        manual submit jobs once they pass --hold-interrupted; a switch-less re-run would
+        publish): the hold is idempotent, the labels are re-applied, the comment is
+        posted once."""
         self._seed(art_dir, jira, auto_revised="false")
         r = _run_submit(art_dir, jira.url, [hold_switch])
         assert r.returncode == 0, r.stderr

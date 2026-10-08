@@ -1382,9 +1382,13 @@ def main():
             and review_data
             and not review_data.get("auto_revised", False)
         ):
-            # A submit re-run over artifacts a previous submit already held (the manual
-            # submit jobs) holds again, idempotently: the labels are re-applied, the review
-            # is left as recorded and the comment is not posted a second time.
+            # A submit re-run over artifacts a previous submit already held holds again,
+            # idempotently -- the labels are re-applied, the review is left as recorded and
+            # the comment is not posted a second time -- but only when the re-run itself
+            # passes --auto-approve or --hold-interrupted: the hold is a property of the
+            # invocation, not of the artifacts. A switch-less re-run (a manual submit job
+            # without --hold-interrupted) takes the update path and publishes the held
+            # rewrite, which is why every non-interactive invocation must pass one.
             already_held = str(review_data.get("error") or "").startswith(
                 REVISION_INTERRUPTED_PREFIX
             )
