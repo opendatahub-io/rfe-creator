@@ -10,6 +10,7 @@ No regex parsing of markdown prose.
 
 Usage:
     python scripts/submit.py [--type rfe|initiative] [--dry-run] [--artifacts-dir DIR]
+                             [--auto-approve] [--hold-splits]
 
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
@@ -32,6 +33,7 @@ is skipped, never written. The remote key of a task is its tracker_ref, else its
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -55,6 +57,7 @@ from artifact_utils import (  # noqa: E402
 )
 from generate_run_report import (  # noqa: E402
     REVISION_INTERRUPTED_PREFIX,
+    SPLIT_HELD_PREFIX,
     SPLIT_NOT_ATTEMPTED_PREFIX,
     _parse_run_id,
 )
@@ -539,6 +542,158 @@ def _record_split_failure(
         )
 
 
+def _split_leaves(tasks, parent_key, id_field):
+    """The leaf children a split of ``parent_key`` would submit, as ``(path, data)`` pairs in
+    scan order: the walk split_submit.py performs — every non-archived descendant, recursing
+    through archived local intermediaries (a re-split's stepping stones), whose own children
+    belong to the parent. A cycle in ``parent_key`` ends the walk instead of recursing."""
+    by_parent = {}
+    for path, data in tasks:
+        pk = data.get("parent_key")
+        if pk:
+            by_parent.setdefault(pk, []).append((path, data))
+
+    def _collect(node_id, seen):
+        leaves = []
+        for path, data in by_parent.get(node_id, []):
+            child_id = data.get(id_field)
+            if data.get("status") == "Archived":
+                if child_id and child_id not in seen:
+                    seen.add(child_id)
+                    leaves.extend(_collect(child_id, seen))
+            else:
+                leaves.append((path, data))
+        return leaves
+
+    return _collect(parent_key, {parent_key})
+
+
+# The longest one-line summary of a proposed child the hold comment quotes.
+_CHILD_SUMMARY_MAX = 160
+
+
+def _child_summary(path):
+    """One short line describing a proposed child for the hold comment: the first line of prose
+    in its body — what the task template puts under its first heading (Summary for an RFE,
+    Objective for an Initiative) — with the frontmatter, headings, comments, list markers and
+    bold stripped, cut to ``_CHILD_SUMMARY_MAX`` characters. Empty when there is no prose or the
+    file cannot be read: the title alone is then listed."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            body = strip_metadata(f.read())
+    except OSError:
+        return ""
+    for line in body.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#") or re.fullmatch(r"-{3,}", text):
+            continue
+        text = re.sub(r"^(?:[-*+]|\d+\.|>)\s+", "", text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text).strip()
+        if not text:
+            continue
+        if len(text) > _CHILD_SUMMARY_MAX:
+            text = text[: _CHILD_SUMMARY_MAX - 1].rstrip() + "…"
+        return text
+    return ""
+
+
+def _split_hold_comment(cfg, children):
+    """The one comment ``--hold-splits`` posts on a held parent, as markdown for
+    ``markdown_to_adf``: the type's comment prefix, the recommendation (the number of children,
+    each title with its one-line summary), and what did and did not happen. ``children`` are
+    ``(title, summary)`` pairs."""
+    type_label = cfg["type_label"]
+    n = len(children)
+    lines = [
+        f"*{cfg['comment_prefix']}* Split held: the review recommends splitting this "
+        f"{type_label} into {n} child {type_label}{'' if n == 1 else 's'}:",
+        "",
+    ]
+    for title, summary in children:
+        lines.append(f"- **{title}**" + (f" — {summary}" if summary else ""))
+    lines += [
+        "",
+        f"No child {type_label} was created and this {type_label} was left as it was: the split "
+        "is withheld until a human decides whether to apply it.",
+    ]
+    return "\n".join(lines)
+
+
+def _hold_split(server, user, token, parent_key, leaves, args, cfg, attention_label, submit_errors):
+    """``--hold-splits`` (AISDLC-278): record the split recommendation on ``parent_key`` without
+    executing it. Nothing is created and the parent keeps its status; it gets ONE comment
+    listing the proposed children and the type's needs-attention label, and its review carries
+    ``split_held: N children proposed, submission withheld`` — the marker the run report maps to
+    ``blocked_reason`` and bootstrap reads as unprocessed, like the live snapshot (the caller
+    resets the parent's ``processed`` flag). The children stay local artifacts.
+
+    The review record comes first and is load-bearing: a hold that is not on disk is no hold
+    (the report would count the parent as a successful split and bootstrap would freeze it as
+    processed), so when it cannot be written nothing is posted to Jira either, and the run ends
+    red through ``submit_errors``. A re-run over already-held artifacts (the manual submit jobs)
+    holds again idempotently, #210-style: the label is re-applied, the review is left as
+    recorded and the comment is not posted a second time. A Jira write that fails after the
+    record landed is reported and ends the run red, but the hold stands. Under ``--dry-run`` the
+    hold is printed and nothing is written.
+    """
+    n = len(leaves)
+    children = [(data["title"], _child_summary(path)) for path, data in leaves]
+    if args.dry_run:
+        print(f"  Would hold split of {parent_key} ({n} children)")
+        for title, _ in children:
+            print(f"    - {title}")
+        return
+
+    already_held = str(_review_error(args.artifacts_dir, parent_key, cfg) or "").startswith(
+        SPLIT_HELD_PREFIX
+    )
+    if already_held:
+        print(f"  {parent_key}: Split already held ({n} children); re-applying the label only")
+    else:
+        review_path = _find_review(args.artifacts_dir, parent_key, cfg)
+        try:
+            if not review_path:
+                raise FileNotFoundError(f"no review file for {parent_key}")
+            update_frontmatter(
+                review_path,
+                {"error": f"{SPLIT_HELD_PREFIX} {n} children proposed, submission withheld"},
+                cfg["review_schema"],
+            )
+        except Exception as e:
+            print(
+                f"Error: could not record the split hold on {parent_key}'s review ({e}); "
+                f"{parent_key} was not flagged in Jira.",
+                file=sys.stderr,
+            )
+            submit_errors.append((parent_key, f"split hold could not be recorded: {e}"))
+            return
+        print(f"  {parent_key}: Split held — {n} children proposed, recorded on the review")
+
+    try:
+        add_labels(server, user, token, parent_key, [attention_label])
+        print(f"  {parent_key}: Labels: {attention_label}")
+    except Exception as e:
+        print(
+            f"Error: could not label {parent_key} in Jira ({e}); the hold is recorded locally.",
+            file=sys.stderr,
+        )
+        submit_errors.append((parent_key, f"split held, but the label could not be applied: {e}"))
+    if already_held:
+        return
+    try:
+        add_comment(
+            server, user, token, parent_key, markdown_to_adf(_split_hold_comment(cfg, children))
+        )
+        print(f"  {parent_key}: Posted split-hold comment ({n} children)")
+    except Exception as e:
+        print(
+            f"Error: could not post the split-hold comment on {parent_key} ({e}); the hold is "
+            "recorded locally and will not be re-posted — post it by hand.",
+            file=sys.stderr,
+        )
+        submit_errors.append((parent_key, f"split held, but the comment could not be posted: {e}"))
+
+
 def _finish(args, type_name, type_label, submit_errors):
     """Summarise failures, regenerate the reports, then exit. Never returns.
 
@@ -622,6 +777,15 @@ def main():
         "--auto-approve",
         action="store_true",
         help="Transition qualifying items to Approved status in Jira",
+    )
+    parser.add_argument(
+        "--hold-splits",
+        action="store_true",
+        help=(
+            "Record split recommendations without executing them: no child is created, the "
+            "parent gets one comment listing the proposed children and the needs-attention "
+            "label, and stays unprocessed for a later run without this switch"
+        ),
     )
     parser.add_argument(
         "--generate-report",
@@ -776,7 +940,10 @@ def main():
         print()
 
     if split_parents:
-        print(f"Phase 1: Submitting {len(split_parents)} split parent(s)\n")
+        if args.hold_splits:
+            print(f"Phase 1: Holding {len(split_parents)} split parent(s) (--hold-splits)\n")
+        else:
+            print(f"Phase 1: Submitting {len(split_parents)} split parent(s)\n")
         script_dir = os.path.dirname(os.path.abspath(__file__))
         # Test seam: the loop policy (systemic abort, circuit breaker) cannot
         # be exercised end-to-end with the real script, which classifies
@@ -819,6 +986,23 @@ def main():
 
         for parent_key in sorted(split_parents):
             attempted_parents.add(parent_key)
+            print(f"--- {parent_key} ---")
+            if args.hold_splits:
+                # The split is recorded, not executed: split_submit.py is not spawned, the
+                # children stay local, and the parent is reset to unprocessed below.
+                _hold_split(
+                    server,
+                    user,
+                    token,
+                    parent_key,
+                    _split_leaves(tasks, parent_key, id_field),
+                    args,
+                    cfg,
+                    desc.get("conventions.labels.needs_attention"),
+                    submit_errors,
+                )
+                print()
+                continue
             cmd = [
                 sys.executable,
                 split_script,
@@ -835,7 +1019,6 @@ def main():
                 # item (RHAIFIRST-82): their rubric-pass label excludes them from every
                 # later run, so nothing else would ever transition them.
                 cmd.append("--auto-approve")
-            print(f"--- {parent_key} ---")
             # D3, one line per run: this process resolved the type (and printed the line for
             # an explicit --type); the child skips its own line when the marker is set.
             result = subprocess.run(
@@ -993,8 +1176,48 @@ def main():
             # place they are recorded.
             _finish(args, type_name, type_label, submit_errors)
 
-    # Record split-child hashes in the snapshot
-    if split_parents and not args.dry_run:
+    # Held split parents are not disposed of: the next scheduled run without the hold must
+    # select them again. Not merely unmarked (a Phase 1 parent is in no plan and is never
+    # marked processed) but RESET, as #210's hold does: a --reprocess fetch records a selected
+    # unchanged item as processed: true, and the next fetch would otherwise not select it
+    # (snapshot invariants 6 and 7). Runs here, not in the final update, because a split-only
+    # batch ends through the early _finish below without reaching it.
+    if split_parents and args.hold_splits and not args.dry_run:
+        held = sorted(split_parents)
+        snap_dir = os.path.join(args.artifacts_dir, "auto-fix-runs")
+        snap_kwargs = {"reset_processed": held}
+        if cfg["snapshot_prefix"]:
+            snap_kwargs["prefix"] = cfg["snapshot_prefix"]
+        updated = update_snapshot_hashes({}, snap_dir, **snap_kwargs)
+        if updated:
+            print(
+                f"  Reset {len(held)} held split parent(s) to unprocessed in the snapshot:"
+                f" {updated}"
+            )
+        elif snapshot_files(
+            snap_dir, **({"prefix": snap_kwargs["prefix"]} if "prefix" in snap_kwargs else {})
+        ):
+            # A snapshot exists and the reset did not land: a held parent that entered
+            # processed: true stays so and no later fetch would select it. The hold itself
+            # (label, comment, review) stands; the run ends red through _finish.
+            print(
+                "Error: the snapshot could not be updated after holding the split of "
+                f"{', '.join(held)}; a held parent may stay processed and the next fetch would "
+                "not select it. Reset its snapshot entry by hand.",
+                file=sys.stderr,
+            )
+            for held_id in held:
+                submit_errors.append(
+                    (
+                        held_id,
+                        "split held, but the snapshot reset did not land: fix the entry by hand",
+                    )
+                )
+        else:
+            print("  Warning: no snapshot found to update", file=sys.stderr)
+
+    # Record split-child hashes in the snapshot (none under the hold: no child was created)
+    if split_parents and not args.dry_run and not args.hold_splits:
         try:
             split_child_hashes = {}
             post_split_tasks = scan_tasks(args.artifacts_dir, desc)

@@ -662,6 +662,8 @@ class TestSubmitTypeConfigs:
         # PR-2c — and the guards (:672-673,:1170-1171) forward only a truthy value, so the
         # EFFECTIVE prefix equals snapshot.prefix for every type. Never compare snapshot.prefix
         # literally to this key; the shape is pinned so lifting the sentinel is a visible change.
+        # Three guard sites: the split-child hashes, the final update, and the Phase 1 reset of
+        # the parents --hold-splits withheld (AISDLC-278).
         c = submit.TYPE_CONFIGS[ctx.t]
         pin(
             "snapshot.prefix ('' sentinel for rfe)",
@@ -679,7 +681,7 @@ class TestSubmitTypeConfigs:
         )
         source = read("scripts/submit.py")
         assert '"" if desc.name == "rfe" else desc.get("snapshot.prefix")' in source
-        assert source.count('if cfg["snapshot_prefix"]:') == 2
+        assert source.count('if cfg["snapshot_prefix"]:') == 3
 
     def test_split_type_arg_and_report_type_flag_are_the_argv_convention(self, ctx):
         # rows: 10 (MIGRATED value, grandfathered shape), 26 residue — the argv convention of the

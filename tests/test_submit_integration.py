@@ -2595,3 +2595,291 @@ class TestOverriddenProjectBinding:
         ) in r.stdout
         assert "Original" in _description_text(jira.get("KONFLUX-2"))
         assert _histories(jira, "KONFLUX-2") == []
+
+
+# ── AISDLC-278: --hold-splits ──────────────────────────────────────────────────────────────────
+
+
+class TestSplitHold:
+    """Under ``--hold-splits`` a split recommendation is recorded, not executed (AISDLC-278):
+    split_submit.py is not spawned, no child is created, the parent keeps its status and gets
+    ONE comment listing the proposed children plus the needs-attention label, its review carries
+    ``split_held:`` (blocked in the run report, unprocessed for bootstrap) and its snapshot entry
+    is reset so a later run without the hold selects it again. The children stay local."""
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nParent content.\n"
+    )
+    PARENT_REVIEW = (
+        "---\nrfe_id: RHAIRFE-1000\nscore: 6\npass: false\n"
+        "recommendation: split\nfeasibility: feasible\n"
+        "auto_revised: false\nneeds_attention: false\n"
+        "scores:\n  what: 2\n  why: 1\n  open_to_how: 2\n"
+        "  not_a_task: 1\n  right_sized: 0\n---\n\nToo big.\n"
+    )
+    CHILD_TASK_TPL = (
+        "---\nrfe_id: RFE-{num:03d}\ntitle: Child RFE {num}\n"
+        "priority: Major\nstatus: Ready\n"
+        "parent_key: RHAIRFE-1000\n---\n\n## Summary\n\nChild {num} does one thing well.\n\n"
+        "## Acceptance Criteria\n\n- Criterion {num}\n"
+    )
+    HELD_ERROR = "split_held: 2 children proposed, submission withheld"
+
+    def _seed(self, art_dir, jira, processed=None, with_regular=False):
+        jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.")
+        _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Parent content.")
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", self.PARENT_REVIEW)
+        for i in (1, 2):
+            _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", self.CHILD_TASK_TPL.format(num=i))
+            _write(f"{art_dir}/rfe-reviews/RFE-{i:03d}-review.md", _review(f"RFE-{i:03d}"))
+        if with_regular:
+            _write(f"{art_dir}/rfe-tasks/RFE-099.md", TASK_FM.format(rfe_id="RFE-099"))
+            _write(f"{art_dir}/rfe-reviews/RFE-099-review.md", _review("RFE-099"))
+        snap_path = None
+        if processed is not None:
+            snap_dir = os.path.join(art_dir, "auto-fix-runs")
+            os.makedirs(snap_dir, exist_ok=True)
+            snap_path = os.path.join(snap_dir, "issue-snapshot-20260401-000000.yaml")
+            with open(snap_path, "w") as f:
+                yaml.dump(
+                    {
+                        "query_timestamp": "2026-04-01T00:00:00Z",
+                        "timestamp": "2026-04-01T00:00:01Z",
+                        "issues": {"RHAIRFE-1000": {"hash": "parent-hash", "processed": processed}},
+                    },
+                    f,
+                )
+        return snap_path
+
+    @staticmethod
+    def _hold_comments(jira, key="RHAIRFE-1000"):
+        comments = jira.request("GET", f"/rest/api/3/issue/{key}/comment")["comments"]
+        return [c for c in comments if "Split held" in json.dumps(c["body"])]
+
+    @staticmethod
+    def _summaries(jira, project="RHAIRFE"):
+        return sorted(
+            i["fields"]["summary"] for i in jira.search(f"project = {project}", "summary")
+        )
+
+    def test_hold_records_the_proposal_and_creates_nothing(self, art_dir, jira):
+        """The story's done-when: with the hold on, an archived parent with children produces
+        no Jira write beyond the comment and the label; the report shows it blocked; the
+        parent ends unprocessed; a regular item in the same batch is submitted as usual."""
+        snap_path = self._seed(art_dir, jira, processed=True, with_regular=True)
+        status_before = jira.get("RHAIRFE-1000")["fields"]["status"]["name"]
+
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            [
+                "--hold-splits",
+                "--auto-approve",
+                "--generate-report",
+                "--report-timestamp",
+                "20261005-120000",
+            ],
+        )
+        assert r.returncode == 0, r.stderr
+        assert "Phase 1: Holding 1 split parent(s) (--hold-splits)" in r.stdout
+        assert "RHAIRFE-1000: Split held — 2 children proposed, recorded on the review" in r.stdout
+        assert "RHAIRFE-1000: Posted split-hold comment (2 children)" in r.stdout
+        assert "Reset 1 held split parent(s) to unprocessed in the snapshot" in r.stdout
+        assert "Split submission:" not in r.stdout  # split_submit.py never ran
+
+        # Jira: the label and the comment, nothing else — no child, no transition, no edit.
+        issue = jira.get("RHAIRFE-1000")
+        assert issue["fields"]["labels"] == ["rfe-creator-needs-attention"]
+        assert issue["fields"]["status"]["name"] == status_before
+        assert "Parent content." in _description_text(issue)
+        changed = {item["field"] for h in _histories(jira, "RHAIRFE-1000") for item in h["items"]}
+        assert changed == {"labels", "Comment"}
+        assert self._summaries(jira) == ["Parent RFE", "Test RFE"]  # the regular item only
+        (comment,) = self._hold_comments(jira)
+        body = json.dumps(comment["body"])
+        assert "[RFE Creator]" in body
+        assert "splitting this RFE into 2 child RFEs" in body
+        assert "Child RFE 1" in body and "Child RFE 2" in body
+        assert "Child 1 does one thing well." in body
+        assert "No child RFE was created and this RFE was left as it was" in body
+
+        # Local: the review carries the marker and keeps its verdict; the children stay local.
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
+        assert (fm["recommendation"], fm["score"], fm["needs_attention"]) == ("split", 6, False)
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md")["status"] == "Archived"
+        for i in (1, 2):
+            assert _read_frontmatter(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md")["status"] == "Ready"
+
+        # Report: blocked under the marker (what bootstrap reads as unprocessed), not split.
+        with open(f"{art_dir}/auto-fix-runs/20261005-120000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1000"]
+        assert entry["blocked_reason"] == self.HELD_ERROR
+        assert entry["recommendation"] == "split"
+        assert report["results"]["blocked"] == 1
+        assert report["results"]["split"] == 0
+
+        # Snapshot: the parent is reset, not marked processed, by the Phase 2 update either.
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"] == {"hash": "parent-hash", "processed": False}
+
+    @pytest.mark.parametrize("processed_at_fetch", [False, True])
+    def test_held_parent_stays_unprocessed_in_a_split_only_batch(
+        self, art_dir, jira, processed_at_fetch
+    ):
+        """A split-only batch ends through the early _finish, before the Phase 2 snapshot
+        update: the reset must land in Phase 1. Reset, not merely unmarked: a --reprocess
+        fetch records a selected unchanged item as processed: true."""
+        snap_path = self._seed(art_dir, jira, processed=processed_at_fetch)
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert "Done. Index rebuilt" in r.stdout
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"]["processed"] is False
+
+    def test_rerun_with_the_hold_posts_no_second_comment(self, art_dir, jira):
+        """The manual submit jobs re-run submit over the same artifacts: the hold is
+        idempotent (#210's already_held pattern) — the label is re-applied, the review is
+        left as recorded, the comment is posted once."""
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert len(self._hold_comments(jira)) == 1
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert "RHAIRFE-1000: Split already held (2 children); re-applying the label only" in (
+            r.stdout
+        )
+        assert len(self._hold_comments(jira)) == 1
+        assert jira.get("RHAIRFE-1000")["fields"]["labels"] == ["rfe-creator-needs-attention"]
+        assert _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")["error"] == (
+            self.HELD_ERROR
+        )
+        assert self._summaries(jira) == ["Parent RFE"]
+
+    def test_dry_run_hold_writes_nothing(self, art_dir, jira):
+        snap_path = self._seed(art_dir, jira, processed=True)
+        r = _run_submit(art_dir, jira.url, ["--hold-splits", "--dry-run"])
+        assert r.returncode == 0, r.stderr
+        assert "Would hold split of RHAIRFE-1000 (2 children)" in r.stdout
+        assert "    - Child RFE 1\n    - Child RFE 2\n" in r.stdout
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm.get("error") is None
+        issue = jira.get("RHAIRFE-1000")
+        assert issue["fields"]["labels"] == []
+        assert self._hold_comments(jira) == []
+        assert _histories(jira, "RHAIRFE-1000") == []
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"]["processed"] is True
+
+    def test_without_the_switch_the_split_is_submitted_as_before(self, art_dir, jira):
+        """Default behaviour is today's: the children are created and linked, the parent is
+        closed, no hold marker anywhere."""
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "Phase 1: Submitting 1 split parent(s)" in r.stdout
+        assert "Holding" not in r.stdout
+        assert self._summaries(jira) == ["Child RFE 1", "Child RFE 2", "Parent RFE"]
+        assert self._hold_comments(jira) == []
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm.get("error") is None
+
+    def test_hold_that_cannot_be_recorded_flags_nothing_and_ends_red(
+        self, art_dir, jira, monkeypatch, capsys
+    ):
+        """A hold that is not on disk is no hold: the report would count the parent as a
+        successful split and bootstrap would freeze it as processed. So when the review write
+        fails nothing is posted to Jira for that parent, the run ends red through _finish
+        (report still generated) and the failure names the parent."""
+        self._seed(art_dir, jira)
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        import submit as submit_mod
+
+        real_update = submit_mod.update_frontmatter
+
+        def failing_review_write(path, *a, **k):
+            if str(path).endswith("RHAIRFE-1000-review.md"):
+                raise OSError("disk full")
+            return real_update(path, *a, **k)
+
+        monkeypatch.setattr(submit_mod, "update_frontmatter", failing_review_write)
+        monkeypatch.setenv("JIRA_SERVER", jira.url)
+        monkeypatch.setenv("JIRA_USER", "admin")
+        monkeypatch.setenv("JIRA_TOKEN", "admin")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit.py",
+                "--artifacts-dir",
+                art_dir,
+                "--hold-splits",
+                "--generate-report",
+                "--report-timestamp",
+                "20261005-130000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            submit_mod.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "could not record the split hold on RHAIRFE-1000's review (disk full)" in err
+        assert "RHAIRFE-1000: split hold could not be recorded" in err
+        assert os.path.exists(f"{art_dir}/auto-fix-runs/20261005-130000.yaml")
+        issue = jira.get("RHAIRFE-1000")
+        assert issue["fields"]["labels"] == []
+        assert self._hold_comments(jira) == []
+        assert self._summaries(jira) == ["Parent RFE"]
+
+    def test_the_hold_is_type_independent(self, init_art_dir, jira):
+        """The same switch holds an Initiative split with the initiative descriptor's comment
+        prefix and needs-attention label (the Initiative jobs are its first user)."""
+        jira.create(
+            "RHOAIENG-1000", "Parent Initiative", "Parent content.", issue_type="Initiative"
+        )
+        _write(f"{init_art_dir}/initiative-originals/RHOAIENG-1000.md", "Parent content.")
+        _write(
+            f"{init_art_dir}/initiatives/RHOAIENG-1000.md",
+            "---\ninitiative_id: RHOAIENG-1000\ntitle: Parent Initiative\n"
+            "priority: Major\nstatus: Archived\n---\n\nParent content.\n",
+        )
+        _write(
+            f"{init_art_dir}/initiative-reviews/RHOAIENG-1000-review.md",
+            "---\ninitiative_id: RHOAIENG-1000\nscore: 6\npass: false\n"
+            "recommendation: split\nfeasibility: feasible\nalignment: strong\n"
+            "auto_revised: false\nneeds_attention: false\n"
+            "scores:\n  what: 2\n  why: 1\n  scope: 1\n  open_to_how: 2\n  right_sized: 0\n"
+            "---\n\nToo big.\n",
+        )
+        for i in (1, 2):
+            _write(
+                f"{init_art_dir}/initiatives/INIT-{i:03d}.md",
+                f"---\ninitiative_id: INIT-{i:03d}\ntitle: Child Initiative {i}\n"
+                "priority: Major\nstatus: Ready\nparent_key: RHOAIENG-1000\n---\n\n"
+                f"## Objective\n\nDeliver part {i}.\n",
+            )
+            _write(
+                f"{init_art_dir}/initiative-reviews/INIT-{i:03d}-review.md",
+                INITIATIVE_REVIEW_FM.format(init_id=f"INIT-{i:03d}", alignment="strong"),
+            )
+
+        r = _run_initiative_submit(init_art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert "RHOAIENG-1000: Split held — 2 children proposed" in r.stdout
+        issue = jira.get("RHOAIENG-1000")
+        assert issue["fields"]["labels"] == ["initiative-needs-attention"]
+        (comment,) = self._hold_comments(jira, "RHOAIENG-1000")
+        body = json.dumps(comment["body"])
+        assert "[Initiative Creator]" in body
+        assert "splitting this Initiative into 2 child Initiatives" in body
+        assert "Child Initiative 1" in body and "Deliver part 2." in body
+        assert self._summaries(jira, "RHOAIENG") == ["Parent Initiative"]
+        fm = _read_frontmatter(f"{init_art_dir}/initiative-reviews/RHOAIENG-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
