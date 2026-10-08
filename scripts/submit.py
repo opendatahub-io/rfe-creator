@@ -741,13 +741,15 @@ def _hold_split(
     return True
 
 
-def _lift_split_hold(args, cfg, parent_key):
+def _lift_split_hold(args, cfg, parent_key, submit_errors):
     """The split of a parent an earlier ``--hold-splits`` run held was just executed (this run
     carries no hold and split_submit.py exited 0): clear the hold's marker from the review so the
     run report counts a split, not a hold, and bootstrap agrees. Only a ``split_held:`` error is
     touched — any other error is another path's record and is left alone — so a parent that was
-    never held reads the review once and is otherwise untouched. Local-only and best-effort: the
-    split is real in Jira whatever happens here, and a failure says what the report will show."""
+    never held reads the review once and is otherwise untouched. Local-only, but not best-effort:
+    the split is real in Jira whatever happens here, so a marker that could not be cleared is a
+    local record out of step with Jira (the report would count the executed split as held and
+    bootstrap would keep the parent unprocessed) and ends the run red naming the parent."""
     error = _review_error(args.artifacts_dir, parent_key, cfg)
     if not error or not error.startswith(SPLIT_HELD_PREFIX):
         return
@@ -758,9 +760,12 @@ def _lift_split_hold(args, cfg, parent_key):
         print(f"  {parent_key}: Split hold lifted — the split was executed")
     except Exception as e:
         print(
-            f"  Warning: could not clear the split hold on {parent_key}'s review ({e}); the run "
-            "report will show the executed split as held.",
+            f"Error: could not clear the split hold on {parent_key}'s review ({e}); the split is "
+            "real but the run report will count it as held — clear the review's error by hand.",
             file=sys.stderr,
+        )
+        submit_errors.append(
+            (parent_key, f"split executed, but the hold could not be cleared: {e}")
         )
 
 
@@ -1111,7 +1116,7 @@ def main():
             if result.returncode == 0 and not args.dry_run:
                 # A parent an earlier --hold-splits run held: the hold is lifted now that
                 # the split is real (a no-op for a parent that was never held).
-                _lift_split_hold(args, cfg, parent_key)
+                _lift_split_hold(args, cfg, parent_key, submit_errors)
             # argparse used to exit 2 as well; split_submit now routes usage
             # errors to 64, so 2 is unambiguously the leaf cap.
             if result.returncode == 2:

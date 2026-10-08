@@ -2895,6 +2895,60 @@ class TestSplitHold:
         assert report["results"]["split"] == 1
         assert report["results"]["blocked"] == 0
 
+    def test_a_lift_that_cannot_be_recorded_ends_the_run_red(
+        self, art_dir, jira, monkeypatch, capsys
+    ):
+        """CodeRabbit on #220: once split_submit.py exits 0 the split is real, so a marker
+        that could not be cleared leaves a local record out of step with Jira — the report
+        counts the executed split as held and bootstrap keeps the parent unprocessed. That
+        is a submit error like any other: the run ends red through _finish naming the
+        parent (report still generated, and reading as the message says), not a warning
+        on a green run."""
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        import submit as submit_mod
+
+        real_update = submit_mod.update_frontmatter
+
+        def failing_review_write(path, *a, **k):
+            if str(path).endswith("RHAIRFE-1000-review.md"):
+                raise OSError("disk full")
+            return real_update(path, *a, **k)
+
+        monkeypatch.setattr(submit_mod, "update_frontmatter", failing_review_write)
+        monkeypatch.setenv("JIRA_SERVER", jira.url)
+        monkeypatch.setenv("JIRA_USER", "admin")
+        monkeypatch.setenv("JIRA_TOKEN", "admin")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit.py",
+                "--artifacts-dir",
+                art_dir,
+                "--generate-report",
+                "--report-timestamp",
+                "20261008-120000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            submit_mod.main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "could not clear the split hold on RHAIRFE-1000's review (disk full)" in captured.err
+        assert "RHAIRFE-1000: split executed, but the hold could not be cleared" in captured.err
+        assert "Split hold lifted" not in captured.out
+        # The split itself is real, and the stale marker is exactly what the message says.
+        assert self._summaries(jira) == ["Child RFE 1", "Child RFE 2", "Parent RFE"]
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
+        with open(f"{art_dir}/auto-fix-runs/20261008-120000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1000"]
+        assert "blocked_reason" in entry
+
     def test_parent_already_flagged_at_fetch_is_held_without_a_second_comment(self, art_dir, jira):
         """The production shape of a re-run: the hold resets the parent to unprocessed and the
         needs-attention label is no fetch filter, so the next scheduled run selects the parent

@@ -438,7 +438,7 @@ if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E8 | null | submit_failed | Jira API exception | Exception in submit loop | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
 | E10 | null or split_refused | split_held | `--hold-splits` on a Phase 1 split parent (§5.12) | Review neither `split_held:` nor `split_submit_failed:` (a quarantined partial split is skipped); at least one child not yet `Submitted` | update_frontmatter() (error set, `needs_attention_reason` cleared; score, recommendation and needs_attention kept), then the needs-attention label and one comment in Jira unless the label was on the parent at fetch | submit.py `_hold_split` |
-| E11 | split_held | null | split_submit.py exit 0 in a run without `--hold-splits` | Review error starts with `split_held:` | update_frontmatter() (best-effort) | submit.py `_lift_split_hold` |
+| E11 | split_held | null | split_submit.py exit 0 in a run without `--hold-splits` | Review error starts with `split_held:` | update_frontmatter(); a failure is a submit error (run ends red naming the parent) | submit.py `_lift_split_hold` |
 
 ### 2.6 Label Transitions
 
@@ -1119,8 +1119,11 @@ children)` with the titles (and a line when the parent is already flagged) and w
 nothing. Lifting the hold is running submit *without*
 the switch over the same artifacts: `split_submit.py` runs exactly as today and, on exit 0, a
 `split_held:` marker on the parent's review is cleared so the report counts a split rather
-than a hold (the comment stays as history). For artifacts that were never held the switch-off
-path is byte-for-byte today's.
+than a hold (the comment stays as history). A marker that cannot be cleared ends the run red
+naming the parent: the split is real in Jira and the local record is what is wrong (the report
+would count the executed split as held and bootstrap would keep the parent unprocessed), so
+it is a submit error, not a warning on a green run. For artifacts that were never held the
+switch-off path is byte-for-byte today's.
 
 ## 6. Cross-References
 
