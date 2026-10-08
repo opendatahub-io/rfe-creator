@@ -10,6 +10,15 @@ No regex parsing of markdown prose.
 
 Usage:
     python scripts/submit.py [--type rfe|initiative] [--dry-run] [--artifacts-dir DIR]
+                             [--auto-approve] [--hold-interrupted]
+                             [--generate-report --report-timestamp TS]
+
+--auto-approve transitions each qualifying item to the type's approved status and implies
+--hold-interrupted. --hold-interrupted holds an existing item whose body changed while its
+review never recorded auto_revised (an interrupted revision, pipeline correctness reference
+§5.12) instead of publishing it: every non-interactive run that does not auto-approve must
+pass it. An interactive submit (the /rfe-submit skill) passes neither and keeps the update
+path: a user who edited the task file by hand is making a manual revision.
 
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
@@ -621,7 +630,16 @@ def main():
     parser.add_argument(
         "--auto-approve",
         action="store_true",
-        help="Transition qualifying items to Approved status in Jira",
+        help="Transition qualifying items to Approved status in Jira (implies --hold-interrupted)",
+    )
+    parser.add_argument(
+        "--hold-interrupted",
+        action="store_true",
+        help=(
+            "Hold an existing item whose body changed while its review never recorded "
+            "auto_revised (an interrupted revision) instead of publishing it; required on "
+            "every non-interactive run that does not pass --auto-approve"
+        ),
     )
     parser.add_argument(
         "--generate-report",
@@ -677,6 +695,11 @@ def main():
         parser.error(
             f"--auto-approve: type '{type_name}' declares no identity.jira.state_map.approved"
         )
+    # The interrupted-revision hold (§5.12) is armed by either non-interactive switch: the RFE
+    # production job passes --auto-approve, which implies it, so its command stream is
+    # unchanged; a non-interactive run that does not auto-approve (the Initiative jobs,
+    # AISDLC-279) passes --hold-interrupted. The interactive skill passes neither.
+    hold_interrupted = args.auto_approve or args.hold_interrupted
 
     server, user, token = require_env()
 
@@ -1347,12 +1370,13 @@ def main():
         # item changed but its review never recorded auto_revised. The revise agent sets
         # that flag as its LAST action (AISDLC-50), so a changed body without it never
         # reached REASSESS -- the pipeline stopped between the rewrite and the re-review.
-        # The automation (--auto-approve) must not publish an unreviewed rewrite: hold the
-        # description, flag the item for a human, and say why. An interactive submit keeps
+        # The automation (--auto-approve, or --hold-interrupted when it does not approve)
+        # must not publish an unreviewed rewrite: hold the description, flag the item for
+        # a human, and say why. An interactive submit, which passes neither switch, keeps
         # the update path: a human editing the task file before /rfe-submit is a manual
         # revision and carries no flag either.
         if (
-            args.auto_approve
+            hold_interrupted
             and is_existing
             and body_changed
             and review_data
