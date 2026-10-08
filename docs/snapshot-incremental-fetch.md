@@ -399,7 +399,10 @@ The bootstrap snapshot accounts for:
   never attempted: `split_submit_failed:`, `split_not_attempted:`) and
   `blocked_reason` entries (a refused split, `split_refused:`; a revision
   held under `--auto-approve`, `revision_interrupted:`; a split withheld
-  under `--hold-splits`, `split_held:`). Issues that were open but not
+  under `--hold-splits`, `split_held:`). A `--hold-splits` run that ended
+  red because a hold could not be recorded reports that parent as a
+  split with no `blocked_reason` and is not a bootstrap source for it
+  (pipeline correctness reference §5.12). Issues that were open but not
   processed by the previous run
   remain absent, correctly surfacing as NEW on the first incremental
   fetch. If the latest report has an EMPTY item list (a legitimate

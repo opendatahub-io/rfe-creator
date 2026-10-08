@@ -2626,11 +2626,24 @@ class TestSplitHold:
     )
     HELD_ERROR = "split_held: 2 children proposed, submission withheld"
 
-    def _seed(self, art_dir, jira, processed=None, with_regular=False):
-        jira.create("RHAIRFE-1000", "Parent RFE", "Parent content.")
+    def _seed(
+        self, art_dir, jira, processed=None, with_regular=False, original_labels=(), review=None
+    ):
+        jira.create(
+            "RHAIRFE-1000", "Parent RFE", "Parent content.", labels=list(original_labels) or None
+        )
         _write(f"{art_dir}/rfe-originals/RHAIRFE-1000.md", "Parent content.")
-        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
-        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", self.PARENT_REVIEW)
+        # original_labels is what FETCH recorded from Jira; the hold reads it from the task.
+        labels_fm = (
+            "original_labels:\n" + "".join(f"- {label}\n" for label in original_labels)
+            if original_labels
+            else ""
+        )
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1000.md",
+            self.PARENT_TASK.replace("status: Archived\n---", f"status: Archived\n{labels_fm}---"),
+        )
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", review or self.PARENT_REVIEW)
         for i in (1, 2):
             _write(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md", self.CHILD_TASK_TPL.format(num=i))
             _write(f"{art_dir}/rfe-reviews/RFE-{i:03d}-review.md", _review(f"RFE-{i:03d}"))
@@ -2824,8 +2837,11 @@ class TestSplitHold:
         """A hold that is not on disk is no hold: the report would count the parent as a
         successful split and bootstrap would freeze it as processed. So when the review write
         fails nothing is posted to Jira for that parent, the run ends red through _finish
-        (report still generated) and the failure names the parent."""
-        self._seed(art_dir, jira)
+        (report still generated) and the failure names the parent. The Phase 1 snapshot reset
+        skips the parent too: its report entry IS a split with no blocked_reason (the record
+        that would say otherwise never landed), so the live snapshot must not claim
+        unprocessed — a red hold run's report is no bootstrap source for that parent."""
+        snap_path = self._seed(art_dir, jira, processed=True)
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
         import submit as submit_mod
 
@@ -2856,14 +2872,185 @@ class TestSplitHold:
         with pytest.raises(SystemExit) as exc:
             submit_mod.main()
         assert exc.value.code == 1
-        err = capsys.readouterr().err
+        captured = capsys.readouterr()
+        err = captured.err
         assert "could not record the split hold on RHAIRFE-1000's review (disk full)" in err
         assert "RHAIRFE-1000: split hold could not be recorded" in err
-        assert os.path.exists(f"{art_dir}/auto-fix-runs/20261005-130000.yaml")
+        assert "Reset" not in captured.out and "snapshot" not in err
         issue = jira.get("RHAIRFE-1000")
         assert issue["fields"]["labels"] == []
         assert self._hold_comments(jira) == []
         assert self._summaries(jira) == ["Parent RFE"]
+        # The snapshot entry is left as fetched, not reset: nothing on disk says "held".
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"] == {"hash": "parent-hash", "processed": True}
+        # The report still counts the parent as a split with no blocked_reason: the known
+        # shape of a red hold run, which is why its report is no bootstrap source for it.
+        with open(f"{art_dir}/auto-fix-runs/20261005-130000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1000"]
+        assert entry["recommendation"] == "split"
+        assert "blocked_reason" not in entry and "failed_reason" not in entry
+        assert report["results"]["split"] == 1
+        assert report["results"]["blocked"] == 0
+
+    def test_parent_already_flagged_at_fetch_is_held_without_a_second_comment(self, art_dir, jira):
+        """The production shape of a re-run: the hold resets the parent to unprocessed and the
+        needs-attention label is no fetch filter, so the next scheduled run selects the parent
+        as new — fresh artifacts, a fresh review with no marker — and would hold it again,
+        re-posting the comment every run. The labels fetch recorded on the task are the second
+        key (the guard _post_needs_attention_comment applies): the hold is still recorded, so
+        the report and bootstrap agree and the parent is reset, but neither the label nor the
+        comment is posted again."""
+        snap_path = self._seed(
+            art_dir, jira, processed=True, original_labels=("rfe-creator-needs-attention",)
+        )
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert "RHAIRFE-1000: Split held — 2 children proposed, recorded on the review" in r.stdout
+        assert (
+            "RHAIRFE-1000: rfe-creator-needs-attention was already on the item at fetch; label "
+            "and comment not posted again"
+        ) in r.stdout
+        assert "Posted split-hold comment" not in r.stdout
+        assert "Labels:" not in r.stdout
+        assert self._hold_comments(jira) == []
+        issue = jira.get("RHAIRFE-1000")
+        assert issue["fields"]["labels"] == ["rfe-creator-needs-attention"]
+        assert _histories(jira, "RHAIRFE-1000") == []  # not even a no-op label write
+        assert self._summaries(jira) == ["Parent RFE"]
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"]["processed"] is False
+
+    def test_dry_run_says_when_the_parent_is_already_flagged(self, art_dir, jira):
+        self._seed(art_dir, jira, original_labels=("rfe-creator-needs-attention",))
+        r = _run_submit(art_dir, jira.url, ["--hold-splits", "--dry-run"])
+        assert r.returncode == 0, r.stderr
+        assert (
+            "  Would hold split of RHAIRFE-1000 (2 children)\n    - Child RFE 1\n"
+            "    - Child RFE 2\n    (rfe-creator-needs-attention already on the item at fetch: "
+            "no comment, no label)\n"
+        ) in r.stdout
+        assert _histories(jira, "RHAIRFE-1000") == []
+
+    def test_quarantined_partial_split_is_not_held(self, art_dir, jira):
+        """A review carrying split_submit_failed: is a partial split an earlier run quarantined
+        (exit 4/5; its Jira half is the split-quarantine label, applied after fetch so it is
+        not in original_labels): a human owns it and the record is its diagnosis. The hold
+        skips the parent as the stall-escalation skip does — the review untouched, nothing
+        posted, the snapshot entry left alone — and the run stays green."""
+        quarantined = self.PARENT_REVIEW.replace(
+            "needs_attention: false\n",
+            "needs_attention: true\n"
+            "needs_attention_reason: 'Split partially applied: 1 of 2 children created'\n"
+            "error: 'split_submit_failed: exit 4'\n",
+        )
+        snap_path = self._seed(art_dir, jira, processed=True, review=quarantined)
+        jira.request(
+            "PUT",
+            "/rest/api/3/issue/RHAIRFE-1000",
+            {"fields": {"labels": ["rfe-creator-needs-attention", "rfe-creator-split-quarantine"]}},
+        )
+        histories_before = _histories(jira, "RHAIRFE-1000")
+
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert (
+            "RHAIRFE-1000: SKIP split-hold - review error split_submit_failed: exit 4; the split "
+            "is quarantined, left for an operator"
+        ) in r.stdout
+        assert "Split held" not in r.stdout and "Reset" not in r.stdout
+        assert "Split submission:" not in r.stdout
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == "split_submit_failed: exit 4"
+        assert fm["needs_attention_reason"] == "Split partially applied: 1 of 2 children created"
+        assert self._hold_comments(jira) == []
+        assert _histories(jira, "RHAIRFE-1000") == histories_before
+        assert self._summaries(jira) == ["Parent RFE"]
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"]["processed"] is True
+
+    def test_submitted_children_are_not_proposed(self, art_dir, jira):
+        """A Submitted descendant was created in Jira by an earlier run and renamed to its key:
+        the hold proposes only what a split would still create, so it is neither counted nor
+        listed."""
+        self._seed(art_dir, jira)
+        jira.create("RHAIRFE-1001", "Child RFE 3", "Child 3 does one thing well.")
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-1001.md",
+            "---\nrfe_id: RHAIRFE-1001\nlocal_id: RFE-003\ntitle: Child RFE 3\n"
+            "priority: Major\nstatus: Submitted\nparent_key: RHAIRFE-1000\n---\n\n"
+            "## Summary\n\nChild 3 does one thing well.\n",
+        )
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert "RHAIRFE-1000: Split held — 2 children proposed, recorded on the review" in r.stdout
+        (comment,) = self._hold_comments(jira)
+        body = json.dumps(comment["body"])
+        assert "Child RFE 1" in body and "Child RFE 2" in body
+        assert "Child RFE 3" not in body
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
+
+    def test_a_parent_with_only_submitted_children_is_not_held(self, art_dir, jira):
+        """Every child already created: there is nothing to propose, so nothing is recorded or
+        posted and the snapshot entry is left alone."""
+        snap_path = self._seed(art_dir, jira, processed=True)
+        for i in (1, 2):
+            os.remove(f"{art_dir}/rfe-tasks/RFE-{i:03d}.md")
+            jira.create(f"RHAIRFE-100{i}", f"Child RFE {i}", f"Child {i} does one thing well.")
+            _write(
+                f"{art_dir}/rfe-tasks/RHAIRFE-100{i}.md",
+                f"---\nrfe_id: RHAIRFE-100{i}\nlocal_id: RFE-{i:03d}\ntitle: Child RFE {i}\n"
+                "priority: Major\nstatus: Submitted\nparent_key: RHAIRFE-1000\n---\n\n"
+                f"## Summary\n\nChild {i} does one thing well.\n",
+            )
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        assert (
+            "RHAIRFE-1000: SKIP split-hold - every child is already submitted; nothing to propose"
+        ) in r.stdout
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm.get("error") is None
+        assert self._hold_comments(jira) == []
+        assert jira.get("RHAIRFE-1000")["fields"]["labels"] == []
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1000"]["processed"] is True
+
+    def test_hold_clears_a_stale_refusal_reason(self, art_dir, jira):
+        """A parent an earlier run refused (split_refused: plus needs_attention_reason) and held
+        on a same-artifacts re-run: the report prefers needs_attention_reason over the error for
+        a blocked entry, so the hold clears the stale reason as it writes its marker and the
+        blocked_reason is the hold, not the refusal. needs_attention itself stays."""
+        refused = self.PARENT_REVIEW.replace(
+            "needs_attention: false\n",
+            "needs_attention: true\n"
+            "needs_attention_reason: 'Split refused: too many leaf children (12 > 10)'\n"
+            "error: 'split_refused: too many leaf children'\n",
+        )
+        self._seed(art_dir, jira, review=refused)
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            ["--hold-splits", "--generate-report", "--report-timestamp", "20261005-140000"],
+        )
+        assert r.returncode == 0, r.stderr
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm["error"] == self.HELD_ERROR
+        assert fm.get("needs_attention_reason") is None
+        assert fm["needs_attention"] is True
+        assert len(self._hold_comments(jira)) == 1  # the proposal is new information
+        with open(f"{art_dir}/auto-fix-runs/20261005-140000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1000"]
+        assert entry["blocked_reason"] == self.HELD_ERROR
+        assert report["results"]["blocked"] == 1
 
     def test_the_hold_is_type_independent(self, init_art_dir, jira):
         """The same switch holds an Initiative split with the initiative descriptor's comment
