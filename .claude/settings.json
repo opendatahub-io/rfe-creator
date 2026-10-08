@@ -27,8 +27,6 @@
       "Bash(python3 scripts/check_content_preservation.py *)",
       "Bash(python3 scripts/frontmatter.py *)",
       "Bash(python3 scripts/fetch_issue.py *)",
-      "Bash(bash scripts/bootstrap-assess-rfe.sh)",
-      "Bash(bash scripts/bootstrap-assess-rfe.sh *)",
       "Bash(bash scripts/bootstrap.sh)",
       "Bash(bash scripts/bootstrap.sh *)",
       "Bash(bash scripts/fetch-architecture-context.sh)",

@@ -18,8 +18,6 @@
 #   --layout   step 2 only, then exit 0 — a skill calls this through its own
 #              plugin-relative path before it can run anything relative.
 #
-# scripts/bootstrap-assess-rfe.sh is the compatibility name and forwards here.
-#
 # The caller declares which pipeline's assets it needs. Validating only the
 # RFE rubric lets a checkout that lacks the initiative rubric or the
 # initiative-scorer agent exit 0, after which the ASSESS phase can never
