@@ -1660,6 +1660,15 @@ class TestApproveStateFromTheBinding:
         assert result.returncode == 1, result.stderr
         assert "No Memo task files found." in result.stderr
 
+    def test_hold_interrupted_needs_no_approved_state(self, drop_in_root, tmp_path):
+        """AISDLC-279: --hold-interrupted is the switch of the non-interactive runs that do
+        not approve, so a type without the approved state takes it (only --auto-approve
+        reads that state)."""
+        root = drop_in_root.memo(drop=("identity.jira.state_map.approved",))
+        result = self._run_memo(root, tmp_path, "--hold-interrupted")
+        assert result.returncode == 1, result.stderr
+        assert "No Memo task files found." in result.stderr  # startup passed, the scan ran
+
 
 class TestReportCommandArgv:
     """_generate_reports spawns generate_run_report.py and generate_review_pdf.py.

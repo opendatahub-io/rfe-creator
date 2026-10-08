@@ -456,11 +456,20 @@ class TestFeasibilityLabelExecutor:
         assert "rfe-creator-feasibility-fail" not in issue["fields"]["labels"]
 
 
+# The two switches that arm the interrupted-revision hold (AISDLC-279): --auto-approve
+# implies it, so the RFE production job's command stream is unchanged; --hold-interrupted
+# alone is the non-interactive run that does not auto-approve (the Initiative jobs).
+_HOLD_SWITCHES = pytest.mark.parametrize(
+    "hold_switch", ["--auto-approve", "--hold-interrupted"], ids=lambda s: s.lstrip("-")
+)
+
+
 class TestInterruptedRevisionHold:
     """An existing item whose body changed while its review still says
     ``auto_revised: false`` is an interrupted revision (the revise agent sets that flag
-    as its last action, AISDLC-50). Under --auto-approve the rewrite is held, not
-    published; an interactive submit keeps the update path."""
+    as its last action, AISDLC-50). Under --auto-approve or --hold-interrupted (the
+    non-interactive switches) the rewrite is held, not published; an interactive submit,
+    which passes neither, keeps the update path."""
 
     ORIGINAL = "## Problem\n\nOriginal content.\n"
     REWRITE = "## Problem\n\nRewritten by the revise agent, never re-reviewed.\n"
@@ -501,6 +510,22 @@ class TestInterruptedRevisionHold:
     def _attention_comments(jira):
         comments = jira.request("GET", "/rest/api/3/issue/RHAIRFE-1234/comment")["comments"]
         return [c for c in comments if "Revision interrupted" in json.dumps(c["body"])]
+
+    @staticmethod
+    def _write_snapshot(art_dir, processed):
+        snap_dir = os.path.join(art_dir, "auto-fix-runs")
+        os.makedirs(snap_dir, exist_ok=True)
+        snap_path = os.path.join(snap_dir, "issue-snapshot-20260929-000000.yaml")
+        with open(snap_path, "w") as f:
+            yaml.dump(
+                {
+                    "query_timestamp": "2026-09-29T00:00:00Z",
+                    "timestamp": "2026-09-29T00:00:01Z",
+                    "issues": {"RHAIRFE-1234": {"processed": processed, "hash": "abc"}},
+                },
+                f,
+            )
+        return snap_path
 
     def test_auto_approve_holds_an_interrupted_revision(self, art_dir, jira):
         self._seed(art_dir, jira, auto_revised="false")
@@ -544,14 +569,17 @@ class TestInterruptedRevisionHold:
         assert "revision interrupted" not in r.stdout
         assert "RHAIRFE-1234: Updated" in r.stdout
 
-    def test_rerun_over_held_artifacts_holds_again_without_a_second_comment(self, art_dir, jira):
+    @_HOLD_SWITCHES
+    def test_rerun_over_held_artifacts_holds_again_without_a_second_comment(
+        self, art_dir, jira, hold_switch
+    ):
         """The manual submit jobs re-run submit over the same artifacts: the hold is
         idempotent, the labels are re-applied, the comment is posted once."""
         self._seed(art_dir, jira, auto_revised="false")
-        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        r = _run_submit(art_dir, jira.url, [hold_switch])
         assert r.returncode == 0, r.stderr
         assert len(self._attention_comments(jira)) == 1
-        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        r = _run_submit(art_dir, jira.url, [hold_switch])
         assert r.returncode == 0, r.stderr
         assert "revision interrupted" in r.stdout
         assert len(self._attention_comments(jira)) == 1
@@ -668,11 +696,12 @@ class TestInterruptedRevisionHold:
         assert "rfe-creator-needs-attention" in issue["fields"]["labels"]
         assert "Original content." in self._desc_text(issue)
 
-    def test_dry_run_hold_writes_nothing(self, art_dir, jira):
+    @_HOLD_SWITCHES
+    def test_dry_run_hold_writes_nothing(self, art_dir, jira, hold_switch):
         """CodeRabbit on #210: the planning path runs under --dry-run too, so the hold
         must be reported without touching the review, the task or Jira."""
         self._seed(art_dir, jira, auto_revised="false")
-        r = _run_submit(art_dir, jira.url, ["--auto-approve", "--dry-run"])
+        r = _run_submit(art_dir, jira.url, [hold_switch, "--dry-run"])
         assert r.returncode == 0, r.stderr
         assert "revision interrupted" in r.stdout
         fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
@@ -734,13 +763,109 @@ class TestInterruptedRevisionHold:
         assert snap["issues"]["RHAIRFE-1234"]["processed"] is False
 
     def test_interactive_submit_still_updates(self, art_dir, jira):
-        """No --auto-approve: a human editing the task file is a manual revision."""
+        """Neither --auto-approve nor --hold-interrupted: the interactive /rfe-submit, where
+        the user is present and a changed task file is a manual revision (which carries no
+        flag either). The update path is unchanged: the description is published, the
+        review is left as it was, the task is marked Submitted; no needs-attention label,
+        no comment."""
         self._seed(art_dir, jira, auto_revised="false")
 
         r = _run_submit(art_dir, jira.url)
         assert r.returncode == 0, r.stderr
         assert "RHAIRFE-1234: Updated" in r.stdout
-        assert "Rewritten" in self._desc_text(jira.get("RHAIRFE-1234"))
+        assert "revision interrupted" not in r.stdout
+        issue = jira.get("RHAIRFE-1234")
+        assert "Rewritten" in self._desc_text(issue)
+        assert "rfe-creator-needs-attention" not in issue["fields"]["labels"]
+        assert self._attention_comments(jira) == []
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm["pass"] is True
+        assert "error" not in fm
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Submitted"
+
+    def test_hold_interrupted_alone_holds_like_auto_approve(self, art_dir, jira):
+        """AISDLC-279: a non-interactive run that does not auto-approve (the Initiative
+        opt-in jobs) passes --hold-interrupted and gets the hold --auto-approve gets --
+        the review's pass: false and error, the label-only plan with the stale verdict
+        labels off, the comment, the snapshot's processed flag reset and blocked_reason
+        in the run report -- without the approval transition the other switch performs.
+        This is the path that would otherwise publish an unreviewed rewrite exactly as
+        RHAIRFE-3520 was published on 2026-09-29."""
+        seeded = ("rfe-creator-autofix-rubric-pass", "rfe-creator-feasibility-pass", "keep-me")
+        self._seed(art_dir, jira, auto_revised="false", original_labels=seeded)
+        jira.request(
+            "PUT",
+            "/rest/api/3/issue/RHAIRFE-1234",
+            {"fields": {"labels": list(seeded)}},
+        )
+        snap_path = self._write_snapshot(art_dir, processed=True)
+
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            ["--hold-interrupted", "--generate-report", "--report-timestamp", "20261008-120000"],
+        )
+        assert r.returncode == 0, r.stderr
+        assert "revision interrupted" in r.stdout
+        assert "RHAIRFE-1234: Updated" not in r.stdout
+        assert "Transitioned to Approved" not in r.stdout
+
+        issue = jira.get("RHAIRFE-1234")
+        assert "Original content." in self._desc_text(issue)
+        assert "Rewritten" not in self._desc_text(issue)
+        assert issue["fields"]["status"]["name"] != "Approved"
+        labels = set(issue["fields"]["labels"])
+        assert "rfe-creator-needs-attention" in labels
+        assert "keep-me" in labels
+        assert "rfe-creator-auto-revised" not in labels
+        assert "rfe-creator-autofix-rubric-pass" not in labels
+        assert not any(label.startswith("rfe-creator-feasibility-") for label in labels)
+        assert len(self._attention_comments(jira)) == 1
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm["pass"] is False
+        assert fm["error"].startswith("revision_interrupted:")
+        assert fm["needs_attention"] is True
+        assert "Revision interrupted" in fm["needs_attention_reason"]
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Ready"
+        with open(snap_path) as fh:
+            snap = yaml.safe_load(fh)
+        assert snap["issues"]["RHAIRFE-1234"]["processed"] is False
+        with open(f"{art_dir}/auto-fix-runs/20261008-120000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1234"]
+        assert "Revision interrupted" in entry["blocked_reason"]
+        assert report["results"]["blocked"] == 1
+
+    def test_both_switches_hold_once(self, art_dir, jira):
+        """--auto-approve already implies the hold, so a job that spells both switches
+        holds the item once -- one plan entry, one comment, one review write -- and still
+        approves nothing."""
+        self._seed(art_dir, jira, auto_revised="false")
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            [
+                "--auto-approve",
+                "--hold-interrupted",
+                "--generate-report",
+                "--report-timestamp",
+                "20261008-130000",
+            ],
+        )
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.count("revision interrupted") == 1
+        assert "RHAIRFE-1234: Updated" not in r.stdout
+        assert "Transitioned to Approved" not in r.stdout
+        issue = jira.get("RHAIRFE-1234")
+        assert "Original content." in self._desc_text(issue)
+        assert issue["fields"]["labels"] == ["rfe-creator-needs-attention"]
+        assert len(self._attention_comments(jira)) == 1
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm["pass"] is False
+        assert fm["error"].startswith("revision_interrupted:")
+        with open(f"{art_dir}/auto-fix-runs/20261008-130000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        assert report["results"]["blocked"] == 1
 
     def test_completed_revision_is_published_under_auto_approve(self, art_dir, jira):
         self._seed(art_dir, jira, auto_revised="true")
