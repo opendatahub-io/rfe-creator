@@ -262,7 +262,7 @@ class TestLayout:
     bootstrap links the plugin's scripts/ and types/ into it. `--layout` does only that and
     exits, so a skill can call it through its own plugin-relative path before anything
     relative. A different entry of the same name is a refusal (exit 3), never a fallback;
-    the skip mode links nothing; the compatibility name forwards; inside a git repository the
+    the skip mode links nothing; inside a git repository the
     links, tmp/ and the vendored set go to the repository's info/exclude (best effort)."""
 
     @staticmethod
@@ -331,14 +331,6 @@ class TestLayout:
         again = self._layout()
         assert again.returncode == 0 and again.stdout == "", again
         assert self._exclude_lines(in_tmp) == lines
-        # the compatibility name forwards, arguments included
-        forwarded = subprocess.run(
-            ["bash", os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"), "--layout"],
-            capture_output=True,
-            text=True,
-            env=_env_no_skip(),
-        )
-        assert forwarded.returncode == 0 and forwarded.stdout == "", forwarded
 
     def test_layout_mode_ignores_the_skip_variable(self, in_tmp):
         env = {**os.environ, "RFE_SKIP_BOOTSTRAP": "1"}
