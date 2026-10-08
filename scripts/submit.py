@@ -312,6 +312,14 @@ def _review_error(artifacts_dir, item_id, cfg):
 # failed`` / ``split phase aborted`` markers mean "not attempted yet" and a re-run over the same
 # artifacts (the manual submit jobs) must still attempt those.
 STALL_NOT_ATTEMPTED_PREFIX = f"{SPLIT_NOT_ATTEMPTED_PREFIX} wave stalled"
+# The needs-attention reason an interrupted-revision hold writes (§5.12). The prefix is what
+# a later run keys on to tell the hold's flag from any other needs-attention reason.
+INTERRUPTED_HOLD_REASON_PREFIX = "Revision interrupted:"
+INTERRUPTED_HOLD_REASON = (
+    f"{INTERRUPTED_HOLD_REASON_PREFIX} the task body changed but the review never recorded "
+    "auto_revised, so the rewrite was not re-reviewed. The description was left "
+    "as it was; re-run the pipeline on this item or review the local revision by hand."
+)
 
 
 def _is_stall_escalation(error):
@@ -1407,11 +1415,7 @@ def main():
             already_held = str(review_data.get("error") or "").startswith(
                 REVISION_INTERRUPTED_PREFIX
             )
-            reason = (
-                "Revision interrupted: the task body changed but the review never recorded "
-                "auto_revised, so the rewrite was not re-reviewed. The description was left "
-                "as it was; re-run the pipeline on this item or review the local revision by hand."
-            )
+            reason = INTERRUPTED_HOLD_REASON
             review_path = _find_review(args.artifacts_dir, item_id, cfg)
             # The planning path runs under --dry-run too: record the hold on the review
             # only when the run is real (CodeRabbit on #210). `pass: false` is what makes
@@ -1492,6 +1496,29 @@ def main():
             )
             continue
 
+        # A review carrying an earlier run's hold, in a run that does not hold (no switch):
+        # the update below publishes the rewrite, which lifts the hold. The hold's record
+        # must not travel with the publication — its needs-attention reason says the
+        # description was left as it was, and its `revision_interrupted:` error would keep
+        # the report counting the item as blocked (unprocessed for bootstrap) after the
+        # snapshot marked it processed (CodeRabbit on #219). So the plan is built as if
+        # the hold's flag were gone, and the review is cleared once the update succeeds.
+        # `pass: false` stays: the published rewrite was never re-reviewed.
+        lift_fields = None
+        lift_remove = []
+        if (
+            review_data
+            and is_existing
+            and str(review_data.get("error") or "").startswith(REVISION_INTERRUPTED_PREFIX)
+        ):
+            lift_fields = {"error": None}
+            held_reason = str(review_data.get("needs_attention_reason") or "")
+            if held_reason.startswith(INTERRUPTED_HOLD_REASON_PREFIX):
+                lift_fields.update({"needs_attention": False, "needs_attention_reason": None})
+                lift_remove = [f"{cfg['label_prefix']}-needs-attention"]
+                attn_reason = None
+            review_data = {**review_data, **lift_fields}
+
         labels = _build_labels(item_id, review_data, is_existing, rec, original_labels)
         feas_remove = []
         if review_data:
@@ -1512,7 +1539,7 @@ def main():
                 "size": size,
                 "action": action,
                 "labels": labels,
-                "remove_labels": feas_remove,
+                "remove_labels": feas_remove + [x for x in lift_remove if x not in feas_remove],
                 "skip_reason": None,
                 "task_path": task_path,
                 "jira_key": jira_key,
@@ -1520,6 +1547,7 @@ def main():
                 "original_labels": original_labels,
                 "auto_approve": auto_approve,
                 "jira_status": jira_status,
+                "lift_hold": lift_fields,
             }
         )
 
@@ -1652,6 +1680,15 @@ def main():
                     update_frontmatter(
                         entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
                     )
+                    if entry.get("lift_hold"):
+                        # The held rewrite is published: clear the hold's record so the
+                        # report counts a submission, as the snapshot now says.
+                        update_frontmatter(
+                            _find_review(args.artifacts_dir, item_id, cfg),
+                            entry["lift_hold"],
+                            cfg["review_schema"],
+                        )
+                        print(f"  {item_id}: Revision hold lifted — the rewrite is published")
                 results[item_id] = jira_key
             else:
                 if args.dry_run:

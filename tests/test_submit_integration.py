@@ -852,6 +852,82 @@ class TestInterruptedRevisionHold:
         assert "error" not in fm
         assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Submitted"
 
+    def test_switch_less_publication_lifts_the_hold(self, art_dir, jira):
+        """CodeRabbit on #219: a submit without either switch over artifacts an earlier run
+        held publishes the rewrite (the documented override), and that publication lifts
+        the hold. The hold's needs-attention reason — which says the description was left
+        as it was — is not posted again and its label comes off; the review's
+        ``revision_interrupted:`` record is cleared once the update succeeded, so the
+        report counts a submission (processed for bootstrap) as the live snapshot says.
+        ``pass`` stays false: the published rewrite was never re-reviewed."""
+        self._seed(art_dir, jira, auto_revised="false")
+        snap_path = self._write_snapshot(art_dir, processed=False)
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        assert len(self._attention_comments(jira)) == 1
+        assert "rfe-creator-needs-attention" in jira.get("RHAIRFE-1234")["fields"]["labels"]
+
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            ["--generate-report", "--report-timestamp", "20261008-130000"],
+        )
+        assert r.returncode == 0, r.stderr
+        assert "RHAIRFE-1234: Updated" in r.stdout
+        assert "RHAIRFE-1234: Revision hold lifted" in r.stdout
+        assert "revision interrupted" not in r.stdout
+        issue = jira.get("RHAIRFE-1234")
+        assert "Rewritten" in self._desc_text(issue)
+        assert "rfe-creator-needs-attention" not in issue["fields"]["labels"]
+        assert len(self._attention_comments(jira)) == 1  # the hold's comment stays as history
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm.get("error") is None
+        assert fm["needs_attention"] is False
+        assert fm.get("needs_attention_reason") is None
+        assert fm["pass"] is False
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Submitted"
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1234"]["processed"] is True
+        with open(f"{art_dir}/auto-fix-runs/20261008-130000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1234"]
+        assert "blocked_reason" not in entry
+        assert report["results"]["blocked"] == 0
+
+    def test_lift_keeps_a_foreign_needs_attention_reason(self, art_dir, jira):
+        """Only the hold's own flag is lifted: a needs-attention reason written by someone
+        else after the hold (the prefix tells them apart) stays, with its label and comment,
+        while the ``revision_interrupted:`` error is still cleared by the publication."""
+        self._seed(art_dir, jira, auto_revised="false")
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        subprocess.run(
+            [
+                sys.executable,
+                os.path.join(os.path.dirname(__file__), "..", "scripts", "frontmatter.py"),
+                "set",
+                f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md",
+                "needs_attention_reason=Customer legal review pending",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "RHAIRFE-1234: Updated" in r.stdout
+        assert "RHAIRFE-1234: Revision hold lifted" in r.stdout
+        issue = jira.get("RHAIRFE-1234")
+        assert "Rewritten" in self._desc_text(issue)
+        assert "rfe-creator-needs-attention" in issue["fields"]["labels"]
+        comments = jira.request("GET", "/rest/api/3/issue/RHAIRFE-1234/comment")["comments"]
+        assert [c for c in comments if "Customer legal review pending" in json.dumps(c["body"])]
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm.get("error") is None
+        assert fm["needs_attention"] is True
+        assert fm["needs_attention_reason"] == "Customer legal review pending"
+
     def test_hold_interrupted_alone_holds_like_auto_approve(self, art_dir, jira):
         """AISDLC-279: a non-interactive run that does not auto-approve (the Initiative
         opt-in jobs) passes --hold-interrupted and gets the hold --auto-approve gets --

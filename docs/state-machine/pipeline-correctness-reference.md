@@ -436,6 +436,7 @@ if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E7 | null | split_refused (jira conflict) | split_submit.py exit code 3 | Parent description changed | update_frontmatter() | submit.py:233 |
 | E8 | null | submit_failed | Jira API exception | Exception in submit loop; a held item's `revision_interrupted:` record is kept instead (§5.12) | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
+| E10 | revision_interrupted | null | Submit without either hold switch publishes the held rewrite (§5.12) | Review error starts with `revision_interrupted:`; after update_issue() succeeded | update_frontmatter() clears error, needs_attention and needs_attention_reason (the hold's own flag only) | submit.py plan `lift_hold` + update path |
 
 ### 2.6 Label Transitions
 
@@ -1091,9 +1092,17 @@ jobs' submit line passes neither either; add `--hold-interrupted` to `submit-rfe
 `submit-rfe-dry` and the Initiative jobs' submit line (the RFE production job already
 passes `--auto-approve`). An interactive submit — the `/rfe-submit` skill without
 `--headless`, which passes neither — keeps the update path: a human who edits the task
-file before `/rfe-submit` is making a manual revision and carries no flag either. Pinned
+file before `/rfe-submit` is making a manual revision and carries no flag either. Over
+artifacts an earlier run held, that publication lifts the hold: the hold's needs-attention
+reason (it says the description was left as it was) is not posted again and its label
+comes off, and once the update succeeds the review's `error: revision_interrupted: …`,
+`needs_attention` and `needs_attention_reason` are cleared, so the report counts a
+submission (processed for bootstrap) as the live snapshot says; `pass: false` stays, the
+published rewrite was never re-reviewed. Only the hold's own flag is lifted — a
+needs-attention reason that does not start with `Revision interrupted:` was written by
+someone else and stays with its label and comment. Pinned
 by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py` (the matrix: each
-switch alone, both, neither), `tests/test_initiative_submit_integration.py` (the
+switch alone, both, neither, and the switch-less publication over held artifacts), `tests/test_initiative_submit_integration.py` (the
 Initiative type under `--hold-interrupted`) and the submit-skill pin in
 `tests/test_type_registry_pins.py` (the `--headless` form carries `--hold-interrupted`,
 the interactive form does not).
