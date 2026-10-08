@@ -144,7 +144,8 @@ The command sequence is ordered to minimize data loss on failure:
    `submit.py` updates the snapshot with post-submit hashes so the
    next fetch doesn't re-flag our own changes, marks the items it
    disposed of without a content change as processed, and resets
-   `processed` for an item it held (an interrupted revision, see the
+   `processed` for an item it held (an interrupted revision under
+   `--auto-approve`, or a split parent under `--hold-splits`; see the
    pipeline correctness reference §5.12) so the next fetch selects it.
 
 2. **Single push at the end**: Everything is pushed once after all
@@ -238,9 +239,9 @@ skipping them.
 | New ID (not in snapshot) | Fetch selects issue | starts `false` |
 | `processed: false` | `submit.py` completes | set to `true` |
 
-Key rule: `processed: true` can only reset to `false` when the content
-hash changes. Only `submit.py` (via `update_snapshot_hashes`) sets
-`processed: true`.
+Key rule: `processed: true` resets to `false` when the content hash
+changes, or when `submit.py` holds the item (invariant 7). Only
+`submit.py` (via `update_snapshot_hashes`) sets `processed: true`.
 
 ### What Counts as "Processed"
 
@@ -265,6 +266,10 @@ Issues remain `processed: false` (and re-surface as NEW) when:
 - Review produced `pass: false` and issue was not in the submit plan
 - Batch was skipped entirely (no review file exists)
 - Jira conflict detected (content changed between fetch and submit)
+- Held by `submit.py` — an interrupted revision under `--auto-approve`,
+  or a split parent under `--hold-splits` (pipeline correctness
+  reference §5.12): reset to `false` even when a `--reprocess` fetch had
+  recorded the item `true`, so the next run selects it again
 
 ### Selection and Limit
 
@@ -389,8 +394,13 @@ has prior CI run history, before the first incremental fetch.
 The bootstrap snapshot accounts for:
 - **Run-report filtering**: Only issues listed in the latest run
   report's `per_rfe` list are included in the snapshot — excluding
-  error entries, which record that the run could NOT dispose of the
-  item. Issues that were open but not processed by the previous run
+  the entries that record that the run could NOT dispose of the item:
+  `error` entries, `failed_reason` entries (a split that crashed or was
+  never attempted: `split_submit_failed:`, `split_not_attempted:`) and
+  `blocked_reason` entries (a refused split, `split_refused:`; a revision
+  held under `--auto-approve`, `revision_interrupted:`; a split withheld
+  under `--hold-splits`, `split_held:`). Issues that were open but not
+  processed by the previous run
   remain absent, correctly surfacing as NEW on the first incremental
   fetch. If the latest report has an EMPTY item list (a legitimate
   zero-count run), bootstrap walks back to the newest run that
@@ -523,10 +533,11 @@ These invariants must hold and should guide future refactors:
    and `processed` is already `true`, it stays `true`, including for an
    unchanged item a `--reprocess` run selects. This ensures that
    externally edited issues are re-processed even if previously
-   completed. The one other path that lowers the flag is `submit.py`
-   holding an interrupted revision (pipeline correctness reference
-   §5.12): the item was selected but not disposed of, so submit resets
-   it through `reset_processed` and the next fetch selects it again.
+   completed. The one other path that lowers the flag is a `submit.py`
+   hold — an interrupted revision under `--auto-approve`, or a split
+   parent under `--hold-splits` (pipeline correctness reference §5.12):
+   the item was selected but not disposed of, so submit resets it
+   through `reset_processed` and the next fetch selects it again.
 8. **Only `submit.py` sets `processed: true`.** `cmd_fetch` never
    sets `processed: true` — it only preserves or resets it.
    `update_snapshot_hashes` (called by `submit.py`) is the sole path

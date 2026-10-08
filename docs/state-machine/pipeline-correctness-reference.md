@@ -93,6 +93,7 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `"reconcile_failed"` | COLLECT reconcile (`scripts/reconcile_reviews.py` reported `RECONCILE_ERRORS=` for the id: restore or frontmatter update raised) — set through `_mark_review_or_stub`, retryable, `needs_attention=true` | `pipeline_state.py` COLLECT decision |
 | `"split_refused: too many leaf children"` | Submit Phase 1 | `submit.py:199` |
 | `"split_refused: jira conflict"` | Submit Phase 1 | `submit.py:233` |
+| `"split_held: N children proposed, submission withheld"` | Submit Phase 1 under `--hold-splits` (§5.12); cleared on exit 0 by a later submit without the switch | `submit.py` `_hold_split` / `_lift_split_hold` |
 | `"submit_failed: {msg}"` | Submit Phase 2 (also sets needs_attention=true) | `submit.py:597-605` |
 
 ### 1.5 Review Orchestration Phases (rfe-review pipeline)
@@ -436,6 +437,8 @@ if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E7 | null | split_refused (jira conflict) | split_submit.py exit code 3 | Parent description changed | update_frontmatter() | submit.py:233 |
 | E8 | null | submit_failed | Jira API exception | Exception in submit loop | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
+| E10 | null | split_held | `--hold-splits` on a Phase 1 split parent (§5.12) | Review not already `split_held:` | update_frontmatter() (error only; score and recommendation kept), then the needs-attention label and one comment in Jira | submit.py `_hold_split` |
+| E11 | split_held | null | split_submit.py exit 0 in a run without `--hold-splits` | Review error starts with `split_held:` | update_frontmatter() (best-effort) | submit.py `_lift_split_hold` |
 
 ### 2.6 Label Transitions
 
@@ -1029,9 +1032,9 @@ could disagree with the submission pipeline's content comparison.
 
 ---
 
-### 5.12 Interrupted revisions at submit
+### 5.12 Submit holds: interrupted revisions and withheld splits
 
-The revise agent sets `auto_revised: true` as its last action (AISDLC-50), so an existing
+**Interrupted revisions (`--auto-approve`, #210).** The revise agent sets `auto_revised: true` as its last action (AISDLC-50), so an existing
 item whose task body differs from its original while the review still says
 `auto_revised: false` is a revision the pipeline stopped between the rewrite and the
 re-review — the 2026-09-29 03:12 UTC shape, where the run ended right after an
@@ -1066,6 +1069,41 @@ limit: the hold keys on `auto_revised`, which `REASSESS_RESTORE` restores to `tr
 durable fix is a per-wave revision marker set by the pipeline (follow-up). An interactive
 submit (no `--auto-approve`) keeps the update path: a human who edits the task file
 before `/rfe-submit` is making a manual revision and carries no flag either.
+
+**Withheld splits (`--hold-splits`, AISDLC-278).** The other hold is a per-run switch,
+declared once for every type and never passed by the RFE production job. Phase 1 otherwise
+runs `split_submit.py` for every archived, Jira-keyed parent that has children whatever
+`--auto-approve` says (that switch only decides whether the *children* are approved at
+creation), so the first live Initiative run whose review scored Right-sized 0/2 would mint
+child Initiatives in RHOAIENG and close the parent as Obsolete before the owners had seen a
+single result (AISDLC-206, decision D3). Under `--hold-splits` the recommendation is
+recorded, not executed. `split_submit.py` is not spawned. Per parent: the review gets
+`error: split_held: N children proposed, submission withheld` first — score and
+recommendation kept, no `needs_attention_reason`, so the run report's `blocked_reason` is the
+marker itself and `bootstrap_snapshot` reads the entry as unprocessed; a hold that is not on
+disk is no hold (the report would count the parent as split and bootstrap would freeze it as
+processed), so when that write fails nothing is posted to Jira for the parent and the run
+ends red naming it. Then the type's `conventions.labels.needs_attention` label is added and
+ONE `*[<Type> Creator]* Split held: …` comment is posted listing the leaf children a split
+would create — the same walk as `split_submit.py`, through archived local intermediaries —
+each as its title and the first line of prose of its body, and saying that no child was
+created, that the parent was left as it was and that a human decides. Nothing else is
+written: no status change, no edit, no child, no link; the children stay local artifacts and
+Phase 2 does not see them (they have a Jira ancestor). The parent is reset to
+`processed: false` in the snapshot from Phase 1 itself, as the interrupted-revision hold
+resets its item (a `--reprocess` fetch records a selected unchanged item as processed, and a
+split-only batch ends through the early `_finish` before the Phase 2 snapshot update), so the
+next scheduled run selects it again; a snapshot that exists but could not be updated ends the
+run red naming the parents. A re-run with the hold over already-held artifacts (the manual
+submit jobs) holds again idempotently — `already_held`, the #210 pattern: the label is
+re-applied, the review is left as recorded, the comment is not posted a second time (which
+also means a comment that failed to post the first time is not retried; the red run says to
+post it by hand). Under `--dry-run` the hold prints `Would hold split of <parent> (N
+children)` with the titles and writes nothing. Lifting the hold is running submit *without*
+the switch over the same artifacts: `split_submit.py` runs exactly as today and, on exit 0, a
+`split_held:` marker on the parent's review is cleared so the report counts a split rather
+than a hold (the comment stays as history). For artifacts that were never held the switch-off
+path is byte-for-byte today's.
 
 ## 6. Cross-References
 
