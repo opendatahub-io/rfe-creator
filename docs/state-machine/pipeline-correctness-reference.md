@@ -1036,7 +1036,8 @@ item whose task body differs from its original while the review still says
 `auto_revised: false` is a revision the pipeline stopped between the rewrite and the
 re-review — the 2026-09-29 03:12 UTC shape, where the run ended right after an
 auto-compaction and the post-agent submit pushed the unreviewed text to RHAIRFE-3520.
-Under `--auto-approve` (the automation's mode) `submit.py` now holds such an item: the
+Under either non-interactive switch — `--auto-approve`, which implies the hold, or
+`--hold-interrupted` (AISDLC-279) — `submit.py` holds such an item: the
 description is not updated, the review gets `needs_attention: true` with a reason that
 names the interruption, the plan entry runs as `Label only` (the needs-attention label
 and comment, no approval, no verdict labels, and the existing rubric-pass and feasibility
@@ -1063,9 +1064,21 @@ comment, and the comment is posted even when the item already carried the needs-
 label at fetch. Under `--dry-run` the hold is reported and nothing is written. Known
 limit: the hold keys on `auto_revised`, which `REASSESS_RESTORE` restores to `true` before
 `REASSESS_REVISE`, so a run that dies inside a *second* revision pass is not detected; the
-durable fix is a per-wave revision marker set by the pipeline (follow-up). An interactive
-submit (no `--auto-approve`) keeps the update path: a human who edits the task file
-before `/rfe-submit` is making a manual revision and carries no flag either.
+durable fix is a per-wave revision marker set by the pipeline (AISDLC-275).
+
+The two switches (AISDLC-279). The hold was first armed by `--auto-approve` alone, which
+the RFE production job passes; the Initiative jobs run with auto-approve off during the
+opt-in period, and on them the 2026-09-29 shape would have published. `--hold-interrupted`
+arms the same hold without the approval transition and reads no approved state from the
+type's binding, so a type that never approves can pass it. Every non-interactive run that
+does not pass `--auto-approve` must pass `--hold-interrupted`; passing both holds once
+(`--auto-approve` implies it, so the RFE job's command stream is unchanged). An interactive
+submit — the `/rfe-submit` skill, which passes neither — keeps the update path: a human who
+edits the task file before `/rfe-submit` is making a manual revision and carries no flag
+either. Pinned by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py`
+(the matrix: each switch alone, both, neither) and
+`tests/test_initiative_submit_integration.py` (the Initiative type under
+`--hold-interrupted`).
 
 ## 6. Cross-References
 

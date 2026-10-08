@@ -51,6 +51,8 @@ Check if `JIRA_SERVER`, `JIRA_USER`, and `JIRA_TOKEN` environment variables are 
 python3 scripts/submit.py {TYPE_FLAG} [--dry-run] [--artifacts-dir artifacts]
 ```
 
+This is the interactive path: pass neither `--auto-approve` nor `--hold-interrupted`. Those are the switches of the non-interactive jobs that call the script directly — under either, an existing item whose body changed while its review never recorded `auto_revised` is held for a human instead of published (`docs/state-machine/pipeline-correctness-reference.md` §5.12). A user who edited the task file by hand before invoking this skill is making a manual revision and expects the update.
+
 ## Step 2: Report Results
 
 After the script completes, report the results — which {ENTITY_PLURAL} were created, updated, or skipped. If `INDEX_ENABLED={INDEX_ENABLED}` is true, `artifacts/rfes.md` (rebuilt by the script) carries the same information.
