@@ -2791,6 +2791,33 @@ class TestSplitHold:
         fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
         assert fm.get("error") is None
 
+    def test_a_later_run_without_the_switch_executes_the_held_split(self, art_dir, jira):
+        """The hold is lifted by running submit without the switch over the same artifacts
+        (the owners allowed splits): split_submit.py runs as today, and the hold's marker is
+        cleared from the review so the report counts a split, not a hold."""
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url, ["--hold-splits"])
+        assert r.returncode == 0, r.stderr
+        r = _run_submit(
+            art_dir,
+            jira.url,
+            ["--generate-report", "--report-timestamp", "20261006-120000"],
+        )
+        assert r.returncode == 0, r.stderr
+        assert "Phase 1: Submitting 1 split parent(s)" in r.stdout
+        assert "RHAIRFE-1000: Split hold lifted — the split was executed" in r.stdout
+        assert self._summaries(jira) == ["Child RFE 1", "Child RFE 2", "Parent RFE"]
+        assert len(self._hold_comments(jira)) == 1  # the hold's comment stays as history
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert fm.get("error") is None
+        assert fm["recommendation"] == "split"
+        with open(f"{art_dir}/auto-fix-runs/20261006-120000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1000"]
+        assert "blocked_reason" not in entry
+        assert report["results"]["split"] == 1
+        assert report["results"]["blocked"] == 0
+
     def test_hold_that_cannot_be_recorded_flags_nothing_and_ends_red(
         self, art_dir, jira, monkeypatch, capsys
     ):

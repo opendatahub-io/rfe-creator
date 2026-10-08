@@ -694,6 +694,29 @@ def _hold_split(server, user, token, parent_key, leaves, args, cfg, attention_la
         submit_errors.append((parent_key, f"split held, but the comment could not be posted: {e}"))
 
 
+def _lift_split_hold(args, cfg, parent_key):
+    """The split of a parent an earlier ``--hold-splits`` run held was just executed (this run
+    carries no hold and split_submit.py exited 0): clear the hold's marker from the review so the
+    run report counts a split, not a hold, and bootstrap agrees. Only a ``split_held:`` error is
+    touched — any other error is another path's record and is left alone — so a parent that was
+    never held reads the review once and is otherwise untouched. Local-only and best-effort: the
+    split is real in Jira whatever happens here, and a failure says what the report will show."""
+    error = _review_error(args.artifacts_dir, parent_key, cfg)
+    if not error or not error.startswith(SPLIT_HELD_PREFIX):
+        return
+    try:
+        update_frontmatter(
+            _find_review(args.artifacts_dir, parent_key, cfg), {"error": None}, cfg["review_schema"]
+        )
+        print(f"  {parent_key}: Split hold lifted — the split was executed")
+    except Exception as e:
+        print(
+            f"  Warning: could not clear the split hold on {parent_key}'s review ({e}); the run "
+            "report will show the executed split as held.",
+            file=sys.stderr,
+        )
+
+
 def _finish(args, type_name, type_label, submit_errors):
     """Summarise failures, regenerate the reports, then exit. Never returns.
 
@@ -1031,6 +1054,10 @@ def main():
                 # classifier is alive (review finding: two isolated signal
                 # deaths separated by a healthy refusal are not a streak).
                 consecutive_generic = 0
+            if result.returncode == 0 and not args.dry_run:
+                # A parent an earlier --hold-splits run held: the hold is lifted now that
+                # the split is real (a no-op for a parent that was never held).
+                _lift_split_hold(args, cfg, parent_key)
             # argparse used to exit 2 as well; split_submit now routes usage
             # errors to 64, so 2 is unambiguously the leaf cap.
             if result.returncode == 2:
