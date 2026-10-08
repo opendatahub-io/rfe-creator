@@ -699,6 +699,73 @@ class TestInterruptedRevisionHold:
         assert "Original content." in self._desc_text(issue)
 
     @_HOLD_SWITCHES
+    def test_hold_whose_jira_write_fails_stays_held_and_unprocessed(
+        self, art_dir, jira, monkeypatch, capsys, hold_switch
+    ):
+        """CodeRabbit on #219: the hold is on disk before its Jira writes run, so a label
+        write that fails must leave both halves of the record in place — the snapshot
+        reset (queued before the Jira call; a --reprocess fetch wrote the item processed:
+        true and no later fetch would select it otherwise) and the review's
+        ``revision_interrupted:`` error (the generic handler must not replace it with
+        ``submit_failed:``, which the report counts as failed, not blocked). The run ends
+        red through _finish naming the item and the Jira error; nothing was published."""
+        self._seed(art_dir, jira, auto_revised="false")
+        snap_path = self._write_snapshot(art_dir, processed=True)
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        import submit as submit_mod
+
+        def failing_swap(*a, **k):
+            raise RuntimeError("Jira 503 on labels")
+
+        monkeypatch.setattr(submit_mod, "swap_labels", failing_swap)
+        monkeypatch.setenv("JIRA_SERVER", jira.url)
+        monkeypatch.setenv("JIRA_USER", "admin")
+        monkeypatch.setenv("JIRA_TOKEN", "admin")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit.py",
+                "--artifacts-dir",
+                art_dir,
+                hold_switch,
+                "--generate-report",
+                "--report-timestamp",
+                "20261008-120000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            submit_mod.main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "RHAIRFE-1234: ERROR — Jira 503 on labels" in captured.err
+        assert "failed during submit" in captured.err
+        assert "revision interrupted" in captured.out
+        # Nothing published, and no comment either: the comment follows the label write.
+        issue = jira.get("RHAIRFE-1234")
+        assert "Original content." in self._desc_text(issue)
+        assert issue["fields"]["labels"] == []
+        assert self._attention_comments(jira) == []
+        # The hold's record stands: review and task read exactly as after a clean hold.
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm["error"].startswith("revision_interrupted:")
+        assert fm["needs_attention"] is True
+        assert fm["pass"] is False
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Ready"
+        # The snapshot reset landed before the Jira call failed.
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1234"]["processed"] is False
+        # And the run report counts the item as blocked (unprocessed for bootstrap),
+        # which agrees with the live snapshot.
+        with open(f"{art_dir}/auto-fix-runs/20261008-120000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1234"]
+        assert "Revision interrupted" in entry["blocked_reason"]
+        assert "failed_reason" not in entry
+        assert report["results"]["blocked"] == 1
+
+    @_HOLD_SWITCHES
     def test_dry_run_hold_writes_nothing(self, art_dir, jira, hold_switch):
         """CodeRabbit on #210: the planning path runs under --dry-run too, so the hold
         must be reported without touching the review, the task or Jira."""

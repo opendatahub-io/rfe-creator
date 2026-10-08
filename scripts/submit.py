@@ -576,6 +576,21 @@ def report_companion_path(artifacts_dir, run_id, work_type, suffix):
     return os.path.join(artifacts_dir, "auto-fix-runs", f"{prefix}{run_id}{suffix}")
 
 
+def _holds_interrupted_revision(review_path, entry):
+    """True when ``entry`` is a held interrupted revision whose review still carries the
+    ``revision_interrupted:`` record (read laxly: the error is what matters here). Such a
+    record is what the run report and bootstrap key on, and no later failure in the same
+    submit may overwrite it."""
+    if not entry.get("leave_unprocessed"):
+        return False
+    try:
+        data, _ = read_frontmatter(review_path)
+    except Exception:
+        return False
+    error = data.get("error") if isinstance(data, dict) else None
+    return str(error or "").startswith(REVISION_INTERRUPTED_PREFIX)
+
+
 def _post_needs_attention_comment(server, user, token, entry, results, dry_run, cfg):
     """Post a Jira comment explaining why human attention is needed."""
     reason = entry.get("attn_reason")
@@ -1581,19 +1596,22 @@ def main():
                     if labels:
                         print(f"  {item_id}: Would add labels: {', '.join(labels)}")
                 else:
+                    # A held entry published nothing: its task keeps its status so a
+                    # re-run of submit on the same artifacts holds it again instead of
+                    # skipping it as submitted, and its snapshot entry is reset to
+                    # unprocessed (a --reprocess fetch writes it as processed). The
+                    # reset is queued BEFORE the Jira writes: the hold is already on
+                    # disk, and a label write that fails must not leave the item
+                    # processed: true, or no later fetch would select it again.
+                    if entry.get("leave_unprocessed"):
+                        reset_processed_ids.append(item_id)
                     if remove or labels:
                         swap_labels(server, user, token, jira_key, labels, remove)
                         if remove:
                             print(f"  {item_id}: Removed labels: {', '.join(remove)}")
                         if labels:
                             print(f"  {item_id}: Labels: {', '.join(labels)}")
-                    # A held entry published nothing: its task keeps its status so a
-                    # re-run of submit on the same artifacts holds it again instead of
-                    # skipping it as submitted, and its snapshot entry is reset to
-                    # unprocessed (a --reprocess fetch writes it as processed).
-                    if entry.get("leave_unprocessed"):
-                        reset_processed_ids.append(item_id)
-                    else:
+                    if not entry.get("leave_unprocessed"):
                         update_frontmatter(
                             entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
                         )
@@ -1713,7 +1731,12 @@ def main():
             print(f"  {item_id}: ERROR — {msg}", file=sys.stderr)
             submit_errors.append((item_id, msg))
             review_path = _find_review(args.artifacts_dir, item_id, cfg)
-            if review_path:
+            if review_path and not _holds_interrupted_revision(review_path, entry):
+                # A held item's review already carries the interruption as its record:
+                # the run report maps it to blocked and bootstrap to unprocessed, which is
+                # what the snapshot reset queued above says. A Jira failure while applying
+                # the hold's labels or comment is reported through submit_errors (the run
+                # ends red naming the item) and must not replace that record.
                 try:
                     update_frontmatter(
                         review_path,

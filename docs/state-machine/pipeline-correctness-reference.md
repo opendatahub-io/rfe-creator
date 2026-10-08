@@ -434,7 +434,7 @@ all `scores.*` fields, writing only the `error` field would cause a ValidationEr
 if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E6 | null | split_refused (too many) | split_submit.py exit code 2 | > 6 leaf children | update_frontmatter() | submit.py:199 |
 | E7 | null | split_refused (jira conflict) | split_submit.py exit code 3 | Parent description changed | update_frontmatter() | submit.py:233 |
-| E8 | null | submit_failed | Jira API exception | Exception in submit loop | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
+| E8 | null | submit_failed | Jira API exception | Exception in submit loop; a held item's `revision_interrupted:` record is kept instead (§5.12) | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
 
 ### 2.6 Label Transitions
@@ -1048,7 +1048,12 @@ again instead of skipping it as submitted), and the item is left **unprocessed**
 snapshot: not merely unmarked but reset, because a `--reprocess` fetch records a selected
 unchanged item as `processed: true` and the next fetch would otherwise not select it (a
 snapshot that exists but could not be updated after a hold ends the run red, naming the
-item, since nothing else would ever select it again). The retry needs one more thing: `snapshot_fetch.diff_snapshots` selects an
+item, since nothing else would ever select it again). The reset is queued before the hold's
+Jira writes, and a label or comment write that fails ends the run red naming the item while
+leaving both halves of the record in place: the reset still lands, and the review keeps
+`error: revision_interrupted: …` rather than the generic `submit_failed:` the exception
+handler writes for other items, so the report still counts the item as blocked and agrees
+with the snapshot. The retry needs one more thing: `snapshot_fetch.diff_snapshots` selects an
 unprocessed id whose Jira content did not change as *new*, not *changed*, and
 `check_resume` skips a new id whose local review (restored from the results repository)
 still says `pass: true` with no `error`. The hold therefore also writes `pass: false` and
