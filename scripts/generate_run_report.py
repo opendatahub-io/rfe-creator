@@ -93,6 +93,11 @@ SPLIT_NOT_ATTEMPTED_PREFIX = "split_not_attempted:"
 # item stays unprocessed for the next run. Reported as blocked, like a refused split, so
 # bootstrap_snapshot agrees with the live snapshot (RHAIFIRST-571).
 REVISION_INTERRUPTED_PREFIX = "revision_interrupted:"
+# submit.py --hold-splits withheld a split (AISDLC-278, reference §5.12): the review recommends
+# splitting the parent and its children exist locally, but no child was created and the parent
+# was left as it was, with a comment listing the proposal and the needs-attention label. Blocked
+# like a refused split: the parent stays unprocessed for a run without the hold.
+SPLIT_HELD_PREFIX = "split_held:"
 
 
 def split_children_map(artifacts_dir, config, tasks=None):
@@ -374,13 +379,15 @@ def build_report(
         if kids:
             entry["children"] = kids
 
-        # A refused split recommended `split` but produced nothing in Jira. Read
-        # the outcome submit.py recorded rather than re-deriving it here — the
+        # A refused or held split recommended `split` but produced nothing in Jira.
+        # Read the outcome submit.py recorded rather than re-deriving it here — the
         # cap lives in split_submit and refusal has more than one cause.
         review_error = data.get("error") or ""
         blocked_reason = None
         failed_reason = None
-        if review_error.startswith((SPLIT_REFUSED_PREFIX, REVISION_INTERRUPTED_PREFIX)):
+        if review_error.startswith(
+            (SPLIT_REFUSED_PREFIX, REVISION_INTERRUPTED_PREFIX, SPLIT_HELD_PREFIX)
+        ):
             blocked_reason = data.get("needs_attention_reason") or review_error
             entry["blocked_reason"] = blocked_reason
         elif review_error.startswith((SPLIT_FAILED_PREFIX, SPLIT_NOT_ATTEMPTED_PREFIX)):

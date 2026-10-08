@@ -1678,6 +1678,26 @@ class TestLoadRunReportRejectsCorruptFiles:
 
         assert ids == {"RHAIRFE-1"}
 
+    def test_held_split_entries_do_not_count_as_processed(self, tmp_path):
+        """A split submit.py --hold-splits withheld (AISDLC-278) is reported as
+        ``blocked_reason: split_held: …`` and the live snapshot resets the parent to
+        processed:false; a snapshot rebuilt from the report must agree, or the parent would
+        be frozen out of the run that is meant to execute the split."""
+        results, run = self._write_report(
+            tmp_path,
+            "report_schema_version: 1\ntype: rfe\nreport_stage: final\n"
+            "per_rfe:\n"
+            "- id: RHAIRFE-1\n"
+            "  recommendation: submit\n"
+            "- id: RHAIRFE-2\n"
+            "  recommendation: split\n"
+            "  blocked_reason: 'split_held: 2 children proposed, submission withheld'\n",
+        )
+
+        ids, _ = _load_run_report(results, run)
+
+        assert ids == {"RHAIRFE-1"}
+
     def test_error_entries_do_not_count_as_processed(self, tmp_path):
         """An error entry records that the run could NOT dispose of the item —
         counting it as processed would freeze it out of every future fetch
