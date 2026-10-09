@@ -10,6 +10,15 @@ No regex parsing of markdown prose.
 
 Usage:
     python scripts/submit.py [--type rfe|initiative] [--dry-run] [--artifacts-dir DIR]
+                             [--auto-approve] [--hold-interrupted]
+                             [--generate-report --report-timestamp TS]
+
+--auto-approve transitions each qualifying item to the type's approved status and implies
+--hold-interrupted. --hold-interrupted holds an existing item whose body changed while its
+review never recorded auto_revised (an interrupted revision, pipeline correctness reference
+§5.12) instead of publishing it: every non-interactive run that does not auto-approve must
+pass it. An interactive submit (the /rfe-submit skill) passes neither and keeps the update
+path: a user who edited the task file by hand is making a manual revision.
 
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
@@ -303,6 +312,23 @@ def _review_error(artifacts_dir, item_id, cfg):
 # failed`` / ``split phase aborted`` markers mean "not attempted yet" and a re-run over the same
 # artifacts (the manual submit jobs) must still attempt those.
 STALL_NOT_ATTEMPTED_PREFIX = f"{SPLIT_NOT_ATTEMPTED_PREFIX} wave stalled"
+# The needs-attention reason an interrupted-revision hold writes (§5.12). The prefix is what
+# a later run keys on to tell the hold's flag from any other needs-attention reason.
+INTERRUPTED_HOLD_REASON_PREFIX = "Revision interrupted:"
+INTERRUPTED_HOLD_REASON = (
+    f"{INTERRUPTED_HOLD_REASON_PREFIX} the task body changed but the review never recorded "
+    "auto_revised, so the rewrite was not re-reviewed. The description was left "
+    "as it was; re-run the pipeline on this item or review the local revision by hand."
+)
+
+
+def _stale_verdict_labels(cfg, original_labels):
+    """The verdict labels (rubric pass, feasibility) an item already carries in Jira. A hold
+    takes them off and a lift keeps them off: the review's verdicts were given on the body
+    before the rewrite, so they say nothing about the body now in the task file. A later run
+    that reviews the published body puts them back."""
+    stale = [cfg["rubric_pass_label"]] + list(cfg["feasibility_labels"].values())
+    return [label for label in stale if label and label in original_labels]
 
 
 def _is_stall_escalation(error):
@@ -567,6 +593,21 @@ def report_companion_path(artifacts_dir, run_id, work_type, suffix):
     return os.path.join(artifacts_dir, "auto-fix-runs", f"{prefix}{run_id}{suffix}")
 
 
+def _holds_interrupted_revision(review_path, entry):
+    """True when ``entry`` is a held interrupted revision whose review still carries the
+    ``revision_interrupted:`` record (read laxly: the error is what matters here). Such a
+    record is what the run report and bootstrap key on, and no later failure in the same
+    submit may overwrite it."""
+    if not entry.get("leave_unprocessed"):
+        return False
+    try:
+        data, _ = read_frontmatter(review_path)
+    except Exception:
+        return False
+    error = data.get("error") if isinstance(data, dict) else None
+    return str(error or "").startswith(REVISION_INTERRUPTED_PREFIX)
+
+
 def _post_needs_attention_comment(server, user, token, entry, results, dry_run, cfg):
     """Post a Jira comment explaining why human attention is needed."""
     reason = entry.get("attn_reason")
@@ -621,7 +662,16 @@ def main():
     parser.add_argument(
         "--auto-approve",
         action="store_true",
-        help="Transition qualifying items to Approved status in Jira",
+        help="Transition qualifying items to Approved status in Jira (implies --hold-interrupted)",
+    )
+    parser.add_argument(
+        "--hold-interrupted",
+        action="store_true",
+        help=(
+            "Hold an existing item whose body changed while its review never recorded "
+            "auto_revised (an interrupted revision) instead of publishing it; required on "
+            "every non-interactive run that does not pass --auto-approve"
+        ),
     )
     parser.add_argument(
         "--generate-report",
@@ -677,6 +727,11 @@ def main():
         parser.error(
             f"--auto-approve: type '{type_name}' declares no identity.jira.state_map.approved"
         )
+    # The interrupted-revision hold (§5.12) is armed by either non-interactive switch: the RFE
+    # production job passes --auto-approve, which implies it, so its command stream is
+    # unchanged; a non-interactive run that does not auto-approve (the Initiative jobs,
+    # AISDLC-279) passes --hold-interrupted. The interactive skill passes neither.
+    hold_interrupted = args.auto_approve or args.hold_interrupted
 
     server, user, token = require_env()
 
@@ -1347,28 +1402,29 @@ def main():
         # item changed but its review never recorded auto_revised. The revise agent sets
         # that flag as its LAST action (AISDLC-50), so a changed body without it never
         # reached REASSESS -- the pipeline stopped between the rewrite and the re-review.
-        # The automation (--auto-approve) must not publish an unreviewed rewrite: hold the
-        # description, flag the item for a human, and say why. An interactive submit keeps
+        # The automation (--auto-approve, or --hold-interrupted when it does not approve)
+        # must not publish an unreviewed rewrite: hold the description, flag the item for
+        # a human, and say why. An interactive submit, which passes neither switch, keeps
         # the update path: a human editing the task file before /rfe-submit is a manual
         # revision and carries no flag either.
         if (
-            args.auto_approve
+            hold_interrupted
             and is_existing
             and body_changed
             and review_data
             and not review_data.get("auto_revised", False)
         ):
-            # A submit re-run over artifacts a previous submit already held (the manual
-            # submit jobs) holds again, idempotently: the labels are re-applied, the review
-            # is left as recorded and the comment is not posted a second time.
+            # A submit re-run over artifacts a previous submit already held holds again,
+            # idempotently -- the labels are re-applied, the review is left as recorded and
+            # the comment is not posted a second time -- but only when the re-run itself
+            # passes --auto-approve or --hold-interrupted: the hold is a property of the
+            # invocation, not of the artifacts. A switch-less re-run (a manual submit job
+            # without --hold-interrupted) takes the update path and publishes the held
+            # rewrite, which is why every non-interactive invocation must pass one.
             already_held = str(review_data.get("error") or "").startswith(
                 REVISION_INTERRUPTED_PREFIX
             )
-            reason = (
-                "Revision interrupted: the task body changed but the review never recorded "
-                "auto_revised, so the rewrite was not re-reviewed. The description was left "
-                "as it was; re-run the pipeline on this item or review the local revision by hand."
-            )
+            reason = INTERRUPTED_HOLD_REASON
             review_path = _find_review(args.artifacts_dir, item_id, cfg)
             # The planning path runs under --dry-run too: record the hold on the review
             # only when the run is real (CodeRabbit on #210). `pass: false` is what makes
@@ -1415,12 +1471,7 @@ def main():
             # feasibility verdict labels the item already has come off until the re-run
             # reviews the current text.
             held_labels = [f"{cfg['label_prefix']}-needs-attention"]
-            stale_verdict_labels = [cfg["rubric_pass_label"]] + list(
-                cfg["feasibility_labels"].values()
-            )
-            held_remove = [
-                label for label in stale_verdict_labels if label and label in original_labels
-            ]
+            held_remove = _stale_verdict_labels(cfg, original_labels)
             plan.append(
                 {
                     id_field: item_id,
@@ -1449,15 +1500,45 @@ def main():
             )
             continue
 
-        labels = _build_labels(item_id, review_data, is_existing, rec, original_labels)
-        feas_remove = []
-        if review_data:
-            _, feas_remove = feasibility_label_changes(
-                _feasibility_verdict(review_data),
-                is_reject=False,
-                original_labels=original_labels,
-                feasibility_labels=cfg["feasibility_labels"],
-            )
+        # A review carrying an earlier run's hold, in a run that does not hold (no switch):
+        # the update below publishes the rewrite, which lifts the hold. The hold's record
+        # must not travel with the publication — its needs-attention reason says the
+        # description was left as it was, and its `revision_interrupted:` error would keep
+        # the report counting the item as blocked (unprocessed for bootstrap) after the
+        # snapshot marked it processed (CodeRabbit on #219). So the plan is built as if
+        # the hold's flag were gone, and the review is cleared once the update succeeds.
+        # `pass: false` stays: the published rewrite was never re-reviewed, so it carries no
+        # verdict labels either (the hold took the stale ones off for that very reason; the
+        # normal label builder would put the rubric-pass and feasibility labels back from a
+        # review of the body before the rewrite). A later run that reviews the published
+        # body restores them.
+        lift_fields = None
+        if (
+            review_data
+            and is_existing
+            and str(review_data.get("error") or "").startswith(REVISION_INTERRUPTED_PREFIX)
+        ):
+            lift_fields = {"error": None}
+            labels = []
+            strip_labels = _stale_verdict_labels(cfg, original_labels)
+            held_reason = str(review_data.get("needs_attention_reason") or "")
+            if held_reason.startswith(INTERRUPTED_HOLD_REASON_PREFIX):
+                lift_fields.update({"needs_attention": False, "needs_attention_reason": None})
+                strip_labels.append(f"{cfg['label_prefix']}-needs-attention")
+                attn_reason = None
+            elif review_data.get("needs_attention"):
+                # Someone else's needs-attention flag stays, label included.
+                labels.append(f"{cfg['label_prefix']}-needs-attention")
+        else:
+            labels = _build_labels(item_id, review_data, is_existing, rec, original_labels)
+            strip_labels = []
+            if review_data:
+                _, strip_labels = feasibility_label_changes(
+                    _feasibility_verdict(review_data),
+                    is_reject=False,
+                    original_labels=original_labels,
+                    feasibility_labels=cfg["feasibility_labels"],
+                )
 
         action = f"Update {item_id}" if is_existing else "Create"
         plan.append(
@@ -1469,7 +1550,7 @@ def main():
                 "size": size,
                 "action": action,
                 "labels": labels,
-                "remove_labels": feas_remove,
+                "remove_labels": strip_labels,
                 "skip_reason": None,
                 "task_path": task_path,
                 "jira_key": jira_key,
@@ -1477,6 +1558,7 @@ def main():
                 "original_labels": original_labels,
                 "auto_approve": auto_approve,
                 "jira_status": jira_status,
+                "lift_hold": lift_fields,
             }
         )
 
@@ -1553,19 +1635,22 @@ def main():
                     if labels:
                         print(f"  {item_id}: Would add labels: {', '.join(labels)}")
                 else:
+                    # A held entry published nothing: its task keeps its status so a
+                    # re-run of submit on the same artifacts holds it again instead of
+                    # skipping it as submitted, and its snapshot entry is reset to
+                    # unprocessed (a --reprocess fetch writes it as processed). The
+                    # reset is queued BEFORE the Jira writes: the hold is already on
+                    # disk, and a label write that fails must not leave the item
+                    # processed: true, or no later fetch would select it again.
+                    if entry.get("leave_unprocessed"):
+                        reset_processed_ids.append(item_id)
                     if remove or labels:
                         swap_labels(server, user, token, jira_key, labels, remove)
                         if remove:
                             print(f"  {item_id}: Removed labels: {', '.join(remove)}")
                         if labels:
                             print(f"  {item_id}: Labels: {', '.join(labels)}")
-                    # A held entry published nothing: its task keeps its status so a
-                    # re-run of submit on the same artifacts holds it again instead of
-                    # skipping it as submitted, and its snapshot entry is reset to
-                    # unprocessed (a --reprocess fetch writes it as processed).
-                    if entry.get("leave_unprocessed"):
-                        reset_processed_ids.append(item_id)
-                    else:
+                    if not entry.get("leave_unprocessed"):
                         update_frontmatter(
                             entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
                         )
@@ -1602,6 +1687,21 @@ def main():
                             print(f"           Removed: {', '.join(remove)}")
                         if labels:
                             print(f"           Labels: {', '.join(labels)}")
+                    if entry.get("lift_hold"):
+                        # The held rewrite is published: clear the hold's record so the
+                        # report counts a submission, as the snapshot will say. Written
+                        # BEFORE the post-submit hash is recorded — a recorded hash marks
+                        # the item processed, and a processed item whose review still
+                        # carries the hold would never be fetched again to repair it. A
+                        # failed write leaves the hash unrecorded, like a failed label
+                        # write: the next scheduled run sees Jira's content differ from
+                        # the snapshot and reviews the published body afresh.
+                        update_frontmatter(
+                            _find_review(args.artifacts_dir, item_id, cfg),
+                            entry["lift_hold"],
+                            cfg["review_schema"],
+                        )
+                        print(f"  {item_id}: Revision hold lifted — the rewrite is published")
                     submitted_hashes[item_id] = compute_content_hash(description_adf)
                     update_frontmatter(
                         entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
@@ -1685,7 +1785,12 @@ def main():
             print(f"  {item_id}: ERROR — {msg}", file=sys.stderr)
             submit_errors.append((item_id, msg))
             review_path = _find_review(args.artifacts_dir, item_id, cfg)
-            if review_path:
+            if review_path and not _holds_interrupted_revision(review_path, entry):
+                # A held item's review already carries the interruption as its record:
+                # the run report maps it to blocked and bootstrap to unprocessed, which is
+                # what the snapshot reset queued above says. A Jira failure while applying
+                # the hold's labels or comment is reported through submit_errors (the run
+                # ends red naming the item) and must not replace that record.
                 try:
                     update_frontmatter(
                         review_path,

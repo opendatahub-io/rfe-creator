@@ -434,8 +434,9 @@ all `scores.*` fields, writing only the `error` field would cause a ValidationEr
 if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E6 | null | split_refused (too many) | split_submit.py exit code 2 | > 6 leaf children | update_frontmatter() | submit.py:199 |
 | E7 | null | split_refused (jira conflict) | split_submit.py exit code 3 | Parent description changed | update_frontmatter() | submit.py:233 |
-| E8 | null | submit_failed | Jira API exception | Exception in submit loop | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
+| E8 | null | submit_failed | Jira API exception | Exception in submit loop; a held item's `revision_interrupted:` record is kept instead (§5.12) | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
+| E10 | revision_interrupted | null | Submit without either hold switch publishes the held rewrite (§5.12) | Review error starts with `revision_interrupted:`; after update_issue() succeeded | update_frontmatter() clears error, needs_attention and needs_attention_reason (the hold's own flag only) | submit.py plan `lift_hold` + update path |
 
 ### 2.6 Label Transitions
 
@@ -1036,7 +1037,8 @@ item whose task body differs from its original while the review still says
 `auto_revised: false` is a revision the pipeline stopped between the rewrite and the
 re-review — the 2026-09-29 03:12 UTC shape, where the run ended right after an
 auto-compaction and the post-agent submit pushed the unreviewed text to RHAIRFE-3520.
-Under `--auto-approve` (the automation's mode) `submit.py` now holds such an item: the
+Under either non-interactive switch — `--auto-approve`, which implies the hold, or
+`--hold-interrupted` (AISDLC-279) — `submit.py` holds such an item: the
 description is not updated, the review gets `needs_attention: true` with a reason that
 names the interruption, the plan entry runs as `Label only` (the needs-attention label
 and comment, no approval, no verdict labels, and the existing rubric-pass and feasibility
@@ -1047,7 +1049,12 @@ again instead of skipping it as submitted), and the item is left **unprocessed**
 snapshot: not merely unmarked but reset, because a `--reprocess` fetch records a selected
 unchanged item as `processed: true` and the next fetch would otherwise not select it (a
 snapshot that exists but could not be updated after a hold ends the run red, naming the
-item, since nothing else would ever select it again). The retry needs one more thing: `snapshot_fetch.diff_snapshots` selects an
+item, since nothing else would ever select it again). The reset is queued before the hold's
+Jira writes, and a label or comment write that fails ends the run red naming the item while
+leaving both halves of the record in place: the reset still lands, and the review keeps
+`error: revision_interrupted: …` rather than the generic `submit_failed:` the exception
+handler writes for other items, so the report still counts the item as blocked and agrees
+with the snapshot. The retry needs one more thing: `snapshot_fetch.diff_snapshots` selects an
 unprocessed id whose Jira content did not change as *new*, not *changed*, and
 `check_resume` skips a new id whose local review (restored from the results repository)
 still says `pass: true` with no `error`. The hold therefore also writes `pass: false` and
@@ -1057,15 +1064,54 @@ again. The run report maps that error prefix to `blocked_reason` and counts the 
 blocked, which is what `bootstrap_snapshot` reads as not processed, so a snapshot rebuilt
 from the reports agrees with the live one (RHAIFIRST-571). The hold needs evidence of a
 rewrite: an original on disk that differs from the task body; without an original the
-item takes the update path as before. A submit re-run over already-held artifacts (the
-manual submit jobs) holds again idempotently, re-applying the labels without a second
-comment, and the comment is posted even when the item already carried the needs-attention
-label at fetch. Under `--dry-run` the hold is reported and nothing is written. Known
+item takes the update path as before. A submit re-run over already-held artifacts holds
+again idempotently, re-applying the labels without a second comment — but only when the
+re-run itself passes `--auto-approve` or `--hold-interrupted` (the two switches, below) —
+and the comment is posted even when the item already carried the needs-attention label at
+fetch. Under `--dry-run` the hold is reported and nothing is written. Known
 limit: the hold keys on `auto_revised`, which `REASSESS_RESTORE` restores to `true` before
 `REASSESS_REVISE`, so a run that dies inside a *second* revision pass is not detected; the
-durable fix is a per-wave revision marker set by the pipeline (follow-up). An interactive
-submit (no `--auto-approve`) keeps the update path: a human who edits the task file
-before `/rfe-submit` is making a manual revision and carries no flag either.
+durable fix is a per-wave revision marker set by the pipeline (AISDLC-275).
+
+The two switches (AISDLC-279). The hold was first armed by `--auto-approve` alone, which
+the RFE production job passes; the Initiative jobs run with auto-approve off during the
+opt-in period, and on them the 2026-09-29 shape would have published. `--hold-interrupted`
+arms the same hold without the approval transition and reads no approved state from the
+type's binding, so a type that never approves can pass it. Every non-interactive run that
+does not pass `--auto-approve` must pass `--hold-interrupted`; passing both holds once
+(`--auto-approve` implies it, so the RFE job's command stream is unchanged). The hold is a
+property of the invocation, not of the artifacts: a re-run over artifacts a previous submit
+held holds again only when the re-run passes `--auto-approve` or `--hold-interrupted`; a
+switch-less re-run takes the update path and publishes the held rewrite. In-repo the one
+non-interactive caller of the skill, the `/rfe-speedrun` Phase 3 handoff, passes
+`--headless`, under which `/rfe-submit` appends `--hold-interrupted`. Follow-up
+(rfe-autofixer): the manual replay jobs `submit-rfe` (live) and `submit-rfe-dry` run
+`scripts/submit.py --artifacts-dir … --generate-report …` with neither switch — a re-run
+over artifacts a previous submit held would publish the held rewrite — and the Initiative
+jobs' submit line passes neither either; add `--hold-interrupted` to `submit-rfe`,
+`submit-rfe-dry` and the Initiative jobs' submit line (the RFE production job already
+passes `--auto-approve`). An interactive submit — the `/rfe-submit` skill without
+`--headless`, which passes neither — keeps the update path: a human who edits the task
+file before `/rfe-submit` is making a manual revision and carries no flag either. Over
+artifacts an earlier run held, that publication lifts the hold: the hold's needs-attention
+reason (it says the description was left as it was) is not posted again and its label
+comes off, and once the update succeeds the review's `error: revision_interrupted: …`,
+`needs_attention` and `needs_attention_reason` are cleared, so the report counts a
+submission (processed for bootstrap) as the live snapshot says; `pass: false` stays, the
+published rewrite was never re-reviewed, and for the same reason it carries no verdict
+labels: the lift does not put the rubric-pass and feasibility labels back from a review of
+the body before the rewrite (a later run that reviews the published body does). The review
+is cleared before the post-submit hash is recorded: a recorded hash marks the item processed,
+and a processed item whose review still carried the hold would never be fetched again to
+repair it, so a failed clear leaves the hash unrecorded (run red, task not `Submitted`) and
+the next scheduled run reviews the published body afresh. Only the hold's own flag is lifted — a
+needs-attention reason that does not start with `Revision interrupted:` was written by
+someone else and stays with its label and comment. Pinned
+by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py` (the matrix: each
+switch alone, both, neither, and the switch-less publication over held artifacts), `tests/test_initiative_submit_integration.py` (the
+Initiative type under `--hold-interrupted`) and the submit-skill pin in
+`tests/test_type_registry_pins.py` (the `--headless` form carries `--hold-interrupted`,
+the interactive form does not).
 
 ## 6. Cross-References
 
