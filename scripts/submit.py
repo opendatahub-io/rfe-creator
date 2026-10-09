@@ -322,6 +322,15 @@ INTERRUPTED_HOLD_REASON = (
 )
 
 
+def _stale_verdict_labels(cfg, original_labels):
+    """The verdict labels (rubric pass, feasibility) an item already carries in Jira. A hold
+    takes them off and a lift keeps them off: the review's verdicts were given on the body
+    before the rewrite, so they say nothing about the body now in the task file. A later run
+    that reviews the published body puts them back."""
+    stale = [cfg["rubric_pass_label"]] + list(cfg["feasibility_labels"].values())
+    return [label for label in stale if label and label in original_labels]
+
+
 def _is_stall_escalation(error):
     """True for the review errors the pipeline's wave stall guard leaves on an item it gave
     up on (docs/wave-stall-guard.md): ``split_not_attempted: wave stalled ...`` and the
@@ -1462,12 +1471,7 @@ def main():
             # feasibility verdict labels the item already has come off until the re-run
             # reviews the current text.
             held_labels = [f"{cfg['label_prefix']}-needs-attention"]
-            stale_verdict_labels = [cfg["rubric_pass_label"]] + list(
-                cfg["feasibility_labels"].values()
-            )
-            held_remove = [
-                label for label in stale_verdict_labels if label and label in original_labels
-            ]
+            held_remove = _stale_verdict_labels(cfg, original_labels)
             plan.append(
                 {
                     id_field: item_id,
@@ -1503,31 +1507,38 @@ def main():
         # the report counting the item as blocked (unprocessed for bootstrap) after the
         # snapshot marked it processed (CodeRabbit on #219). So the plan is built as if
         # the hold's flag were gone, and the review is cleared once the update succeeds.
-        # `pass: false` stays: the published rewrite was never re-reviewed.
+        # `pass: false` stays: the published rewrite was never re-reviewed, so it carries no
+        # verdict labels either (the hold took the stale ones off for that very reason; the
+        # normal label builder would put the rubric-pass and feasibility labels back from a
+        # review of the body before the rewrite). A later run that reviews the published
+        # body restores them.
         lift_fields = None
-        lift_remove = []
         if (
             review_data
             and is_existing
             and str(review_data.get("error") or "").startswith(REVISION_INTERRUPTED_PREFIX)
         ):
             lift_fields = {"error": None}
+            labels = []
+            strip_labels = _stale_verdict_labels(cfg, original_labels)
             held_reason = str(review_data.get("needs_attention_reason") or "")
             if held_reason.startswith(INTERRUPTED_HOLD_REASON_PREFIX):
                 lift_fields.update({"needs_attention": False, "needs_attention_reason": None})
-                lift_remove = [f"{cfg['label_prefix']}-needs-attention"]
+                strip_labels.append(f"{cfg['label_prefix']}-needs-attention")
                 attn_reason = None
-            review_data = {**review_data, **lift_fields}
-
-        labels = _build_labels(item_id, review_data, is_existing, rec, original_labels)
-        feas_remove = []
-        if review_data:
-            _, feas_remove = feasibility_label_changes(
-                _feasibility_verdict(review_data),
-                is_reject=False,
-                original_labels=original_labels,
-                feasibility_labels=cfg["feasibility_labels"],
-            )
+            elif review_data.get("needs_attention"):
+                # Someone else's needs-attention flag stays, label included.
+                labels.append(f"{cfg['label_prefix']}-needs-attention")
+        else:
+            labels = _build_labels(item_id, review_data, is_existing, rec, original_labels)
+            strip_labels = []
+            if review_data:
+                _, strip_labels = feasibility_label_changes(
+                    _feasibility_verdict(review_data),
+                    is_reject=False,
+                    original_labels=original_labels,
+                    feasibility_labels=cfg["feasibility_labels"],
+                )
 
         action = f"Update {item_id}" if is_existing else "Create"
         plan.append(
@@ -1539,7 +1550,7 @@ def main():
                 "size": size,
                 "action": action,
                 "labels": labels,
-                "remove_labels": feas_remove + [x for x in lift_remove if x not in feas_remove],
+                "remove_labels": strip_labels,
                 "skip_reason": None,
                 "task_path": task_path,
                 "jira_key": jira_key,

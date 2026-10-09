@@ -1098,7 +1098,9 @@ reason (it says the description was left as it was) is not posted again and its 
 comes off, and once the update succeeds the review's `error: revision_interrupted: …`,
 `needs_attention` and `needs_attention_reason` are cleared, so the report counts a
 submission (processed for bootstrap) as the live snapshot says; `pass: false` stays, the
-published rewrite was never re-reviewed. Only the hold's own flag is lifted — a
+published rewrite was never re-reviewed, and for the same reason it carries no verdict
+labels: the lift does not put the rubric-pass and feasibility labels back from a review of
+the body before the rewrite (a later run that reviews the published body does). Only the hold's own flag is lifted — a
 needs-attention reason that does not start with `Revision interrupted:` was written by
 someone else and stays with its label and comment. Pinned
 by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py` (the matrix: each

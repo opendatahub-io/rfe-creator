@@ -859,13 +859,21 @@ class TestInterruptedRevisionHold:
         as it was — is not posted again and its label comes off; the review's
         ``revision_interrupted:`` record is cleared once the update succeeded, so the
         report counts a submission (processed for bootstrap) as the live snapshot says.
-        ``pass`` stays false: the published rewrite was never re-reviewed."""
-        self._seed(art_dir, jira, auto_revised="false")
+        ``pass`` stays false: the published rewrite was never re-reviewed, and it carries no
+        verdict labels either — the hold took the stale rubric-pass and feasibility labels
+        off, and the lift must not put them back from a review of the body before the
+        rewrite (CodeRabbit round 3); a later run that reviews the published body does."""
+        seeded = ("rfe-creator-autofix-rubric-pass", "rfe-creator-feasibility-pass", "keep-me")
+        self._seed(art_dir, jira, auto_revised="false", original_labels=seeded)
+        jira.request("PUT", "/rest/api/3/issue/RHAIRFE-1234", {"fields": {"labels": list(seeded)}})
         snap_path = self._write_snapshot(art_dir, processed=False)
         r = _run_submit(art_dir, jira.url, ["--auto-approve"])
         assert r.returncode == 0, r.stderr
         assert len(self._attention_comments(jira)) == 1
-        assert "rfe-creator-needs-attention" in jira.get("RHAIRFE-1234")["fields"]["labels"]
+        assert set(jira.get("RHAIRFE-1234")["fields"]["labels"]) == {
+            "keep-me",
+            "rfe-creator-needs-attention",
+        }
 
         r = _run_submit(
             art_dir,
@@ -878,7 +886,8 @@ class TestInterruptedRevisionHold:
         assert "revision interrupted" not in r.stdout
         issue = jira.get("RHAIRFE-1234")
         assert "Rewritten" in self._desc_text(issue)
-        assert "rfe-creator-needs-attention" not in issue["fields"]["labels"]
+        # The hold's label is off, the stale verdict labels stay off, unrelated labels stay.
+        assert issue["fields"]["labels"] == ["keep-me"]
         assert len(self._attention_comments(jira)) == 1  # the hold's comment stays as history
         fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
         assert fm.get("error") is None
@@ -920,7 +929,7 @@ class TestInterruptedRevisionHold:
         assert "RHAIRFE-1234: Revision hold lifted" in r.stdout
         issue = jira.get("RHAIRFE-1234")
         assert "Rewritten" in self._desc_text(issue)
-        assert "rfe-creator-needs-attention" in issue["fields"]["labels"]
+        assert issue["fields"]["labels"] == ["rfe-creator-needs-attention"]
         comments = jira.request("GET", "/rest/api/3/issue/RHAIRFE-1234/comment")["comments"]
         assert [c for c in comments if "Customer legal review pending" in json.dumps(c["body"])]
         fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
