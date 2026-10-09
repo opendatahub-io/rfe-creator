@@ -93,6 +93,7 @@ exclusion, and split parent detection. The `rfe_id` pattern constraint causes
 | `"reconcile_failed"` | COLLECT reconcile (`scripts/reconcile_reviews.py` reported `RECONCILE_ERRORS=` for the id: restore or frontmatter update raised) — set through `_mark_review_or_stub`, retryable, `needs_attention=true` | `pipeline_state.py` COLLECT decision |
 | `"split_refused: too many leaf children"` | Submit Phase 1 | `submit.py:199` |
 | `"split_refused: jira conflict"` | Submit Phase 1 | `submit.py:233` |
+| `"split_held: N children proposed, submission withheld"` | Submit Phase 1 under `--hold-splits` (§5.12); cleared on exit 0 by a later submit without the switch | `submit.py` `_hold_split` / `_lift_split_hold` |
 | `"submit_failed: {msg}"` | Submit Phase 2 (also sets needs_attention=true) | `submit.py:597-605` |
 
 ### 1.5 Review Orchestration Phases (rfe-review pipeline)
@@ -437,6 +438,8 @@ if no review file existed yet (e.g., assess_failed before any review agent ran).
 | E8 | null | submit_failed | Jira API exception | Exception in submit loop; a held item's `revision_interrupted:` record is kept instead (§5.12) | update_frontmatter() (best-effort); also sets needs_attention=true | submit.py:597-605 |
 | E9 | any error | null | Auto-fix retry clears error | Single pass after all batches; split_failed cleaned up via cleanup_partial_split.py first; re-runs the dispatch loop over the retry ids | frontmatter.py set error=null | pipeline_state.py ERROR_COLLECT (`error_collect.py`) |
 | E10 | revision_interrupted | null | Submit without either hold switch publishes the held rewrite (§5.12) | Review error starts with `revision_interrupted:`; after update_issue() succeeded | update_frontmatter() clears error, needs_attention and needs_attention_reason (the hold's own flag only) | submit.py plan `lift_hold` + update path |
+| E11 | null or split_refused | split_held | `--hold-splits` on a Phase 1 split parent (§5.12) | Review neither `split_held:` nor `split_submit_failed:` (a quarantined partial split is skipped); at least one child not yet `Submitted` | update_frontmatter() (error set, `needs_attention_reason` cleared; score, recommendation and needs_attention kept), then the needs-attention label and one comment in Jira unless the label was on the parent at fetch | submit.py `_hold_split` |
+| E12 | split_held | null | split_submit.py exit 0 in a run without `--hold-splits` | Review error starts with `split_held:` | update_frontmatter(); a failure is a submit error (run ends red naming the parent) | submit.py `_lift_split_hold` |
 
 ### 2.6 Label Transitions
 
@@ -1030,9 +1033,9 @@ could disagree with the submission pipeline's content comparison.
 
 ---
 
-### 5.12 Interrupted revisions at submit
+### 5.12 Submit holds: interrupted revisions and withheld splits
 
-The revise agent sets `auto_revised: true` as its last action (AISDLC-50), so an existing
+**Interrupted revisions (`--auto-approve`, #210).** The revise agent sets `auto_revised: true` as its last action (AISDLC-50), so an existing
 item whose task body differs from its original while the review still says
 `auto_revised: false` is a revision the pipeline stopped between the rewrite and the
 re-review — the 2026-09-29 03:12 UTC shape, where the run ended right after an
@@ -1112,6 +1115,61 @@ switch alone, both, neither, and the switch-less publication over held artifacts
 Initiative type under `--hold-interrupted`) and the submit-skill pin in
 `tests/test_type_registry_pins.py` (the `--headless` form carries `--hold-interrupted`,
 the interactive form does not).
+
+**Withheld splits (`--hold-splits`, AISDLC-278).** The other hold is a per-run switch,
+declared once for every type and never passed by the RFE production job. Phase 1 otherwise
+runs `split_submit.py` for every archived, Jira-keyed parent that has children whatever
+`--auto-approve` says (that switch only decides whether the *children* are approved at
+creation), so the first live Initiative run whose review scored Right-sized 0/2 would mint
+child Initiatives in RHOAIENG and close the parent as Obsolete before the owners had seen a
+single result (AISDLC-206, decision D3). Under `--hold-splits` the recommendation is
+recorded, not executed. `split_submit.py` is not spawned. Two parents are not held: one
+whose review carries `split_submit_failed:` is a partial split an earlier run quarantined
+(exit 4/5; its Jira half is the `<prefix>-split-quarantine` label) — a human owns it and the
+record is its diagnosis, so it is skipped with `SKIP split-hold - review error …`, like the
+stall-escalation skip, and nothing is written; and one with no child left to propose (every
+descendant is `Submitted`, created by an earlier run), since the proposal lists only what a
+split would still create. Per held parent: the review gets `error: split_held: N children
+proposed, submission withheld` first — score, recommendation and `needs_attention` kept,
+`needs_attention_reason` cleared (the report prefers that field over the error for a blocked
+entry, and an earlier run's refusal reason would otherwise stay its `blocked_reason`), so the
+run report's `blocked_reason` is the marker itself and `bootstrap_snapshot` reads the entry
+as unprocessed; a hold that is not on disk is no hold (the report would count the parent as
+split and bootstrap would freeze it as processed), so when that write fails nothing is
+posted to Jira for the parent and the run ends red naming it. A red hold run's report counts
+that parent as `split` with no `blocked_reason` and is not a bootstrap source for it; its
+snapshot entry is left as fetched, not reset. Then the type's
+`conventions.labels.needs_attention` label is added and ONE `*[<Type> Creator]* Split held:
+…` comment is posted listing the leaf children a split would create — the same walk as
+`split_submit.py`, through archived local intermediaries, minus the `Submitted` ones — each
+as its title and the first line of prose of its body, and saying that no child was created,
+that the parent was left as it was and that a human decides. Nothing else is written: no
+status change, no edit, no child, no link; the children stay local artifacts and Phase 2
+does not see them (they have a Jira ancestor). A parent whose hold is on disk is reset to
+`processed: false` in the snapshot from Phase 1 itself, as the interrupted-revision hold
+resets its item (a `--reprocess` fetch records a selected unchanged item as processed, and a
+split-only batch ends through the early `_finish` before the Phase 2 snapshot update), so the
+next scheduled run selects it again; a snapshot that exists but could not be updated ends the
+run red naming the parents. The hold is idempotent twice over. A re-run with the hold over
+already-held artifacts (the manual submit jobs) finds the marker — `already_held`, the #210
+pattern: the label is re-applied, the review is left as recorded, the comment is not posted a
+second time (which also means a comment that failed to post the first time is not retried;
+the red run says to post it by hand). The marker does not cover the production shape: the
+reset parent is selected as *new* by the next scheduled run (the needs-attention label is no
+fetch filter), with fresh artifacts and a fresh review, so the second key is the labels
+fetch recorded on the task (`original_labels`, the guard `_post_needs_attention_comment`
+applies) — a parent that already carried the needs-attention label at fetch is recorded as
+held, so the report and bootstrap agree and it is reset again, but neither the label nor the
+comment is posted again. Under `--dry-run` the hold prints `Would hold split of <parent> (N
+children)` with the titles (and a line when the parent is already flagged) and writes
+nothing. Lifting the hold is running submit *without*
+the switch over the same artifacts: `split_submit.py` runs exactly as today and, on exit 0, a
+`split_held:` marker on the parent's review is cleared so the report counts a split rather
+than a hold (the comment stays as history). A marker that cannot be cleared ends the run red
+naming the parent: the split is real in Jira and the local record is what is wrong (the report
+would count the executed split as held and bootstrap would keep the parent unprocessed), so
+it is a submit error, not a warning on a green run. For artifacts that were never held the
+switch-off path is byte-for-byte today's.
 
 ## 6. Cross-References
 

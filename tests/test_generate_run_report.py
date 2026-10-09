@@ -787,6 +787,41 @@ class TestRefusedSplitIsBlockedNotSplit:
         assert report["results"]["blocked"] == 0
         assert report["results"]["split"] == 1
 
+    def test_held_split_is_blocked_under_its_marker(self, art_dir):
+        """submit.py --hold-splits records only the error on the review (AISDLC-278): with
+        no needs_attention_reason the marker itself is the blocked_reason, so the report
+        reads ``blocked_reason: split_held: …`` and bootstrap leaves the parent unprocessed."""
+        held = "split_held: 3 children proposed, submission withheld"
+        _write(
+            f"{art_dir}/rfe-tasks/RHAIRFE-2780.md",
+            TASK_TEMPLATE.format(rfe_id="RHAIRFE-2780", extra=""),
+        )
+        _write(
+            f"{art_dir}/rfe-reviews/RHAIRFE-2780-review.md",
+            REVIEW_TEMPLATE.format(
+                rfe_id="RHAIRFE-2780",
+                score=6,
+                pass_val="false",
+                recommendation="split",
+                right_sized=0,
+            ).replace("needs_attention: false\n", f"needs_attention: false\nerror: '{held}'\n"),
+        )
+
+        report = build_report(["RHAIRFE-2780"], "20261005-120000", artifacts_dir=art_dir)
+
+        entry = report["per_rfe"][0]
+        assert held.startswith(generate_run_report.SPLIT_HELD_PREFIX)
+        assert entry["blocked_reason"] == held
+        assert entry["recommendation"] == "split"
+        assert "failed_reason" not in entry
+        assert report["results"] == {
+            **report["results"],
+            "blocked": 1,
+            "split": 0,
+            "failed": 0,
+        }
+        assert report["errors"] == []
+
     def test_needs_attention_is_surfaced_on_rfe_entries(self, art_dir):
         """The initiative report already carried this; the RFE side did not."""
         self._refused(art_dir, "RHAIRFE-2429", "split_refused: too many leaf children")

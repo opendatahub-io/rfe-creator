@@ -1318,6 +1318,97 @@ class TestSplitFailureIsRecorded:
         )
 
 
+class TestHoldSplitsSpawnsNoSplitSubmit:
+    """AISDLC-278: under ``--hold-splits`` Phase 1 does not spawn split_submit.py for any split
+    parent — the hold is reported per parent instead — while without the switch the spawn is
+    today's, argv included. Dry-run through the RFE_SPLIT_SUBMIT_SCRIPT seam (pytest only)."""
+
+    PARENT_TASK = (
+        "---\nrfe_id: RHAIRFE-1000\ntitle: Parent RFE\n"
+        "priority: Major\nstatus: Archived\n---\n\nParent content.\n"
+    )
+    PARENT_REVIEW = (
+        "---\nrfe_id: RHAIRFE-1000\nscore: 6\npass: false\nrecommendation: split\n"
+        "feasibility: feasible\nauto_revised: false\nneeds_attention: false\n"
+        "scores:\n  what: 2\n  why: 2\n  open_to_how: 1\n  not_a_task: 1\n  right_sized: 0\n"
+        "---\n\nToo big.\n"
+    )
+
+    def _batch(self, art_dir):
+        _write(f"{art_dir}/rfe-tasks/RHAIRFE-1000.md", self.PARENT_TASK)
+        _write(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md", self.PARENT_REVIEW)
+        # An archived local intermediary (a re-split) with two leaves, plus a direct leaf: the
+        # hold counts and lists the LEAVES split_submit.py would create, three here.
+        _write(
+            f"{art_dir}/rfe-tasks/RFE-010.md",
+            "---\nrfe_id: RFE-010\ntitle: Intermediary\npriority: Major\nstatus: Archived\n"
+            "parent_key: RHAIRFE-1000\n---\n\nSplit again.\n",
+        )
+        for cid, pk, title in (
+            ("RFE-011", "RFE-010", "Leaf A"),
+            ("RFE-012", "RFE-010", "Leaf B"),
+            ("RFE-002", "RHAIRFE-1000", "Leaf C"),
+        ):
+            _write(
+                f"{art_dir}/rfe-tasks/{cid}.md",
+                f"---\nrfe_id: {cid}\ntitle: {title}\npriority: Major\nstatus: Ready\n"
+                f"parent_key: {pk}\n---\n\n## Summary\n\n{title} does one thing.\n",
+            )
+
+    def _run(self, art_dir, tmp_path, extra_flags=None):
+        log = tmp_path / "split-stub.log"
+        stub = tmp_path / "split_submit_stub.py"
+        stub.write_text(
+            "import os, sys\n"
+            "with open(os.environ['SPLIT_STUB_LOG'], 'a') as f:\n"
+            "    f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "sys.exit(0)\n"
+        )
+        env = _clean_env(**FAKE_CREDS, RFE_SPLIT_SUBMIT_SCRIPT=str(stub), SPLIT_STUB_LOG=str(log))
+        cmd = ["python3", SCRIPT, "--dry-run", "--artifacts-dir", art_dir] + (extra_flags or [])
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        calls = log.read_text().splitlines() if log.exists() else []
+        return result.stdout, result.stderr, result.returncode, calls
+
+    def test_hold_reports_the_leaves_and_spawns_nothing(self, art_dir, tmp_path):
+        self._batch(art_dir)
+        stdout, stderr, rc, calls = self._run(art_dir, tmp_path, ["--hold-splits"])
+        assert rc == 0, stderr
+        assert calls == []
+        assert "Phase 1: Holding 1 split parent(s) (--hold-splits)" in stdout
+        assert (
+            "--- RHAIRFE-1000 ---\n  Would hold split of RHAIRFE-1000 (3 children)\n"
+            "    - Leaf C\n    - Leaf A\n    - Leaf B\n"
+        ) in stdout
+        assert "Phase 1: Submitting" not in stdout
+        # Nothing is written under --dry-run: the review keeps no marker.
+        import artifact_utils
+
+        data, _ = artifact_utils.read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1000-review.md")
+        assert data.get("error") is None
+
+    def test_without_the_switch_the_spawn_is_unchanged(self, art_dir, tmp_path):
+        self._batch(art_dir)
+        stdout, stderr, rc, calls = self._run(art_dir, tmp_path)
+        assert rc == 0, stderr
+        assert calls == [f"RHAIRFE-1000 --artifacts-dir {art_dir} --dry-run"]
+        assert "Phase 1: Submitting 1 split parent(s)" in stdout
+        assert "hold" not in stdout.lower()
+
+    def test_the_switch_is_declared_for_every_type(self):
+        """One switch, no descriptor field behind it: --help lists it with no --type given, and
+        the initiative resolution accepts it too."""
+        for flags in ((), ("--type", "initiative")):
+            result = subprocess.run(
+                ["python3", SCRIPT, *flags, "--help"],
+                capture_output=True,
+                text=True,
+                env=_clean_env(),
+            )
+            assert result.returncode == 0, result.stderr
+            assert "--hold-splits" in result.stdout
+
+
 class TestStallEscalatedSplitParentIsSkipped:
     """Phase 1 does not split-submit a parent the wave stall guard gave up on.
 

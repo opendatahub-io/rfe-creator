@@ -175,7 +175,12 @@ poll with nothing recorded. After the reviews directory is fixed, re-running
   `  <key>: SKIP split-submit - review error <error>; children were not reviewed, left for an operator`
   — and the parent is in no plan, so it is neither split-submitted nor marked
   processed; its children stay local. An unreadable review counts as no error.
-  `split_refused:` and `split_submit_failed:` parents behave as before.
+  `split_refused:`, `split_submit_failed:` and `split_held:` (a parent an
+  earlier `--hold-splits` run withheld) parents behave as before: a run
+  without the hold split-submits them, and clears a `split_held:` marker
+  once the split is real. A run with the hold holds the first and the
+  third and skips a `split_submit_failed:` parent (quarantined, a human
+  owns it) with `SKIP split-hold - review error …`.
 - **A review carrying an `error` has no feasibility verdict.** Every
   `*_failed` / `*_stalled` stub inherits the stub shape (`feasibility:
   feasible`, `recommendation: revise`, `pass: false`, `score: 0`) although no
