@@ -1100,7 +1100,11 @@ comes off, and once the update succeeds the review's `error: revision_interrupte
 submission (processed for bootstrap) as the live snapshot says; `pass: false` stays, the
 published rewrite was never re-reviewed, and for the same reason it carries no verdict
 labels: the lift does not put the rubric-pass and feasibility labels back from a review of
-the body before the rewrite (a later run that reviews the published body does). Only the hold's own flag is lifted — a
+the body before the rewrite (a later run that reviews the published body does). The review
+is cleared before the post-submit hash is recorded: a recorded hash marks the item processed,
+and a processed item whose review still carried the hold would never be fetched again to
+repair it, so a failed clear leaves the hash unrecorded (run red, task not `Submitted`) and
+the next scheduled run reviews the published body afresh. Only the hold's own flag is lifted — a
 needs-attention reason that does not start with `Revision interrupted:` was written by
 someone else and stays with its label and comment. Pinned
 by `TestInterruptedRevisionHold` in `tests/test_submit_integration.py` (the matrix: each

@@ -904,6 +904,65 @@ class TestInterruptedRevisionHold:
         assert "blocked_reason" not in entry
         assert report["results"]["blocked"] == 0
 
+    def test_lift_whose_review_write_fails_leaves_the_item_fetchable(
+        self, art_dir, jira, monkeypatch, capsys
+    ):
+        """CodeRabbit on #219 (round 4): the lift's review write runs before the post-submit
+        hash is recorded. A recorded hash marks the item processed, and a processed item
+        whose review still says ``revision_interrupted:`` would never be fetched again to
+        repair the record. So when that write fails the run ends red naming the item, the
+        rewrite stays published, and the snapshot keeps the pre-publish hash, unprocessed:
+        the next scheduled run sees Jira differ and reviews the published body afresh."""
+        self._seed(art_dir, jira, auto_revised="false")
+        snap_path = self._write_snapshot(art_dir, processed=False)
+        r = _run_submit(art_dir, jira.url, ["--auto-approve"])
+        assert r.returncode == 0, r.stderr
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+        import submit as submit_mod
+
+        real_update = submit_mod.update_frontmatter
+
+        def failing_review_write(path, *a, **k):
+            if str(path).endswith("RHAIRFE-1234-review.md"):
+                raise OSError("disk full")
+            return real_update(path, *a, **k)
+
+        monkeypatch.setattr(submit_mod, "update_frontmatter", failing_review_write)
+        monkeypatch.setenv("JIRA_SERVER", jira.url)
+        monkeypatch.setenv("JIRA_USER", "admin")
+        monkeypatch.setenv("JIRA_TOKEN", "admin")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit.py",
+                "--artifacts-dir",
+                art_dir,
+                "--generate-report",
+                "--report-timestamp",
+                "20261009-100000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            submit_mod.main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "RHAIRFE-1234: ERROR — disk full" in captured.err
+        assert "Revision hold lifted" not in captured.out
+        # Jira has the rewrite; the local record says the item is not disposed of.
+        assert "Rewritten" in self._desc_text(jira.get("RHAIRFE-1234"))
+        assert _read_frontmatter(f"{art_dir}/rfe-tasks/RHAIRFE-1234.md")["status"] == "Ready"
+        fm = _read_frontmatter(f"{art_dir}/rfe-reviews/RHAIRFE-1234-review.md")
+        assert fm["error"].startswith("revision_interrupted:")  # no write to it succeeded
+        with open(snap_path) as f:
+            snap = yaml.safe_load(f)
+        assert snap["issues"]["RHAIRFE-1234"] == {"hash": "abc", "processed": False}
+        # And the report agrees: still blocked, which bootstrap reads as unprocessed.
+        with open(f"{art_dir}/auto-fix-runs/20261009-100000.yaml") as fh:
+            report = yaml.safe_load(fh)
+        (entry,) = [e for e in report["per_rfe"] if e["id"] == "RHAIRFE-1234"]
+        assert "blocked_reason" in entry
+
     def test_lift_keeps_a_foreign_needs_attention_reason(self, art_dir, jira):
         """Only the hold's own flag is lifted: a needs-attention reason written by someone
         else after the hold (the prefix tells them apart) stays, with its label and comment,

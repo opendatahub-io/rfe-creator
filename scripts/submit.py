@@ -1687,19 +1687,25 @@ def main():
                             print(f"           Removed: {', '.join(remove)}")
                         if labels:
                             print(f"           Labels: {', '.join(labels)}")
-                    submitted_hashes[item_id] = compute_content_hash(description_adf)
-                    update_frontmatter(
-                        entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
-                    )
                     if entry.get("lift_hold"):
                         # The held rewrite is published: clear the hold's record so the
-                        # report counts a submission, as the snapshot now says.
+                        # report counts a submission, as the snapshot will say. Written
+                        # BEFORE the post-submit hash is recorded — a recorded hash marks
+                        # the item processed, and a processed item whose review still
+                        # carries the hold would never be fetched again to repair it. A
+                        # failed write leaves the hash unrecorded, like a failed label
+                        # write: the next scheduled run sees Jira's content differ from
+                        # the snapshot and reviews the published body afresh.
                         update_frontmatter(
                             _find_review(args.artifacts_dir, item_id, cfg),
                             entry["lift_hold"],
                             cfg["review_schema"],
                         )
                         print(f"  {item_id}: Revision hold lifted — the rewrite is published")
+                    submitted_hashes[item_id] = compute_content_hash(description_adf)
+                    update_frontmatter(
+                        entry["task_path"], {"status": "Submitted"}, cfg["task_schema"]
+                    )
                 results[item_id] = jira_key
             else:
                 if args.dry_run:
