@@ -11,7 +11,7 @@ All submission goes through Python scripts that use the Jira REST API directly w
 
 **This skill is non-interactive.** Do not prompt the user for confirmation before submitting. The user invoked `/rfe-submit` — that is the confirmation. Run the script directly without asking "are you sure?" or presenting a dry run for approval.
 
-See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
 
 ## Step 0: Resolve the Type and Check Credentials
 

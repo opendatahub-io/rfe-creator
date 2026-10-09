@@ -48,9 +48,10 @@ order; the first signal present wins:
 2. **The batch file's `type:`** (`/rfe-speedrun --input <file>`), when the file is written as
    `type: initiative` followed by `items:`. A `--type` that disagrees with it is an error.
 3. **What you pass.** A Jira key or local id names its type on its own: `RHAIRFE-` and `RFE-`
-   ids are RFEs, `RHOAIENG-` and `INIT-` ids are Initiatives. An item file names its type
-   through its `type:` field, or failing that through the folder it sits in
-   (`artifacts/rfe-tasks/` is RFE, `artifacts/initiatives/` is Initiative).
+   ids are RFEs, `RHOAIENG-` and `INIT-` ids are Initiatives. An item file (not reachable from
+   the skills, which take ids) names its type through its `type:` field, or failing that
+   through the folder it sits in (`artifacts/rfe-tasks/` is RFE, `artifacts/initiatives/` is
+   Initiative).
 4. **Nothing at all**: the run is an RFE run. That is the historical default, so `/rfe-create`
    with just a sentence writes an RFE and a new Initiative needs `--type initiative`.
 
@@ -85,9 +86,9 @@ Three more shapes you may meet:
 - `ERROR: unknown type 'epic' (--type); registered types: rfe, initiative`: a `--type` that is
   not registered.
 - An id no type owns, say `FOO-1`: in a terminal the skill prints
-  `TYPE AMBIGUOUS: rfe, initiative - pass --type` and asks you to pick; in a headless or CI run
-  it stops with `ERROR: ambiguous type for FOO-1: candidates rfe, initiative — pass --type`,
-  because a headless run never guesses.
+  `TYPE AMBIGUOUS: rfe, initiative - pass --type` and stops; re-run with `--type`. In a headless
+  or CI run it stops with `ERROR: ambiguous type for FOO-1: candidates rfe, initiative — pass
+  --type`, because a headless run never guesses.
 - A batch file with a `type` on an individual entry is rejected: a batch is single-typed, so
   split it into one file per type.
 
@@ -96,7 +97,7 @@ Three more shapes you may meet:
 | | RFE | Initiative |
 |---|---|---|
 | Jira ticket | project RHAIRFE, issue type Feature Request | project RHOAIENG, issue type Initiative |
-| Template | Summary, Problem Statement, Affected Customers, Business Justification, Acceptance Criteria, Success Criteria; large items add User Scenarios, Scope and Open Questions. Sized S, M, L or XL by the number of acceptance criteria. | Objective, Problem Statement, Scope. Prose is fine; there is no size. |
+| Template | Summary, Affected Customers, Business Justification, Acceptance Criteria; medium items add Problem Statement and Success Criteria; large items add User Scenarios, Scope and Open Questions. Sized S, M, L or XL by the number of acceptance criteria. | Objective, Problem Statement, Scope. Prose is fine; there is no size. |
 | Clarifying questions (two to five) | Who are the affected customers? What is the business justification? What is the user's problem? How big is this? What does success look like? | What is the objective? What problem does it solve, with what evidence? What is in and out of scope? Is there a parent RHAISTRAT Outcome? |
 | Parent | none | `--parent RHAISTRAT-NNNN` on create, `parent_key` in a batch entry; links the ticket to the Outcome |
 | Review scores | WHAT, WHY, HOW (open to how), Not-a-task, Right-sized | WHAT, WHY, Scope, HOW (open to how), Right-sized |
@@ -107,19 +108,23 @@ Three more shapes you may meet:
 | Companion files | `<id>-comments.md` (stakeholder comments) and `<id>-removed-context.yaml` (implementation detail moved out during review) | `<id>-removed-context.yaml` only |
 | Index | `artifacts/rfes.md`, rebuilt after every write | none |
 | Jira comment the pipeline posts | starts with `[RFE Creator]` | starts with `[Initiative Creator]` |
-| Batch query (`/rfe-auto-fix --jql`) | a query on project RHAIRFE | a query on project RHOAIENG; a query on another project is refused |
+| Batch query (`/rfe-auto-fix --jql`) | a query on project RHAIRFE | a query on project RHOAIENG |
 | Run report of a batch run | `artifacts/auto-fix-runs/<run-id>.yaml`, items listed under `per_rfe` | `artifacts/auto-fix-runs/initiative-run-<run-id>.yaml`, items listed under `per_initiative`, each with its `alignment` and `feasibility` |
+
+For either type, the batch query is checked against the type's project before anything is
+fetched: a `project =` clause that names another project is refused with an error naming the
+expected one, and a query that names no project is not checked.
 
 ### Labels in Jira
 
 The pipeline sets these labels on the tickets it creates or updates. They are exact strings;
-the first two rows at the bottom are the ones a human sets or clears.
+the last two rows are the ones a human sets or clears.
 
 | Meaning | RFE | Initiative |
 |---|---|---|
 | Created by the pipeline | `rfe-creator-auto-created` | `initiative-auto-created` |
 | Description revised by the pipeline | `rfe-creator-auto-revised` | `initiative-auto-revised` |
-| Passed review; left out of later batch runs | `rfe-creator-autofix-rubric-pass` | `initiative-autofix-rubric-pass` |
+| Passed review; a later batch run re-checks it only if its description changed in Jira | `rfe-creator-autofix-rubric-pass` | `initiative-autofix-rubric-pass` |
 | Needs a human | `rfe-creator-needs-attention` | `initiative-needs-attention` |
 | Parent that was split | `rfe-creator-split-original` | `initiative-split-original` |
 | Child produced by a split | `rfe-creator-split-result` | `initiative-split-result` |
@@ -176,11 +181,11 @@ Objective, Problem Statement and Scope sections. Edit the file by hand if you li
 The review scores WHAT, WHY, Scope, HOW and Right-sized, checks technical feasibility, checks
 strategic alignment when a RHAISTRAT parent is set, and revises the file itself for the problems
 it can fix (up to two passes). It writes `artifacts/initiative-reviews/INIT-001-review.md` with
-the score, a `recommendation` (`submit`, `revise`, `split` or `reject`), `feasibility`,
-`alignment` and `needs_attention`, and ends by telling you one of three things: the item is
-ready for `/rfe-submit --type initiative`; edit the file and re-run
-`/rfe-review --type initiative`; or run `/rfe-split --type initiative INIT-001` because the
-item is too big.
+the score, a `recommendation` (`submit`, `revise`, `split`, `reject`, or `autorevise_reject` when
+a revision scored lower than the text it replaced), `feasibility`, `alignment` and
+`needs_attention`, and ends by telling you one of three things: the item is ready for
+`/rfe-submit --type initiative`; edit the file and re-run `/rfe-review --type initiative INIT-001`;
+or run `/rfe-split --type initiative INIT-001` because the item is too big.
 
 ### 3. Submit
 

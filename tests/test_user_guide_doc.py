@@ -9,6 +9,7 @@ rename of the page cannot leave the README or a skill body pointing at nothing.
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -30,20 +31,19 @@ def _text():
 
 
 def test_names_every_registered_type_and_its_jira_binding():
-    """Each registered type appears by its display name, with the Jira project and issue
-    type it maps to and the ``--type <name>`` flag the user passes."""
+    """Each registered type appears by its display name in a table row, with the Jira project
+    and issue type it maps to and the ``--type <name>`` flag the user passes (matched as a
+    whole word, so ``--type rfe`` is not satisfied by ``--type rfe-something``)."""
     registry = type_registry.load(extra_roots=[], env={})
     text = _text()
     assert registry.names(), "no registered types"
     for name in registry.names():
         desc = registry.get(name)
-        for fact in (
-            desc.get("display.entity"),
-            desc.get("identity.jira.project"),
-            desc.get("identity.jira.issue_type"),
-            f"--type {name}",
-        ):
+        entity = desc.get("display.entity")
+        assert f"| {entity} |" in text, (name, entity)
+        for fact in (desc.get("identity.jira.project"), desc.get("identity.jira.issue_type")):
             assert fact in text, (name, fact)
+        assert re.search(rf"--type {re.escape(name)}\b", text), (name, f"--type {name}")
 
 
 def test_reads_as_a_user_page():

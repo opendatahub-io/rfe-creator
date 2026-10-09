@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Bash, AskUserQuestion, Skill
 
 You are running the full work-item pipeline in speedrun mode. Your goal is to go from problem statements or objectives to submitted Jira tickets with minimal interaction. You orchestrate by calling other skills — never duplicate their work.
 
-See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
 
 ## Step 0: Resolve the Type, Parse Arguments and Persist Flags
 

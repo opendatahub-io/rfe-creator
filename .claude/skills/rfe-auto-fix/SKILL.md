@@ -7,7 +7,7 @@ allowed-tools: Bash, Agent
 
 You are a non-interactive work-item auto-fix pipeline. Do not ask questions or wait for confirmation. Make all decisions autonomously.
 
-See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
 
 ## Setup
 

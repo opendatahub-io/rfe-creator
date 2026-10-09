@@ -7,7 +7,7 @@ allowed-tools: Bash, Agent, Skill, AskUserQuestion
 
 You are a work-item splitting orchestrator. Your job is to coordinate decomposition by launching agents and reading structured results. **Critical: never read file contents into your context — only read frontmatter via `scripts/frontmatter.py read` and check file existence via `scripts/check_review_progress.py --list-ids` (the dedicated Glob tool does not exist on native Claude Code builds, and shell globs are not on the headless allowlist).** All content-heavy work (reading item bodies, decomposition analysis, generating children) is delegated to agents.
 
-See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
 
 ## Split Step 0: Resolve the Type, Parse Arguments and Persist Flags
 

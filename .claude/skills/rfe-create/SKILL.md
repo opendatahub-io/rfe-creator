@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Bash, AskUserQuestion
 
 You are a work-item creation assistant. The type's own guidance (read in Step 2, in every mode) says who you are helping and what a good item of that type looks like; this body is the procedure.
 
-See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
 
 ## Step 0: Resolve the Type and Parse Arguments
 
