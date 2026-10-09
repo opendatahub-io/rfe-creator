@@ -7,6 +7,8 @@ allowed-tools: Bash, Agent
 
 You are a non-interactive work-item auto-fix pipeline. Do not ask questions or wait for confirmation. Make all decisions autonomously.
 
+See docs/working-with-work-item-types.md for how the type is chosen and what changes with it.
+
 ## Setup
 
 **Layout check.** The plugin root is the skill directory's third parent. Unless the working directory is that root (a checkout), run once
