@@ -13,6 +13,15 @@ Usage:
     # Fetch everything and write all artifact files at once
     python3 scripts/fetch_issue.py RHAIRFE-1234 --fetch-all artifacts
 
+For a type whose pipeline reads ``parent_key`` off the task frontmatter (a
+``pipeline.dimensions[].condition`` of the ``{frontmatter_field: parent_key,
+prefix}`` form — the initiative alignment dimension), --fetch-all also
+requests Jira's ``parent`` and records it as the task's ``parent_key`` when
+its key carries one of those prefixes and matches the type's parent_key
+grammar; any other parent is left in Jira with a ``Note:`` on stderr (see
+``recorded_parent_key``). A type without such a condition (rfe) requests and
+writes exactly what it did before (AISDLC-280).
+
 Environment variables:
     JIRA_SERVER  Jira server URL (e.g. https://mysite.atlassian.net)
     JIRA_USER    Jira username/email
@@ -33,6 +42,7 @@ Exit codes:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -75,6 +85,80 @@ FETCH_ALL_FIELDS = [
     "issuetype",
     "project",
 ]
+
+# Jira's hierarchy link. Requested — and read into the task's parent_key — only for a type whose
+# pipeline reads parent_key off the task frontmatter (Descriptor.condition_prefixes; AISDLC-280):
+# a frontmatter condition can only fire for a fetched item when the fetch populates the field
+# from the tracker. Decided from the descriptor, never from the type name; a type without such
+# a condition requests exactly FETCH_ALL_FIELDS and writes exactly the frontmatter it did.
+PARENT_FIELD = "parent"
+
+
+def parent_key_prefixes(desc):
+    """The prefixes a fetched issue's Jira parent key must carry for ``--fetch-all`` to record it
+    as the task's ``parent_key``: the ones the type's dimension conditions read ``parent_key``
+    with (``Descriptor.condition_prefixes("parent_key")``, a tuple in declaration order). Empty
+    for a type whose pipeline never reads the field — the fetch then neither requests the
+    parent nor writes anything for it."""
+    return desc.condition_prefixes("parent_key")
+
+
+def fetch_all_fields(desc):
+    """The ``--fetch-all`` request list for ``desc``: ``FETCH_ALL_FIELDS``, plus Jira's ``parent``
+    for a type with ``parent_key_prefixes``."""
+    fields = list(FETCH_ALL_FIELDS)
+    if parent_key_prefixes(desc):
+        fields.append(PARENT_FIELD)
+    return fields
+
+
+def _parent_key_grammar(desc):
+    """What the task schema admits for ``parent_key`` — the effective pattern
+    (``Descriptor.parent_key_pattern_effective``), the descriptor's own under a malformed
+    override: ``artifact_utils`` builds the schema by the same rule, so a key accepted here is
+    one ``scripts/frontmatter.py set`` accepts too."""
+    try:
+        return desc.parent_key_pattern_effective()
+    except type_registry.RegistryError:
+        return desc.parent_key_pattern
+
+
+def recorded_parent_key(desc, issue_key, fields):
+    """``(parent_key, note)`` for a fetched issue's ``fields``: the Jira parent key to write as the
+    task's ``parent_key``, or ``None`` and — when there was a parent that is not recorded — the
+    one ``Note:`` line to print on stderr (never fatal).
+
+    Recorded when the key carries one of ``parent_key_prefixes(desc)`` AND matches the type's
+    ``parent_key`` grammar; both ``None`` for a type without prefixes or an issue without a
+    parent. A parent outside the prefixes is the documented decision (types/README.md "Parent
+    field"): the artifact model's ``parent_key`` means "split from" for a key of the type's own
+    family — ``submit.py`` keeps such a task out of Phase 2 as a split child of a Jira ancestor
+    and the run report lists it under that parent — so a same-project Outcome parent
+    (``RHOAIENG`` for an Initiative) is NOT written; it stays in Jira, where split children
+    inherit it directly (``split_submit.discover_state``) and the alignment stage skips with
+    its ``not_assessed`` stub exactly as today. A parent carrying a prefix but failing the
+    grammar is not written either (the schema would refuse it and fail the whole fetch).
+    """
+    prefixes = parent_key_prefixes(desc)
+    parent = fields.get(PARENT_FIELD)
+    if not prefixes or not parent:
+        return None, None
+    key = parent.get("key") if isinstance(parent, dict) else None
+    if not key:
+        return None, f"Note: {issue_key}: parent field carries no key; parent_key not recorded"
+    if not key.startswith(prefixes):
+        return None, (
+            f"Note: {issue_key}: parent {key} not recorded as parent_key - the {desc.name} "
+            f"pipeline reads parent_key with prefix {' / '.join(prefixes)} only; the link "
+            f"stays in Jira"
+        )
+    grammar = _parent_key_grammar(desc)
+    if grammar is None or re.fullmatch(grammar, key) is None:
+        return None, (
+            f"Note: {issue_key}: parent {key} not recorded as parent_key - it does not match "
+            f"the {desc.name} parent_key grammar {grammar}"
+        )
+    return key, None
 
 
 def _fetched_pair(fields):
@@ -162,6 +246,12 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", b
     its frontmatter set by ``scripts/frontmatter.py``; when that step fails the task file is
     removed again before returning 1, so a failed fetch never leaves a body-only task file for
     the fetch barrier to accept (the original and the companion are not yet written then).
+
+    For a type with ``parent_key_prefixes`` the request also carries Jira's ``parent`` and the
+    task frontmatter gains ``parent_key=<key>`` — appended after the self-describing pair, only
+    when ``recorded_parent_key`` has one to record (an issue without a parent, or with one the
+    rule leaves in Jira, writes the same frontmatter as before). Every other type's request and
+    frontmatter argv are unchanged (AISDLC-280).
     """
     desc = _TYPES.get(type_name)
     if binding is None:
@@ -174,7 +264,7 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", b
 
     # Fetch issue fields
     try:
-        issue = get_issue(server, user, token, issue_key, fields=list(FETCH_ALL_FIELDS))
+        issue = get_issue(server, user, token, issue_key, fields=fetch_all_fields(desc))
     except Exception as e:
         print(f"Error fetching issue {issue_key}: {e}", file=sys.stderr)
         return 1
@@ -184,6 +274,12 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", b
     if refusal is not None:
         print(refusal, file=sys.stderr)
         return 1
+
+    # The Jira parent to record (AISDLC-280): decided before anything is written, so a parent the
+    # rule leaves in Jira is noted once, on stderr, and the write goes on unchanged.
+    parent_key, parent_note = recorded_parent_key(desc, issue_key, fields)
+    if parent_note:
+        print(parent_note, file=sys.stderr)
 
     os.makedirs(tasks_dir, exist_ok=True)
     os.makedirs(originals_dir, exist_ok=True)
@@ -222,6 +318,12 @@ def _fetch_all(issue_key, artifacts_dir, server, user, token, type_name="rfe", b
         f"type={desc.name}",
         f"tracker_ref={issue_key}",
     ]
+    if parent_key:
+        # Appended after the self-describing pair (D7) and only when there is one: a type
+        # without parent_key_prefixes, or an issue without a recordable parent, hands
+        # frontmatter.py exactly the argv above and the schema default (parent_key: null)
+        # trails the stamp as before.
+        fm_args.append(f"parent_key={parent_key}")
     result = subprocess.run(fm_args, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Error setting frontmatter: {result.stderr.strip()}", file=sys.stderr)

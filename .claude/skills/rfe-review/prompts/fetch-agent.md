@@ -10,11 +10,11 @@ Fetch Jira issue {KEY} and write artifacts. Steps:
    If it exits with any other error, report the failure and stop.
 
 2. MCP fallback (only if step 1 exited with code 2):
-   a. Call mcp__atlassian__getJiraIssue with cloudId="https://redhat.atlassian.net", issueIdOrKey="{KEY}", fields=["summary","description","priority","labels","status","issuetype","project"{COMMENTS_FIELD}], responseContentFormat="markdown"
+   a. Call mcp__atlassian__getJiraIssue with cloudId="https://redhat.atlassian.net", issueIdOrKey="{KEY}", fields=["summary","description","priority","labels","status","issuetype","project"{COMMENTS_FIELD}{PARENT_FIELD}], responseContentFormat="markdown"
       If the response's project.key or issuetype.name differs from the {TYPE} binding (python3 scripts/type_registry.py binding {TYPE} shows it), report the mismatch and stop — write no files.
    b. Write the Jira description to {TASKS_DIR}/{KEY}.md as-is — preserve the original markdown structure, headings, and content exactly as fetched. Do not add a title heading — the title lives in frontmatter only.
    c. Run: python3 scripts/frontmatter.py schema {TASK_SCHEMA}
-      Then: python3 scripts/frontmatter.py set {TASKS_DIR}/{KEY}.md {ID_FIELD}={KEY} title="<title>" priority=<priority> status=Ready original_labels="<comma-separated labels or null if none>" type={TYPE} tracker_ref={KEY}
+      Then: python3 scripts/frontmatter.py set {TASKS_DIR}/{KEY}.md {ID_FIELD}={KEY} title="<title>" priority=<priority> status=Ready original_labels="<comma-separated labels or null if none>" type={TYPE} tracker_ref={KEY}{PARENT_KEY_SET}
    d. Save the same description content from step 2b to {ORIGINALS_DIR}/{KEY}.md (just the description body — no frontmatter, no title heading).
    e. Only when this type keeps a comments companion (COMMENTS_COMPANION={COMMENTS_COMPANION}): write comments to {TASKS_DIR}/{KEY}-comments.md formatted as:
       # Comments: {KEY}

@@ -28,6 +28,8 @@ Write `artifacts/initiative-reviews/{ID}-alignment.md`:
 
 Stop here. Your work is complete.
 
+(`parent_key` is the batch entry's for a created Initiative and, for one fetched from Jira, the issue's Parent when that parent is a `RHAISTRAT-` key — `fetch_issue.py --fetch-all`, AISDLC-280. An Initiative whose Jira parent is an RHOAIENG Outcome arrives with `parent_key: null` on purpose — see "Parent field" in `types/README.md` — and takes this branch; the pipeline normally writes this stub itself without launching you.)
+
 ## Step 3: Fetch RHAISTRAT Outcome
 
 ```bash

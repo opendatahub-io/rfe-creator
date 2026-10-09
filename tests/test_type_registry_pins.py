@@ -2586,7 +2586,26 @@ class TestSkillLayer:
             "issuetype",
             "project",
         ]
-        pin("companions.comments", "fetch-agent.md MCP fields", comments, fields[7:] == ["comment"])
+        # AISDLC-280: the MCP fallback mirrors fetch_issue.py — Jira's parent is requested, and
+        # recorded as parent_key, only for a type whose dimension conditions read parent_key
+        # (Descriptor.condition_prefixes), and only for a key carrying one of their prefixes.
+        parent_prefixes = ctx.desc.condition_prefixes("parent_key")
+        pin(
+            "companions.comments + dimensions[].condition(parent_key)",
+            "fetch-agent.md MCP fields",
+            (["comment"] if comments else []) + (["parent"] if parent_prefixes else []),
+            fields[7:],
+        )
+        (set_line,) = [ln for ln in lines if "frontmatter.py set" in ln]
+        if parent_prefixes:
+            assert set_line.endswith(
+                f"tracker_ref={{KEY}} parent_key=<parent.key, only when it starts with "
+                f"{' or '.join(parent_prefixes)}; omit the field otherwise>"
+            ), set_line
+        else:
+            # byte-stable for a type without the condition: nothing about a parent anywhere
+            assert set_line.endswith("tracker_ref={KEY}"), set_line
+            assert "parent" not in text.lower()
         assert (
             f"If the response's project.key or issuetype.name differs from the {ctx.t} binding "
             f"(python3 scripts/type_registry.py binding {ctx.t} shows it), report the mismatch "
@@ -2841,7 +2860,7 @@ class TestSkillLayer:
             (
                 f"{SKELETON_DIR}/fetch-agent.md",
                 "{TASKS_DIR}/{KEY}.md",
-            ): "type={TYPE} tracker_ref={KEY}",
+            ): "type={TYPE} tracker_ref={KEY}{PARENT_KEY_SET}",
         }
         expected = set()
         for (rel, target), tail in tails.items():

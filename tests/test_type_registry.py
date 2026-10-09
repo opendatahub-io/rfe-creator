@@ -371,6 +371,38 @@ class TestDescriptorProjections:
             assert re.fullmatch(desc.parent_key_pattern, f"{desc.write_prefix}12")
             assert re.fullmatch(desc.parent_key_pattern, f"x{desc.write_prefix}12") is None
 
+    def test_condition_prefixes_follow_the_dimension_conditions(self):
+        # AISDLC-280: the descriptor-derived "does this type's pipeline read <field> off a
+        # fetched task, and for which prefixes" — what fetch_issue.py decides the parent
+        # request and the parent_key write from, never the type name.
+        reg = _shipped()
+        assert reg.get("rfe").condition_prefixes("parent_key") == ()
+        assert reg.get("initiative").condition_prefixes("parent_key") == ("RHAISTRAT-",)
+        for name in SHIPPED:
+            desc = reg.get(name)
+            expected = []
+            for dim in desc.get("pipeline.dimensions"):
+                cond = dim.get("condition") or {}
+                if cond.get("frontmatter_field") == "parent_key":
+                    expected.append(cond["prefix"])
+            assert list(desc.condition_prefixes("parent_key")) == expected
+            assert desc.condition_prefixes("size") == ()
+        dims = [
+            {"name": "a", "condition": {"frontmatter_field": "parent_key", "prefix": "A-"}},
+            {"name": "b", "condition": {"context_exists": ".context/x"}},
+            {"name": "c", "condition": {"frontmatter_field": "parent_key", "prefix": "B-"}},
+            {"name": "d", "condition": {"frontmatter_field": "parent_key", "prefix": "A-"}},
+            {"name": "e", "condition": {"frontmatter_field": "size", "prefix": "X"}},
+            {"name": "f"},
+        ]
+        desc = Descriptor("x", {"type": "x", "pipeline": {"dimensions": dims}})
+        # declaration order, duplicates dropped, other forms and other fields ignored
+        assert desc.condition_prefixes("parent_key") == ("A-", "B-")
+        assert desc.condition_prefixes("size") == ("X",)
+        assert desc.condition_prefixes("other") == ()
+        assert Descriptor("bare", {"type": "bare"}).condition_prefixes("parent_key") == ()
+        assert Descriptor("gh", _minimal("gh", "GH")).condition_prefixes("parent_key") == ()
+
     def test_parent_key_pattern_is_none_without_patterns(self):
         assert Descriptor("bare", {"type": "bare"}).parent_key_pattern is None
         assert Descriptor("gh", _minimal("gh", "GH")).parent_key_pattern is None
@@ -3159,6 +3191,14 @@ class TestLaunchVars:
         assert rfe["SIZE_SET"] == " size=<size>" and init["SIZE_SET"] == ""
         assert rfe["PARENT_FLAG"] == "" and init["PARENT_FLAG"] == "--parent"
         assert rfe["COMMENTS_FIELD"] == ',"comment"' and init["COMMENTS_FIELD"] == ""
+        # AISDLC-280: the fetch skeleton's MCP fallback requests and records the parent only
+        # for a type whose dimension conditions read parent_key; empty otherwise (byte-stable).
+        assert rfe["PARENT_FIELD"] == "" and rfe["PARENT_KEY_SET"] == ""
+        assert init["PARENT_FIELD"] == ',"parent"'
+        assert init["PARENT_KEY_SET"] == (
+            " parent_key=<parent.key, only when it starts with RHAISTRAT-; "
+            "omit the field otherwise>"
+        )
         assert init["DIMENSION_ALIGNMENT_CONDITION"] == "parent_key startswith RHAISTRAT-"
         assert init["DIMENSION_ALIGNMENT_BLOCKING"] == "false"
         assert rfe["RUN_REPORT"] == "artifacts/auto-fix-runs/<timestamp>.yaml"
