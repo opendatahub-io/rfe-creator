@@ -47,9 +47,19 @@ Check if `JIRA_SERVER`, `JIRA_USER`, and `JIRA_TOKEN` environment variables are 
 
 ## Step 1: Run Submission
 
+Interactive invocation — no `--headless` was parsed in Step 0:
+
 ```bash
 python3 scripts/submit.py {TYPE_FLAG} [--dry-run] [--artifacts-dir artifacts]
 ```
+
+When `--headless` was parsed from the arguments (the `/rfe-speedrun` Phase 3 handoff, a CI run), append `--hold-interrupted`:
+
+```bash
+python3 scripts/submit.py {TYPE_FLAG} --hold-interrupted [--dry-run] [--artifacts-dir artifacts]
+```
+
+The interactive form passes neither `--auto-approve` nor `--hold-interrupted`: a user who edited the task file by hand before invoking this skill is making a manual revision and expects the update. Every non-interactive run must pass one of the two — under either, an existing item whose body changed while its review never recorded `auto_revised` is held for a human instead of published (`docs/state-machine/pipeline-correctness-reference.md` §5.12) — and `--hold-interrupted` is the one this skill passes; `--auto-approve` belongs to the production job that calls the script directly and is never passed here.
 
 ## Step 2: Report Results
 

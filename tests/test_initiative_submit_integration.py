@@ -5,6 +5,7 @@ Runs the full execution path against a real HTTP server that tracks
 issue state, changelogs, labels, and comments.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -273,6 +274,71 @@ class TestLabelOnly:
                 if item["field"] == "description":
                     desc_changes.append(item)
         assert len(desc_changes) == 0
+
+
+class TestInterruptedRevisionHold:
+    """The Initiative jobs run with auto-approve off (AISDLC-206 D3), so they pass
+    --hold-interrupted to get the submit hold of reference §5.12 (AISDLC-279): an existing
+    Initiative whose body changed while its review never recorded ``auto_revised`` is held
+    under the type's own labels and directories, not published. Without the switch the
+    update path stands. The hold's mechanics are covered on the RFE type in
+    tests/test_submit_integration.py::TestInterruptedRevisionHold."""
+
+    ORIGINAL = "## Objective\n\nOriginal content.\n"
+    REWRITE = "## Objective\n\nRewritten by the revise agent, never re-reviewed.\n"
+
+    def _seed(self, art_dir, jira):
+        jira.create("RHOAIENG-1234", "Test Initiative", self.ORIGINAL, issue_type="Initiative")
+        _write(f"{art_dir}/initiative-originals/RHOAIENG-1234.md", self.ORIGINAL)
+        _write(
+            f"{art_dir}/initiatives/RHOAIENG-1234.md",
+            "---\ninitiative_id: RHOAIENG-1234\ntitle: Test Initiative\n"
+            f"priority: Major\nstatus: Ready\n---\n{self.REWRITE}",
+        )
+        _write(
+            f"{art_dir}/initiative-reviews/RHOAIENG-1234-review.md",
+            _review("RHOAIENG-1234", auto_revised="false"),
+        )
+
+    @staticmethod
+    def _desc_text(issue):
+        desc = issue["fields"]["description"]
+        if isinstance(desc, dict):
+            texts = []
+            for node in desc.get("content", []):
+                for child in node.get("content", []):
+                    if child.get("type") == "text":
+                        texts.append(child["text"])
+            return "\n".join(texts)
+        return desc or ""
+
+    def test_hold_interrupted_holds_an_initiative(self, art_dir, jira):
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url, ["--hold-interrupted"])
+        assert r.returncode == 0, r.stderr
+        assert "revision interrupted" in r.stdout
+        assert "RHOAIENG-1234: Updated" not in r.stdout
+        issue = jira.get("RHOAIENG-1234")
+        assert "Original content." in self._desc_text(issue)
+        assert "Rewritten" not in self._desc_text(issue)
+        assert issue["fields"]["labels"] == ["initiative-needs-attention"]
+        comments = jira.request("GET", "/rest/api/3/issue/RHOAIENG-1234/comment")["comments"]
+        assert [c for c in comments if "Revision interrupted" in json.dumps(c["body"])]
+        fm = _read_frontmatter(f"{art_dir}/initiative-reviews/RHOAIENG-1234-review.md")
+        assert fm["pass"] is False
+        assert fm["error"].startswith("revision_interrupted:")
+        assert fm["needs_attention"] is True
+        assert _read_frontmatter(f"{art_dir}/initiatives/RHOAIENG-1234.md")["status"] == "Ready"
+
+    def test_without_the_switch_the_initiative_is_updated(self, art_dir, jira):
+        """The interactive /rfe-submit --type initiative passes neither switch."""
+        self._seed(art_dir, jira)
+        r = _run_submit(art_dir, jira.url)
+        assert r.returncode == 0, r.stderr
+        assert "RHOAIENG-1234: Updated" in r.stdout
+        issue = jira.get("RHOAIENG-1234")
+        assert "Rewritten" in self._desc_text(issue)
+        assert "initiative-needs-attention" not in issue["fields"]["labels"]
 
 
 class TestConflictDetection:

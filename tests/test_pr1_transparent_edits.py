@@ -789,10 +789,11 @@ NEW_ALLOW = [
     "Bash(python3 scripts/type_registry.py *)",
     "Bash(python3 scripts/validate_types.py *)",
     "Bash(python3 scripts/generate_eval_config.py *)",
-    # PR-5d: the workspace bootstrap's own name (the old pair stays while the forwarder does)
+    # PR-5d: the workspace bootstrap's own name; PR-E retired the forwarder's pair below
     "Bash(bash scripts/bootstrap.sh)",
     "Bash(bash scripts/bootstrap.sh *)",
 ]
+# PR-E: the forwarder scripts/bootstrap-assess-rfe.sh and its pair are gone together.
 COMPAT_BOOTSTRAP_ALLOW = [
     "Bash(bash scripts/bootstrap-assess-rfe.sh)",
     "Bash(bash scripts/bootstrap-assess-rfe.sh *)",
@@ -845,13 +846,14 @@ class TestSettingsAllowlist:
     def test_no_duplicates(self):
         assert len(self.allow) == len(set(self.allow))
 
-    def test_compat_bootstrap_rules_live_and_die_with_the_forwarder(self):
-        """PR-5d: scripts/bootstrap-assess-rfe.sh forwards to bootstrap.sh for callers outside
-        the repo; its two allow rules are present exactly while that forwarder exists, so the
-        pair and the file are removed together."""
-        forwarder = os.path.exists(os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"))
+    def test_compat_bootstrap_forwarder_and_its_rules_died_together(self):
+        """PR-5d kept scripts/bootstrap-assess-rfe.sh as a forwarder to bootstrap.sh for
+        callers outside the repo, its two allow rules present exactly while it existed. PR-E
+        removed both once the last caller (rfe-autofixer, MR !15) moved to bootstrap.sh;
+        neither the file nor the rules come back."""
+        assert not os.path.exists(os.path.join(REPO_ROOT, "scripts", "bootstrap-assess-rfe.sh"))
         for entry in COMPAT_BOOTSTRAP_ALLOW:
-            assert (entry in self.allow) == forwarder, entry
+            assert entry not in self.allow, entry
 
     def test_every_launch_bootstrap_matches_an_allow_rule(self):
         """The BOOTSTRAP launch var is what the orchestrator runs: its text must match a rule

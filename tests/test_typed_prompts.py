@@ -76,7 +76,7 @@ def sentences(text):
 
 # Scripts renamed since the legacy corpus was frozen: the corpus keeps the old name (it is
 # history), the generic surface uses the new one, and the invocation counts as surviving.
-# PR-5d: the workspace bootstrap dropped its assess-rfe-era name (the old name forwards).
+# PR-5d: the workspace bootstrap dropped its assess-rfe-era name; PR-E removed the forwarder.
 RENAMED_SCRIPTS = {"scripts/bootstrap-assess-rfe.sh": "scripts/bootstrap.sh"}
 
 

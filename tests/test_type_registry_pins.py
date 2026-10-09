@@ -2470,6 +2470,25 @@ class TestSkillLayer:
         raw = read(GENERIC_SKILL.format(stage="submit")).split("---", 2)[2]
         assert "feasibility." not in raw and "alignment." not in raw
 
+    def test_submit_skill_headless_form_passes_hold_interrupted(self, ctx):
+        # rows: none (AISDLC-279) — Step 1 of the generic submit runs scripts/submit.py in two
+        # forms: the interactive form passes neither --auto-approve nor --hold-interrupted (a
+        # hand edit of the task file is a manual revision), and the --headless form — the
+        # speedrun's Phase 3 handoff, the one non-interactive caller of the skill in-repo —
+        # carries --hold-interrupted so an interrupted revision is held (reference §5.12).
+        # --auto-approve is the production job's switch: no form of the skill passes it. The
+        # compat shim forwards to this body and runs no script of its own.
+        base = f"python3 scripts/submit.py {dict(launch(ctx.t, 'submit'))['TYPE_FLAG']}"
+        tail = "[--dry-run] [--artifacts-dir artifacts]"
+        step = skill(ctx.t, "submit").split("## Step 1: Run Submission", 1)[1]
+        step = step.split("## Step 2", 1)[0]
+        commands = [ln.strip() for ln in step.splitlines() if ln.lstrip().startswith("python3 ")]
+        assert commands == [f"{base} {tail}", f"{base} --hold-interrupted {tail}"], commands
+        assert "--auto-approve" not in "\n".join(commands)
+        assert "When `--headless` was parsed from the arguments" in step
+        shim = read(COMPAT_SHIM.format(stage="submit"))
+        assert "scripts/submit.py" not in shim and "rfe-submit/SKILL.md" in shim
+
     def test_type_flag_pass_through(self, ctx):
         # rows: 222 — every script invocation that carries --type names this type (TYPE_FLAG,
         # rendered); every nested Skill(...) handoff and every /rfe-* invocation with arguments
