@@ -156,6 +156,12 @@ DEFERRED = [
     ),
     (198, ".codex-plugin/plugin.json", "plugin-level manifest; no per-type field"),
     (
+        212,
+        ".github/workflows/rfe-creator-eval.yml type input",
+        "type-neutral since AISDLC-209: a free-text type sent as EVAL_TYPE; rfe-creator-eval "
+        "reads eval.config from the PR's descriptor through the registry",
+    ),
+    (
         213,
         "Makefile lint/test targets; .github/workflows/lint.yml",
         "type-neutral wiring; pinned by tests/test_pr1_transparent_edits.py::TestLintHooks",
@@ -2872,10 +2878,10 @@ class TestSkillLayer:
 
 
 class TestEvalConfigs:
-    # rows: 199-212. Since PR-4 both configs are GENERATED (scripts/generate_eval_config.py:
-    # eval/config/skeleton.yaml + types/<t>/eval/fragment.yaml + the descriptor), so the pins
-    # below hold by construction; they stay as the readable statement of what the skeleton
-    # derives from which descriptor field.
+    # rows: 199-211 (212 DEFERRED). Since PR-4 both configs are GENERATED
+    # (scripts/generate_eval_config.py: eval/config/skeleton.yaml + types/<t>/eval/fragment.yaml
+    # + the descriptor), so the pins below hold by construction; they stay as the readable
+    # statement of what the skeleton derives from which descriptor field.
 
     def test_generated_and_in_sync(self, ctx):
         path, rendered, committed, diff = generate_eval_config.compare(ctx.desc)
@@ -3051,17 +3057,6 @@ class TestEvalConfigs:
             assert '"-snapshot-" in os.path.basename(k)' in check, name
         for t in TYPES:
             assert "-snapshot-" in _ctx(t).snap["prefix"]
-
-    def test_workflow_eval_config_options(self):
-        # rows: 212 — .github/workflows/rfe-creator-eval.yml:25-35
-        wf = yaml.safe_load(read(".github/workflows/rfe-creator-eval.yml"))
-        options = wf[True]["workflow_dispatch"]["inputs"]["eval_config"]["options"]
-        pin(
-            "[eval.config for t in types]",
-            "rfe-creator-eval.yml:25-35",
-            [_ctx(t).ev["config"] for t in TYPES],
-            options,
-        )
 
 
 # ── manifests and docs that restate descriptor values ────────────────────────────────────────

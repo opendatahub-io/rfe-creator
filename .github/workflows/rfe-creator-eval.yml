@@ -22,13 +22,14 @@ on:
         description: "PR number to evaluate"
         required: true
         type: number
-      eval_config:
-        description: "Eval config to run"
-        type: choice
-        default: eval.yaml
-        options:
-          - eval.yaml
-          - eval-initiative.yaml
+      # Free text, not a choice list: GitHub cannot fill a choice list from
+      # types/, and rfe-creator-eval reads the eval config from the PR's own
+      # descriptor (types/<type>/type.yaml eval.config), so a new type needs no
+      # edit here.
+      type:
+        description: "Work item type to evaluate (rfe, initiative, or any types/<name> in the PR)"
+        type: string
+        default: rfe
       quick_mode:
         description: "Quick mode: 2 cases only (~$5 vs ~$50)"
         type: boolean
@@ -58,6 +59,28 @@ jobs:
           echo "sha=$(echo "$PR_JSON" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
           echo "ref=$(echo "$PR_JSON" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
 
+      # The type is free text, and a GitLab job that fails on an unknown type
+      # never posts to the PR, so a typo would otherwise end in a green run and
+      # no comment. This reads the PR's file list through the API and checks
+      # out no PR code. rfe is not checked: a PR older than types/ has no
+      # descriptors and rfe-creator-eval runs eval.yaml for it.
+      - name: Check the work item type
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_SHA: ${{ steps.pr.outputs.sha }}
+          EVAL_TYPE: ${{ inputs.type }}
+        run: |
+          if [[ ! "${EVAL_TYPE}" =~ ^[a-z][a-z0-9-]*$ ]]; then
+            echo "::error::the type input is not a type name (lowercase letters, digits and -)"
+            exit 1
+          fi
+          if [ "${EVAL_TYPE}" != rfe ] \
+            && ! gh api "repos/${REPO}/contents/types/${EVAL_TYPE}/type.yaml?ref=${PR_SHA}" --silent; then
+            echo "::error::the PR has no types/${EVAL_TYPE}/type.yaml at ${PR_SHA}"
+            exit 1
+          fi
+
       - name: Trigger rfe-creator-eval on GitLab
         env:
           GITLAB_TRIGGER_TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
@@ -66,7 +89,7 @@ jobs:
           PR_SHA: ${{ steps.pr.outputs.sha }}
           PR_REF: ${{ steps.pr.outputs.ref }}
           REPO: ${{ github.repository }}
-          EVAL_CONFIG: ${{ inputs.eval_config }}
+          EVAL_TYPE: ${{ inputs.type }}
           QUICK_MODE: ${{ inputs.quick_mode }}
         run: |
           curl --fail-with-body \
@@ -77,6 +100,6 @@ jobs:
             --form-string "variables[GITHUB_SHA]=${PR_SHA}" \
             --form-string "variables[GITHUB_HEAD_REF]=${PR_REF}" \
             --form-string "variables[GITHUB_REPO]=${REPO}" \
-            --form-string "variables[EVAL_CONFIG]=${EVAL_CONFIG}" \
+            --form-string "variables[EVAL_TYPE]=${EVAL_TYPE}" \
             --form-string "variables[QUICK_MODE]=${QUICK_MODE}" \
             "${GITLAB_TRIGGER_URL}"
