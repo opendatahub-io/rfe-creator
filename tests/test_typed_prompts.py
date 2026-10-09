@@ -216,6 +216,13 @@ _allow_command(
     "python3 scripts/type_registry.py get rfe pipeline.rubric.path",
 )
 _allow("initiative", f"{LEGACY}/initiative/split.md", *_RESPLIT_INIT)
+# AISDLC-280: the fetch skeleton's MCP fallback requests Jira's parent for a type whose dimension
+# conditions read parent_key (PARENT_FIELD renders `,"parent"` for initiative), so the legacy
+# initiative field list is a strict prefix of the rendered one; the rfe rendering is unchanged.
+_PARENT_FIELD_INIT = (
+    'fields=["summary","description","priority","labels","status","issuetype","project"]',
+)
+_allow("initiative", f"{LEGACY}/initiative/prompts/fetch-agent.md", *_PARENT_FIELD_INIT)
 
 
 def sections(text, headings):

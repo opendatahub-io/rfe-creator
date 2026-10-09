@@ -109,7 +109,7 @@ The strategy skills live in a dedicated repo: [opendatahub-io/strat-creator](htt
 5. **Submit**: Creates new RHAIRFE tickets or updates existing ones in Jira. Supports `--dry-run` to validate without writing to Jira. A non-interactive run (a CI job calling `scripts/submit.py` directly) passes `--auto-approve` or `--hold-interrupted` so that an interrupted revision — an existing item whose body changed while its review never recorded `auto_revised` — is held for a human instead of published; the skill passes neither when invoked interactively, since a user who edited the task file by hand is making a manual revision, and appends `--hold-interrupted` under `--headless` (the speedrun's Phase 3 handoff).
 6. **Speedrun**: End-to-end pipeline (create → auto-fix → submit). Supports `--input <yaml>` for batch creation, `--headless` for CI, `--announce-complete` for completion signaling, `--dry-run` to skip Jira writes, and `--batch-size N`.
 
-All pipeline steps apply identically to Initiatives (`--type initiative`). Initiative review additionally runs a strategic alignment check against the parent RHAISTRAT Outcome when one is linked.
+All pipeline steps apply identically to Initiatives (`--type initiative`). Initiative review additionally runs a strategic alignment check against the parent RHAISTRAT Outcome when one is linked (read from Jira's Parent field at fetch, or from the batch entry's `parent_key` for a created Initiative).
 
 ## Editing Between Steps
 

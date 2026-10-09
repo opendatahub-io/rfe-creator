@@ -655,6 +655,30 @@ class Descriptor:
                 alternatives.insert(0, derived)
         return "^(" + "|".join(alternatives) + ")$"
 
+    def condition_prefixes(self, field):
+        """The prefixes the type's dimension conditions test the task-frontmatter ``field``
+        against — every ``pipeline.dimensions[].condition`` of the ``{frontmatter_field, prefix}``
+        form that names ``field`` — in declaration order without duplicates, as a tuple; empty
+        when no condition reads ``field`` (no dimension, or ``context_exists`` conditions only).
+
+        The descriptor-derived answer to "does this type's pipeline read ``field`` off a fetched
+        task, and for which values" (AISDLC-280): a condition on a frontmatter field can only
+        ever fire for a fetched item when the fetch populates that field from the tracker, so
+        ``fetch_issue.py --fetch-all`` requests Jira's ``parent`` and records ``parent_key`` for
+        exactly the types whose ``condition_prefixes("parent_key")`` is non-empty — the
+        initiative alignment dimension today — and never by type name. The engine side of the
+        same condition is ``pipeline_state._check_condition``.
+        """
+        prefixes = []
+        for dim in self.get("pipeline.dimensions", None) or []:
+            cond = dim.get("condition") if isinstance(dim, dict) else None
+            if not isinstance(cond, dict) or cond.get("frontmatter_field") != field:
+                continue
+            prefix = cond.get("prefix")
+            if isinstance(prefix, str) and prefix and prefix not in prefixes:
+                prefixes.append(prefix)
+        return tuple(prefixes)
+
     def accepted_pairs(self, binding, key):
         """The ``(project, issue_type)`` pairs a fetched issue behind ``key`` may carry to be this
         type's own under ``binding`` (design §3.2.1; PR-3c, the writers).
@@ -1562,6 +1586,8 @@ LAUNCH_KEYS = (
     "INDEX_ENABLED",
     "COMMENTS_COMPANION",
     "COMMENTS_FIELD",
+    "PARENT_FIELD",
+    "PARENT_KEY_SET",
     "STATE_PREFIX",
     "POLL_PREFIX",
     "POLL_FILE_PREFIX",
@@ -1695,6 +1721,7 @@ def launch_vars(desc, stage):
     write_prefix = desc.write_prefix or ""
     local_prefix = desc.local_prefix
     comments = bool(desc.get("companions.comments", False))
+    parent_prefixes = desc.condition_prefixes("parent_key")
     report_prefix = desc.get("snapshot.report_prefix", "") or ""
     size = task_extra.get("size") if isinstance(task_extra, dict) else None
 
@@ -1730,6 +1757,20 @@ def launch_vars(desc, stage):
         ("INDEX_ENABLED", _flag(desc.get("index.enabled", False))),
         ("COMMENTS_COMPANION", _flag(comments)),
         ("COMMENTS_FIELD", ',"comment"' if comments else ""),
+        # The fetch skeleton's MCP fallback mirrors fetch_issue.py --fetch-all (AISDLC-280): Jira's
+        # parent is requested, and recorded as parent_key, only for a type whose dimension
+        # conditions read parent_key, and only for a parent carrying one of their prefixes. Both
+        # render empty for every other type, so its skeleton is byte-identical.
+        ("PARENT_FIELD", ',"parent"' if parent_prefixes else ""),
+        (
+            "PARENT_KEY_SET",
+            (
+                f" parent_key=<parent.key, only when it starts with {' or '.join(parent_prefixes)};"
+                " omit the field otherwise>"
+            )
+            if parent_prefixes
+            else "",
+        ),
         ("STATE_PREFIX", pipe.get("state_prefix", "") or ""),
         ("POLL_PREFIX", pipe.get("poll_prefix", "") or ""),
         ("POLL_FILE_PREFIX", _POLL_FILE_PREFIX.format(type=desc.name)),

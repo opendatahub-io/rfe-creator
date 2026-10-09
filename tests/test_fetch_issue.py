@@ -16,6 +16,7 @@ Unit tests monkeypatch the two Jira reads; the last class drives the script as a
 against the jira-emulator (``jira`` fixture, tests/conftest.py).
 """
 
+import copy
 import io
 import json
 import os
@@ -29,6 +30,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import fetch_issue  # noqa: E402
+import pipeline_state  # noqa: E402
 import type_registry  # noqa: E402
 from artifact_utils import read_frontmatter, read_frontmatter_validated  # noqa: E402
 
@@ -41,6 +43,9 @@ DEFAULT_FIELDS = ["summary", "description", "priority", "labels", "status", "iss
 # --fetch-all also requests the project witness of the post-fetch verification (PR-3c, D9);
 # the JSON modes keep DEFAULT_FIELDS.
 FETCH_ALL_FIELDS = DEFAULT_FIELDS + ["project"]
+# ...and, for a type whose dimension conditions read parent_key off the task frontmatter (the
+# initiative alignment dimension), Jira's parent (AISDLC-280). rfe requests FETCH_ALL_FIELDS alone.
+INITIATIVE_FETCH_FIELDS = FETCH_ALL_FIELDS + ["parent"]
 
 
 def _clean_env(**extra):
@@ -130,6 +135,16 @@ GOLDEN_TASK = (
     + DESC_MD.encode()
 )
 GOLDEN_ORIGINAL = DESC_MD.encode()
+# The initiative-task schema's field order and defaults (no `size`, parent_key null) for an issue
+# without a Jira parent; a RHAISTRAT parent replaces the trailing `parent_key: null` default by a
+# `parent_key:` line right after the stamp (AISDLC-280, see TestParentField).
+GOLDEN_INITIATIVE_TASK = (
+    b"---\ninitiative_id: RHOAIENG-12345\n"
+    b"title: Add model registry export to S3-compatible storage\n"
+    b"priority: Major\nstatus: Ready\noriginal_labels: null\n"
+    b"type: initiative\ntracker_ref: RHOAIENG-12345\n"
+    b"local_id: null\nparent_key: null\n---\n" + DESC_MD.encode()
+)
 GOLDEN_COMMENTS = (
     "# Comments: RHAIRFE-1595\n\n"
     "## Jane Doe — 2025-01-15\n\nAcme Corp asked for this twice.\n\n"
@@ -273,7 +288,7 @@ class TestInitiativeLayout:
         assert out == f"OK: wrote {task}, {original}\n"
         # companions.comments is false for initiative: no companion AND no comment request.
         assert fake_jira["comments"] == []
-        assert fake_jira["issue"] == [("RHOAIENG-12345", FETCH_ALL_FIELDS)]
+        assert fake_jira["issue"] == [("RHOAIENG-12345", INITIATIVE_FETCH_FIELDS)]
 
         data, body = read_frontmatter_validated(str(task), "initiative-task")
         assert data["initiative_id"] == "RHOAIENG-12345"
@@ -294,11 +309,7 @@ class TestInitiativeLayout:
         rc, _ = _fetch_all("RHOAIENG-12345", tmp_path, type_name="initiative")
         assert rc == 0
         assert (tmp_path / "initiatives" / "RHOAIENG-12345.md").read_bytes() == (
-            b"---\ninitiative_id: RHOAIENG-12345\n"
-            b"title: Add model registry export to S3-compatible storage\n"
-            b"priority: Major\nstatus: Ready\noriginal_labels: null\n"
-            b"type: initiative\ntracker_ref: RHOAIENG-12345\n"
-            b"local_id: null\nparent_key: null\n---\n" + DESC_MD.encode()
+            GOLDEN_INITIATIVE_TASK
         )
 
     def test_cli_type_initiative(self, tmp_path, monkeypatch, fake_jira):
@@ -709,19 +720,26 @@ class TestFrontmatterFailureWritesNothing:
     no original, no comments companion (the comments are not even requested)."""
 
     @pytest.mark.parametrize(
-        "key, kwargs, task_rel, original_rel",
+        "key, kwargs, task_rel, original_rel, fields",
         [
-            ("RHAIRFE-1595", {}, "rfe-tasks/RHAIRFE-1595.md", "rfe-originals/RHAIRFE-1595.md"),
+            (
+                "RHAIRFE-1595",
+                {},
+                "rfe-tasks/RHAIRFE-1595.md",
+                "rfe-originals/RHAIRFE-1595.md",
+                FETCH_ALL_FIELDS,
+            ),
             (
                 "RHOAIENG-12345",
                 {"type_name": "initiative"},
                 "initiatives/RHOAIENG-12345.md",
                 "initiative-originals/RHOAIENG-12345.md",
+                INITIATIVE_FETCH_FIELDS,
             ),
         ],
     )
     def test_task_file_is_removed_and_no_original_is_written(
-        self, tmp_path, fake_jira, monkeypatch, capsys, key, kwargs, task_rel, original_rel
+        self, tmp_path, fake_jira, monkeypatch, capsys, key, kwargs, task_rel, original_rel, fields
     ):
         calls = []
 
@@ -738,12 +756,234 @@ class TestFrontmatterFailureWritesNothing:
         assert capsys.readouterr().err == "Error setting frontmatter: schema says no\n"
         assert len(calls) == 1 and calls[0][1:3] == ["scripts/frontmatter.py", "set"]
         # The issue was fetched and verified (the write started) ...
-        assert fake_jira["issue"] == [(key, FETCH_ALL_FIELDS)]
+        assert fake_jira["issue"] == [(key, fields)]
         # ... but no file survives: not the task file, no original, no comments companion.
         assert not (artifacts / task_rel).exists()
         assert not (artifacts / original_rel).exists()
         assert _tree(artifacts) == {}
         assert fake_jira["comments"] == []
+
+
+# ── the Jira parent (AISDLC-280) ─────────────────────────────────────────────────────────────
+
+RHAISTRAT_PARENT = {
+    "id": "70001",
+    "key": "RHAISTRAT-45",
+    "fields": {"summary": "Outcome", "issuetype": {"name": "Outcome"}},
+}
+GOLDEN_INITIATIVE_TASK_WITH_PARENT = GOLDEN_INITIATIVE_TASK.replace(
+    b"tracker_ref: RHOAIENG-12345\nlocal_id: null\nparent_key: null\n",
+    b"tracker_ref: RHOAIENG-12345\nparent_key: RHAISTRAT-45\nlocal_id: null\n",
+)
+assert GOLDEN_INITIATIVE_TASK_WITH_PARENT != GOLDEN_INITIATIVE_TASK
+
+
+def _serve_with_parent(monkeypatch, fake_jira, key, parent):
+    """Serve ``key`` as _issue_for does, with ``fields.parent`` set to ``parent`` (``None`` for a
+    Jira issue without one; the ``"absent"`` sentinel leaves the field out of the response),
+    still recording the request list."""
+
+    def fake_get_issue(server, user, token, k, fields=None):
+        fake_jira["issue"].append((k, list(fields) if fields else fields))
+        issue = _issue_for(k)
+        if parent != "absent":
+            issue["fields"]["parent"] = parent
+        return issue
+
+    monkeypatch.setattr(fetch_issue, "get_issue", fake_get_issue)
+
+
+class TestParentField:
+    """The alignment dimension runs only when the task's ``parent_key`` is a RHAISTRAT key
+    (``pipeline.dimensions[].condition``), and a fetched task's frontmatter is whatever
+    ``--fetch-all`` writes — so for a type whose dimension conditions read ``parent_key``
+    (``Descriptor.condition_prefixes``; initiative) the fetch requests Jira's ``parent`` and
+    records a key carrying one of those prefixes, and matching the task grammar, as
+    ``parent_key``; every other parent is left in Jira with one stderr note. A type without such
+    a condition (rfe) requests and writes exactly what it did (types/README.md "Parent field")."""
+
+    def test_the_predicate_is_the_descriptor_condition_for_every_registered_type(self):
+        for name in REG.names():
+            desc = REG.get(name)
+            declared = []
+            for dim in desc.get("pipeline.dimensions", None) or []:
+                cond = dim.get("condition") or {}
+                if cond.get("frontmatter_field") == "parent_key":
+                    declared.append(cond["prefix"])
+            assert list(fetch_issue.parent_key_prefixes(desc)) == declared, name
+            assert fetch_issue.fetch_all_fields(desc) == (
+                FETCH_ALL_FIELDS + (["parent"] if declared else [])
+            ), name
+        assert fetch_issue.parent_key_prefixes(REG.get("rfe")) == ()
+        assert fetch_issue.fetch_all_fields(REG.get("rfe")) == FETCH_ALL_FIELDS
+        assert fetch_issue.parent_key_prefixes(REG.get("initiative")) == ("RHAISTRAT-",)
+        assert fetch_issue.fetch_all_fields(REG.get("initiative")) == INITIATIVE_FETCH_FIELDS
+        # Derived from the condition, never from the type name: an rfe-shaped descriptor that
+        # declares such a stage wants the parent, an initiative-shaped one without it does not.
+        rfe_like = copy.deepcopy(REG.get("rfe").data)
+        rfe_like["pipeline"]["dimensions"].append(
+            {
+                "name": "rollup",
+                "prompt": "types/rfe/dimensions/feasibility.md",
+                "blocking": False,
+                "condition": {"frontmatter_field": "parent_key", "prefix": "RHAISTRAT-"},
+            }
+        )
+        assert fetch_issue.parent_key_prefixes(type_registry.Descriptor("rfe", rfe_like)) == (
+            "RHAISTRAT-",
+        )
+        init_like = copy.deepcopy(REG.get("initiative").data)
+        init_like["pipeline"]["dimensions"] = [
+            d for d in init_like["pipeline"]["dimensions"] if d["name"] != "alignment"
+        ]
+        bare = type_registry.Descriptor("initiative", init_like)
+        assert fetch_issue.parent_key_prefixes(bare) == ()
+        assert fetch_issue.fetch_all_fields(bare) == FETCH_ALL_FIELDS
+
+    def test_a_rhaistrat_parent_is_written_and_arms_the_alignment_condition(
+        self, tmp_path, fake_jira, monkeypatch, capsys
+    ):
+        _serve_with_parent(monkeypatch, fake_jira, "RHOAIENG-12345", RHAISTRAT_PARENT)
+        artifacts = tmp_path / "artifacts"
+        rc, out = _fetch_all("RHOAIENG-12345", artifacts, type_name="initiative")
+        assert rc == 0 and out.startswith("OK: wrote ")
+        assert capsys.readouterr().err == ""
+        assert fake_jira["issue"] == [("RHOAIENG-12345", INITIATIVE_FETCH_FIELDS)]
+        task = artifacts / "initiatives" / "RHOAIENG-12345.md"
+        # parent_key follows the self-describing pair (D7: appended, never reordered) and the
+        # schema default it replaces is gone; nothing else moved.
+        assert task.read_bytes() == GOLDEN_INITIATIVE_TASK_WITH_PARENT
+        data, _ = read_frontmatter_validated(str(task), "initiative-task")
+        assert data["parent_key"] == "RHAISTRAT-45"
+        # The engine's own condition, over the file the fetch wrote: the alignment stage runs.
+        monkeypatch.chdir(tmp_path)
+        assert pipeline_state._has_rhaistrat_parent("RHOAIENG-12345", {"type": "initiative"})
+        assert pipeline_state._has_rhaistrat_parent("RHOAIENG-12345", {"type": "rfe"}) is False
+
+    @pytest.mark.parametrize("parent", [None, "absent"], ids=["null", "absent"])
+    def test_no_parent_writes_the_same_bytes_and_the_stub_path_stands(
+        self, tmp_path, fake_jira, monkeypatch, capsys, parent
+    ):
+        _serve_with_parent(monkeypatch, fake_jira, "RHOAIENG-12345", parent)
+        artifacts = tmp_path / "artifacts"
+        rc, _ = _fetch_all("RHOAIENG-12345", artifacts, type_name="initiative")
+        assert rc == 0
+        assert capsys.readouterr().err == ""
+        task = artifacts / "initiatives" / "RHOAIENG-12345.md"
+        assert task.read_bytes() == GOLDEN_INITIATIVE_TASK
+        monkeypatch.chdir(tmp_path)
+        assert (
+            pipeline_state._has_rhaistrat_parent("RHOAIENG-12345", {"type": "initiative"}) is False
+        )
+
+    def test_an_outcome_parent_in_the_types_own_project_is_left_in_jira(
+        self, tmp_path, fake_jira, monkeypatch, capsys
+    ):
+        # The documented decision: a same-family parent_key means "split from" to submit.py
+        # (_has_jira_ancestor keeps the task out of Phase 2) and to the run report
+        # (child_parent_prefixes), so an RHOAIENG Outcome parent is not recorded — the task is
+        # byte-identical to a parentless one, the condition does not fire, one note says why.
+        parent = {"id": "70002", "key": "RHOAIENG-100", "fields": {"summary": "Outcome"}}
+        _serve_with_parent(monkeypatch, fake_jira, "RHOAIENG-12345", parent)
+        artifacts = tmp_path / "artifacts"
+        rc, out = _fetch_all("RHOAIENG-12345", artifacts, type_name="initiative")
+        assert rc == 0 and out.startswith("OK: wrote ")
+        assert capsys.readouterr().err == (
+            "Note: RHOAIENG-12345: parent RHOAIENG-100 not recorded as parent_key - the "
+            "initiative pipeline reads parent_key with prefix RHAISTRAT- only; the link stays "
+            "in Jira\n"
+        )
+        task = artifacts / "initiatives" / "RHOAIENG-12345.md"
+        assert task.read_bytes() == GOLDEN_INITIATIVE_TASK
+        monkeypatch.chdir(tmp_path)
+        assert (
+            pipeline_state._has_rhaistrat_parent("RHOAIENG-12345", {"type": "initiative"}) is False
+        )
+
+    @pytest.mark.parametrize(
+        "parent, note",
+        [
+            (
+                {"key": "FOO-1"},
+                "parent FOO-1 not recorded as parent_key - the initiative pipeline reads "
+                "parent_key with prefix RHAISTRAT- only; the link stays in Jira",
+            ),
+            (
+                {"key": "RHAISTRAT-x"},
+                "parent RHAISTRAT-x not recorded as parent_key - it does not match the "
+                r"initiative parent_key grammar ^(RHAISTRAT-\d+|RHOAIENG-\d+|INIT-\d+)$",
+            ),
+            ({"id": "9"}, "parent field carries no key; parent_key not recorded"),
+            ("RHAISTRAT-45", "parent field carries no key; parent_key not recorded"),
+        ],
+        ids=["foreign-prefix", "bad-grammar", "no-key", "not-an-object"],
+    )
+    def test_a_parent_the_rule_leaves_in_jira_is_noted_never_written(
+        self, tmp_path, fake_jira, monkeypatch, capsys, parent, note
+    ):
+        _serve_with_parent(monkeypatch, fake_jira, "RHOAIENG-12345", parent)
+        artifacts = tmp_path / "artifacts"
+        rc, _ = _fetch_all("RHOAIENG-12345", artifacts, type_name="initiative")
+        assert rc == 0
+        assert capsys.readouterr().err == f"Note: RHOAIENG-12345: {note}\n"
+        task = artifacts / "initiatives" / "RHOAIENG-12345.md"
+        assert task.read_bytes() == GOLDEN_INITIATIVE_TASK
+
+    def test_recorded_parent_key_is_a_pure_function_of_descriptor_and_fields(self):
+        init, rfe = REG.get("initiative"), REG.get("rfe")
+        assert fetch_issue.recorded_parent_key(init, "K", {}) == (None, None)
+        assert fetch_issue.recorded_parent_key(init, "K", {"parent": None}) == (None, None)
+        assert fetch_issue.recorded_parent_key(init, "K", {"parent": RHAISTRAT_PARENT}) == (
+            "RHAISTRAT-45",
+            None,
+        )
+        key, note = fetch_issue.recorded_parent_key(init, "K", {"parent": {"key": "INIT-001"}})
+        assert key is None and note.startswith("Note: K: parent INIT-001 not recorded")
+        # An rfe never looks, whatever the response carries (its parent_key grammar exists for
+        # split children; no dimension condition reads it).
+        for parent in (RHAISTRAT_PARENT, {"key": "RHAIRFE-1"}, {"key": "FOO-1"}):
+            assert fetch_issue.recorded_parent_key(rfe, "K", {"parent": parent}) == (None, None)
+
+    @pytest.mark.parametrize(
+        "parent", [RHAISTRAT_PARENT, {"key": "RHAIRFE-1"}, None], ids=["rhaistrat", "rfe", "none"]
+    )
+    def test_the_rfe_fetch_requests_and_writes_exactly_what_it_did(
+        self, tmp_path, fake_jira, monkeypatch, capsys, parent
+    ):
+        # The pin the story asks for: whatever Jira says about an rfe's parent, the request list
+        # is FETCH_ALL_FIELDS (no parent), the frontmatter argv is the pre-280 list to the byte,
+        # the task is the c1df503 golden plus the PR-3c stamp, and nothing is noted.
+        _serve_with_parent(monkeypatch, fake_jira, "RHAIRFE-1595", parent)
+        argv = []
+        real_run = subprocess.run
+
+        def recording_run(cmd, *args, **kwargs):
+            argv.append(list(cmd))
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(fetch_issue.subprocess, "run", recording_run)
+        artifacts = tmp_path / "artifacts"
+        rc, _ = _fetch_all("RHAIRFE-1595", artifacts)
+        assert rc == 0
+        assert capsys.readouterr().err == ""
+        assert fake_jira["issue"] == [("RHAIRFE-1595", FETCH_ALL_FIELDS)]
+        task = artifacts / "rfe-tasks" / "RHAIRFE-1595.md"
+        assert argv == [
+            [
+                sys.executable,
+                "scripts/frontmatter.py",
+                "set",
+                str(task),
+                "rfe_id=RHAIRFE-1595",
+                "title=Add model registry export to S3-compatible storage",
+                "priority=Major",
+                "status=Ready",
+                "original_labels=rfe-creator-autofix-rubric-pass,customer-request",
+                "type=rfe",
+                "tracker_ref=RHAIRFE-1595",
+            ]
+        ]
+        assert task.read_bytes() == GOLDEN_TASK
 
 
 # ── CLI surface ──────────────────────────────────────────────────────────────────────────────
@@ -1129,3 +1369,70 @@ class TestFetchAllAgainstTheEmulator:
             "RHAIRFE-5",
         )
         assert body == "Epic body.\n"
+
+    # ── the Jira parent (AISDLC-280): the emulator serves fields.parent ───────────────────────
+
+    def test_initiative_with_a_rhaistrat_parent_records_it_end_to_end(
+        self, tmp_path, jira, env, monkeypatch
+    ):
+        jira.create("RHAISTRAT-1", "Outcome", "Outcome body.", issue_type="Outcome")
+        jira.create(
+            "RHOAIENG-7",
+            "Serve models at the edge",
+            "Init body.",
+            issue_type="Initiative",
+            parent="RHAISTRAT-1",
+        )
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHOAIENG-7", "--fetch-all", str(artifacts), "--type", "initiative")
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == "TYPE RESOLVED: initiative (--type)\n"
+        task = artifacts / "initiatives" / "RHOAIENG-7.md"
+        data, body = read_frontmatter_validated(str(task), "initiative-task")
+        assert data["parent_key"] == "RHAISTRAT-1"
+        assert (data["initiative_id"], data["tracker_ref"]) == ("RHOAIENG-7", "RHOAIENG-7")
+        assert body == "Init body.\n"
+        keys = list(data)
+        assert keys[keys.index("tracker_ref") + 1] == "parent_key"
+        # The pipeline's own condition over the fetched file: the alignment stage would run.
+        monkeypatch.chdir(tmp_path)
+        assert pipeline_state._has_rhaistrat_parent("RHOAIENG-7", {"type": "initiative"})
+
+    def test_initiative_under_an_outcome_of_its_own_project_keeps_parent_key_null(
+        self, tmp_path, jira, env, monkeypatch
+    ):
+        jira.create("RHOAIENG-50", "Outcome", "Outcome body.", issue_type="Outcome")
+        jira.create(
+            "RHOAIENG-8",
+            "Serve models",
+            "Init body.",
+            issue_type="Initiative",
+            parent="RHOAIENG-50",
+        )
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHOAIENG-8", "--fetch-all", str(artifacts), "--type", "initiative")
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.splitlines() == [
+            "TYPE RESOLVED: initiative (--type)",
+            "Note: RHOAIENG-8: parent RHOAIENG-50 not recorded as parent_key - the initiative "
+            "pipeline reads parent_key with prefix RHAISTRAT- only; the link stays in Jira",
+        ]
+        task = artifacts / "initiatives" / "RHOAIENG-8.md"
+        data, _ = read_frontmatter_validated(str(task), "initiative-task")
+        assert data["parent_key"] is None
+        monkeypatch.chdir(tmp_path)
+        assert pipeline_state._has_rhaistrat_parent("RHOAIENG-8", {"type": "initiative"}) is False
+        # ...and the link is still in Jira for what reads it there (split children inherit it).
+        assert jira.get("RHOAIENG-8")["fields"]["parent"]["key"] == "RHOAIENG-50"
+
+    def test_rfe_under_a_jira_parent_is_fetched_as_before(self, tmp_path, jira, env):
+        jira.create("RHAISTRAT-1", "Outcome", "Outcome body.", issue_type="Outcome")
+        jira.create("RHAIRFE-9", "Export models", "Body text.", parent="RHAISTRAT-1")
+        artifacts = tmp_path / "artifacts"
+        result = self._run(env, "RHAIRFE-9", "--fetch-all", str(artifacts))
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        task = artifacts / "rfe-tasks" / "RHAIRFE-9.md"
+        data, _ = read_frontmatter_validated(str(task), "rfe-task")
+        assert data["parent_key"] is None
+        assert jira.get("RHAIRFE-9")["fields"]["parent"]["key"] == "RHAISTRAT-1"

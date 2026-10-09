@@ -96,7 +96,7 @@ pipeline:
     - name: alignment                                   # poll phase "initiative-alignment" (check_review_progress.py:34; pipeline_state.py:206)
       prompt: types/initiative/dimensions/alignment.md      # pipeline_state.py:115 alignment_skill (truthiness is the only switch, :202)
       blocking: false                                   # Q17: the generic rfe-review body renders a non-blocking dimension as "informational, not blocking" — unpinned
-      condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208)
+      condition: { frontmatter_field: parent_key, prefix: "RHAISTRAT-" }   # pipeline_state.py:143-144 _has_rhaistrat_parent; the engine's closed name is "has_rhaistrat_parent" (:149/:208). Also what makes fetch_issue.py --fetch-all request Jira's parent and record a RHAISTRAT- one as parent_key (Descriptor.condition_prefixes, AISDLC-280)
       skip_stub: { result: not_assessed, reason: "skipped by pipeline (no RHAISTRAT parent)" }   # pipeline_state.py:161-162 _write_poll_stub writes BOTH keys (§8.2 shows one)
   rubric:
     repo: https://github.com/opendatahub-io/assess-rfe  # bootstrap.sh:45 (verbatim URL; shared)

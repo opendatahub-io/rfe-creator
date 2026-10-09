@@ -129,6 +129,15 @@ Rules that are easy to trip:
   `fetch_issue.py --fetch-all --type <t>` reads `dirs.{tasks,originals}`, `identity.id_field`
   and `companions.comments` (all schema-required), plus the effective
   `identity.jira.{project,issue_type}` it verifies the fetched issue against.
+- **A type that wants the tracker's parent link fetched declares a stage that reads it.** The fetch
+  requests Jira's `parent`, and records its key as the task's `parent_key`, only for a type with a
+  `pipeline.dimensions[].condition: { frontmatter_field: parent_key, prefix: "<PARENT-PROJECT->" }`
+  (`Descriptor.condition_prefixes("parent_key")`; the initiative alignment dimension), and only for
+  a parent carrying one of those prefixes that also matches `conventions.parent_key_patterns` —
+  list the prefix's grammar there, or the schema refuses the write. Never name the type's own key
+  prefix in such a condition: a same-family `parent_key` means "split from" to `submit.py` and the
+  run report, so the fetch leaves such a parent in Jira with a stderr note ("Parent field" in
+  `types/README.md`). A type without the condition requests and writes exactly what it did before.
 - **A type picks its results subtree.** `snapshot.results_subdir` names the type's subtree of
   the shared results repository (`<subdir>/<run>/` and `<subdir>/latest`; `''` is the root,
   grandfathered for `rfe`) — gate 1 requires it next to `prefix` / `report_prefix`, keeps

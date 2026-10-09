@@ -139,7 +139,7 @@ Skills that only work with local artifacts (`/rfe-create`) do not require Jira a
 - **Issue Type**: `Initiative` (id: 10103)
 - **Priority values** (use these exactly): Blocker, Critical, Major, Normal, Minor, Undefined
 - **Status on creation**: `New`
-- **Parent field**: Set to a RHAISTRAT Outcome key to link the Initiative to a strategic outcome
+- **Parent field**: Set to a RHAISTRAT Outcome key to link the Initiative to a strategic outcome. `fetch_issue.py --fetch-all --type initiative` reads it back into the task's `parent_key` (what arms the alignment check for an Initiative fetched from Jira); an RHOAIENG Outcome parent is left in Jira — types/README.md "Parent field"
 - **Submission script**: `scripts/submit.py --type initiative`
 
 ## Work Item Types

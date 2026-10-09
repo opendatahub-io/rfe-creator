@@ -222,8 +222,12 @@ def jira(jira_emu):
         url = jira_emu
 
         @staticmethod
-        def create(key, summary, description, labels=None, components=None, issue_type=None):
-            """Import an issue with a specific key."""
+        def create(
+            key, summary, description, labels=None, components=None, issue_type=None, parent=None
+        ):
+            """Import an issue with a specific key. ``parent`` links it under an existing issue
+            (the emulator's import spells the hierarchy link ``epic_link``; GET then returns it
+            as ``fields.parent`` with the parent's key)."""
             issue = {
                 "key": key,
                 "summary": summary,
@@ -235,6 +239,8 @@ def jira(jira_emu):
                 issue["labels"] = labels
             if components:
                 issue["components"] = [{"name": c} for c in components]
+            if parent:
+                issue["epic_link"] = parent
             _jira_request(jira_emu, "POST", "/api/admin/import", {"issues": [issue]})
 
         @staticmethod

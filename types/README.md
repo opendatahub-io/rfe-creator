@@ -87,7 +87,7 @@ itself is fine — `resolve()` follows the link).
 | `collect_children.py` | `id_field`, `--type` choices; task scan via `artifact_utils.scan_tasks(desc)` | PR-2a, PR-2b |
 | `collect_recommendations.py` | `_review_dir`, `--type` choices | PR-2a |
 | `error_collect.py` | `_TYPE_CONFIG`, `--type` choices | PR-2a |
-| `fetch_issue.py` | `--fetch-all` layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments companion and its request gated on `companions.comments`), new `--type` (registry choices, default `rfe`; the no-`--type` invocation is byte-identical); the effective `identity.jira.{project,issue_type}` (`Descriptor.binding(env)`) that `--fetch-all` verifies the fetched issue's `(project, issuetype)` against before writing anything | PR-2c; PR-3c (1/3): `--fetch-all` appends `type:` and `tracker_ref:` to the task file it writes; `status=Ready` and the `Major` priority fallback stay literal (shared pipeline vocabulary, not type facts); PR-3c (2/3): post-fetch verification ("Fetch verification" below) — the initiative fetch agent now calls `--fetch-all --type initiative` instead of `--fields` (D10) |
+| `fetch_issue.py` | `--fetch-all` layout (`dirs.{tasks,originals}`, `identity.id_field`, the comments companion and its request gated on `companions.comments`), new `--type` (registry choices, default `rfe`; the no-`--type` invocation is byte-identical); the effective `identity.jira.{project,issue_type}` (`Descriptor.binding(env)`) that `--fetch-all` verifies the fetched issue's `(project, issuetype)` against before writing anything | PR-2c; PR-3c (1/3): `--fetch-all` appends `type:` and `tracker_ref:` to the task file it writes; `status=Ready` and the `Major` priority fallback stay literal (shared pipeline vocabulary, not type facts); PR-3c (2/3): post-fetch verification ("Fetch verification" below) — the initiative fetch agent now calls `--fetch-all --type initiative` instead of `--fields` (D10); AISDLC-280: Jira's `parent` requested, and recorded as `parent_key`, only for a type whose dimension conditions read `parent_key` (`Descriptor.condition_prefixes`; "Parent field" below) |
 | `filter_for_revision.py` | prefix sniff → `detect()` | PR-2a |
 | `frontmatter.py` | `_detect_schema_type` path table (`_SCHEMA_BY_DIR`), `schema` / `--schema-type` choices through `SCHEMAS`; frontmatter `type:` chooses the schema when present, the path table is the fallback; `set` refuses an explicit `--schema-type` (or `type=`) that contradicts a known directory's type | PR-2b; PR-3c (1/3) |
 | `generate_eval_config.py` | renders each type's committed `eval.config` from `eval/config/skeleton.yaml` + `types/<t>/eval/fragment.yaml` + the descriptor (`display.*`, `dirs.*`, `identity.{local_prefix,id_field}`, `key_prefixes[0]`, `schema.review.{score_fields,extra_fields,extra_rules}`, `reporting.{item_key,run_report.extra_entry_fields}`, `snapshot.report_prefix`, `eval.*` — `eval.thresholds` verbatim); `--check` is the regenerate-and-diff gate ("Generated eval configs" below) | PR-4 |
@@ -530,6 +530,49 @@ accepted nor refused (the key form is checked case-insensitively, as Jira compar
 over it (same line, same exit, decided after argument parsing and before the credentials, the
 results directory or any snapshot are read); it also cross-checks each run report's `type:` against
 `--type` and refuses a report of another type; a legacy report without `type:` is read as today.
+
+### Parent field (AISDLC-280)
+
+`fetch_issue.py --fetch-all` requests Jira's `parent` for a type whose pipeline reads `parent_key`
+off the task frontmatter — a `pipeline.dimensions[].condition` of the
+`{ frontmatter_field: parent_key, prefix }` form, `Descriptor.condition_prefixes("parent_key")`; the
+initiative alignment dimension (`prefix: "RHAISTRAT-"`) is the one such reader — and writes the
+parent's key as the task's `parent_key` when it carries one of those prefixes AND matches the type's
+`parent_key` grammar (`Descriptor.parent_key_pattern_effective`, the task schema's own join). The
+field is appended to the `frontmatter.py set` argv after `type` / `tracker_ref` (D7) and only when
+there is one to record: an Initiative without a parent writes the same bytes as before
+(`parent_key: null` from the schema default) and the alignment stage skips with its `not_assessed`
+stub; one with a RHAISTRAT parent carries `parent_key: RHAISTRAT-NNNN`, so
+`pipeline_state._check_condition` fires and the alignment agent runs — for an Initiative selected by
+key or JQL, not only for a batch-created one (before 280 only the batch entry's `parent_key` ever
+reached the check, and every fetched Initiative got the stub). The rule is decided from the
+descriptor, never from the type name: a type without such a condition (`rfe`, whose
+`parent_key_patterns` exist for split children only) requests exactly the pre-280 field list and
+hands `frontmatter.py` exactly the pre-280 argv — `tests/test_fetch_issue.py` records both. The
+fetch skeleton's MCP fallback carries the same rule through the `PARENT_FIELD` / `PARENT_KEY_SET`
+launch vars (both render empty for every other type, so its text is byte-identical). The parent's
+issue type is not consulted (the schema's note that `parent_is_outcome` is deliberately not
+expressible stands): a RHAISTRAT Feature parent is recorded like an Outcome and the alignment agent
+judges what it fetches.
+
+A parent that is NOT recorded is noted once on stderr (`Note: <key>: parent <P> not recorded as
+parent_key - ...`, never fatal) and left in Jira:
+
+- **A parent in the type's own key family — an RHOAIENG Outcome above an Initiative** (15 open
+  Initiatives carried one when this landed). Deliberately not written, although
+  `conventions.parent_key_patterns` admits `RHOAIENG-\d+`: in the artifact model a same-family
+  `parent_key` means "split from" — `submit.py` keeps such a task out of Phase 2 as the child of a
+  Jira ancestor (`_has_jira_ancestor`, whose `_owned_key` is the effective key-prefix test) and the
+  run report lists it under that parent (`child_parent_prefixes`: the local and tracker prefixes,
+  deliberately not `parent_key_patterns`) — so recording it would stop the Initiative being updated,
+  labelled or marked processed, and misreport it as a split child. Nothing is lost: the Outcome link
+  stays in Jira (`submit.py` never writes `parent` on an update), split children inherit it from
+  Jira directly (`split_submit.discover_state` reads the parent's `fields.parent`), and the alignment
+  stage — RHAISTRAT-only by its condition — skips with its stub exactly as it did before 280. A field
+  of its own is the follow-up if the pipeline ever reads that link.
+- **A parent outside every prefix (`FOO-1`), or one carrying a prefix but failing the grammar
+  (`RHAISTRAT-x`).** Not written; the schema would refuse the latter and fail the whole fetch.
+- **A parent object without a key.** Not written.
 
 ## Generated eval configs (§4.5, PR-4)
 
