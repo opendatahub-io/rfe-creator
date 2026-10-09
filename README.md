@@ -35,7 +35,7 @@ Inspired by the [PRD/RFE workflow](https://github.com/ambient-code/workflows/tre
 /rfe-creator.update-deps   # Force update vendored dependencies
 ```
 
-Every skill takes `--type <type>` (`rfe` or `initiative`); without it the type is resolved from the ids you pass (`RHAIRFE-*` / `RFE-*` are RFEs, `RHOAIENG-*` / `INIT-*` are Initiatives) and defaults to `rfe`. The dotted names of the original RFE skills (`/rfe.create`, `/rfe.review`, `/rfe.split`, `/rfe.submit`, `/rfe.speedrun`, `/rfe.auto-fix`) remain as compatibility aliases that run the same bodies.
+Every skill takes `--type <type>` (`rfe` or `initiative`); without it the type is resolved from the ids you pass (`RHAIRFE-*` / `RFE-*` are RFEs, `RHOAIENG-*` / `INIT-*` are Initiatives) and defaults to `rfe`. The dotted names of the original RFE skills (`/rfe.create`, `/rfe.review`, `/rfe.split`, `/rfe.submit`, `/rfe.speedrun`, `/rfe.auto-fix`) remain as compatibility aliases that run the same bodies. See [docs/working-with-work-item-types.md](docs/working-with-work-item-types.md) for how the type is chosen and what changes with it.
 
 ## Install
 

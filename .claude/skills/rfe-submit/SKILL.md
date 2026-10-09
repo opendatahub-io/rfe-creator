@@ -11,6 +11,8 @@ All submission goes through Python scripts that use the Jira REST API directly w
 
 **This skill is non-interactive.** Do not prompt the user for confirmation before submitting. The user invoked `/rfe-submit` — that is the confirmation. Run the script directly without asking "are you sure?" or presenting a dry run for approval.
 
+Reference for the person invoking this skill, not read during a run: docs/working-with-work-item-types.md (how the type is chosen and what changes with it).
+
 ## Step 0: Resolve the Type and Check Credentials
 
 **Layout check.** The plugin root is the skill directory's third parent. Unless the working directory is that root (a checkout), run once
