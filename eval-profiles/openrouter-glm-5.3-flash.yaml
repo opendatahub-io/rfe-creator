@@ -1,0 +1,6 @@
+# z-ai/glm-5.3-flash as the model under test (pins: eval.yaml models.providers.openrouter).
+# Run: /eval-run --config eval-profiles/openrouter-glm-5.3-flash.yaml
+extends: openrouter.yaml
+models:
+  skill: openrouter:/z-ai/glm-5.3-flash
+  subagent: openrouter:/z-ai/glm-5.3-flash
